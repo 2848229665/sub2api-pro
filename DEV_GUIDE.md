@@ -7,10 +7,12 @@
 | 项目 | 说明 |
 |------|------|
 | **上游仓库** | Wei-Shaw/sub2api |
-| **Fork 仓库** | bayma888/sub2api-bmai |
+| **Fork 仓库** | killaragorn/sub2api-pro |
 | **技术栈** | Go 后端 (Ent ORM + Gin) + Vue3 前端 (pnpm) |
 | **数据库** | PostgreSQL 16 + Redis |
 | **包管理** | 后端: go modules, 前端: **pnpm**（不是 npm） |
+
+二次开发的长期分支、上游同步、合并和发布规则见 [sub2api-pro 分支管理规范](docs/DOWNSTREAM_BRANCHING_CN.md)。
 
 ## 二、本地环境配置
 
@@ -264,19 +266,23 @@ psql -U sub2api -h 127.0.0.1 -d sub2api -f migration.sql
 ### Git 操作
 
 ```bash
-# 同步上游
-git fetch upstream
-git checkout main
-git merge upstream/main
+# 将纯净 main 快进到官方最新状态
+git fetch upstream --tags --prune
+git switch main
+git merge --ff-only upstream/main
 git push origin main
 
-# 创建功能分支
-git checkout -b feature/xxx
+# 从二开产品主线创建功能分支
+git switch product/main
+git pull --ff-only origin product/main
+git switch -c feature/xxx
 
-# Rebase 到最新 main
-git fetch upstream
-git rebase upstream/main
+# 未共享的功能分支跟进产品主线
+git fetch origin
+git rebase origin/product/main
 ```
+
+上游版本集成必须使用 `sync/v*` 分支并通过 Merge Commit 合入 `product/main`；完整流程见 [sub2api-pro 分支管理规范](docs/DOWNSTREAM_BRANCHING_CN.md)。
 
 ### 前端操作
 
