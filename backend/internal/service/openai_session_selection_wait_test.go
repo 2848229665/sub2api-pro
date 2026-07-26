@@ -36,7 +36,7 @@ func (c *openAIWaitRecheckConcurrencyCache) ReleaseAccountSlot(
 	return nil
 }
 
-func openAIWaitRecheckAccount(id int64, concurrency, reserve int) Account {
+func openAIWaitRecheckAccount(id int64, concurrency int) Account {
 	return Account{
 		ID:          id,
 		Platform:    PlatformOpenAI,
@@ -44,16 +44,14 @@ func openAIWaitRecheckAccount(id int64, concurrency, reserve int) Account {
 		Status:      StatusActive,
 		Schedulable: true,
 		Concurrency: concurrency,
-		Extra: map[string]any{
-			AccountExtraAffinityConcurrencyReserve: reserve,
-		},
+		Extra:       map[string]any{},
 	}
 }
 
 func TestFinalizeAcquiredOpenAISelection_RevalidatesWaitPlanCapacity(t *testing.T) {
 	const accountID = int64(48001)
-	stale := openAIWaitRecheckAccount(accountID, 4, 1)
-	fresh := openAIWaitRecheckAccount(accountID, 2, 1)
+	stale := openAIWaitRecheckAccount(accountID, 4)
+	fresh := openAIWaitRecheckAccount(accountID, 2)
 	concurrencyCache := &openAIWaitRecheckConcurrencyCache{acquireResult: true}
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{fresh}},
@@ -63,8 +61,9 @@ func TestFinalizeAcquiredOpenAISelection_RevalidatesWaitPlanCapacity(t *testing.
 
 	initialReleaseCount := 0
 	req := OpenAIAccountScheduleRequest{
-		Platform:    PlatformOpenAI,
-		SessionHash: "wait-plan-capacity",
+		Platform:               PlatformOpenAI,
+		SessionHash:            "wait-plan-capacity",
+		AffinityReservePercent: intPtrForTest(50),
 	}
 	selection := attachOpenAISelectionRequest(&AccountSelectionResult{
 		Account:     &stale,
@@ -72,7 +71,7 @@ func TestFinalizeAcquiredOpenAISelection_RevalidatesWaitPlanCapacity(t *testing.
 		ReleaseFunc: func() { initialReleaseCount++ },
 		WaitPlan: &AccountWaitPlan{
 			AccountID:      accountID,
-			MaxConcurrency: stale.GeneralConcurrencyLimit(),
+			MaxConcurrency: stale.GeneralConcurrencyLimit(50),
 			Timeout:        time.Second,
 			MaxWaiting:     2,
 		},
@@ -91,7 +90,7 @@ func TestFinalizeAcquiredOpenAISelection_RevalidatesWaitPlanCapacity(t *testing.
 	require.Nil(t, finalized.WaitPlan)
 	require.Equal(t, 2, finalized.Account.Concurrency)
 	require.Equal(t, 1, initialReleaseCount)
-	require.Equal(t, []int{fresh.GeneralConcurrencyLimit()}, concurrencyCache.acquireLimits)
+	require.Equal(t, []int{fresh.GeneralConcurrencyLimit(50)}, concurrencyCache.acquireLimits)
 
 	finalized.ReleaseFunc()
 	require.Equal(t, 1, concurrencyCache.releaseCount)
@@ -99,10 +98,10 @@ func TestFinalizeAcquiredOpenAISelection_RevalidatesWaitPlanCapacity(t *testing.
 
 func TestFinalizeAcquiredOpenAISelection_ReschedulesAfterWaitTargetBecameIneligible(t *testing.T) {
 	const accountID = int64(48002)
-	stale := openAIWaitRecheckAccount(accountID, 4, 1)
+	stale := openAIWaitRecheckAccount(accountID, 4)
 	ineligible := stale
 	ineligible.Schedulable = false
-	fallback := openAIWaitRecheckAccount(48003, 3, 1)
+	fallback := openAIWaitRecheckAccount(48003, 3)
 	concurrencyCache := &openAIWaitRecheckConcurrencyCache{acquireResult: true}
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{ineligible, fallback}},
@@ -113,8 +112,9 @@ func TestFinalizeAcquiredOpenAISelection_ReschedulesAfterWaitTargetBecameIneligi
 
 	initialReleaseCount := 0
 	req := OpenAIAccountScheduleRequest{
-		Platform:    PlatformOpenAI,
-		SessionHash: "wait-plan-ineligible",
+		Platform:               PlatformOpenAI,
+		SessionHash:            "wait-plan-ineligible",
+		AffinityReservePercent: intPtrForTest(34),
 	}
 	selection := attachOpenAISelectionRequest(&AccountSelectionResult{
 		Account:     &stale,
@@ -122,7 +122,7 @@ func TestFinalizeAcquiredOpenAISelection_ReschedulesAfterWaitTargetBecameIneligi
 		ReleaseFunc: func() { initialReleaseCount++ },
 		WaitPlan: &AccountWaitPlan{
 			AccountID:      accountID,
-			MaxConcurrency: stale.GeneralConcurrencyLimit(),
+			MaxConcurrency: stale.GeneralConcurrencyLimit(34),
 			Timeout:        time.Second,
 			MaxWaiting:     2,
 		},
@@ -141,7 +141,7 @@ func TestFinalizeAcquiredOpenAISelection_ReschedulesAfterWaitTargetBecameIneligi
 	require.NotNil(t, finalized.Account)
 	require.Equal(t, fallback.ID, finalized.Account.ID)
 	require.Equal(t, 1, initialReleaseCount)
-	require.Equal(t, []int{fallback.GeneralConcurrencyLimit()}, concurrencyCache.acquireLimits)
+	require.Equal(t, []int{fallback.GeneralConcurrencyLimit(34)}, concurrencyCache.acquireLimits)
 
 	finalized.ReleaseFunc()
 	require.Equal(t, 1, concurrencyCache.releaseCount)
@@ -156,14 +156,12 @@ func TestFinalizeAcquiredOpenAISelection_ReschedulesAfterWaitTargetLosesRequired
 		targetID   = int64(48021)
 		fallbackID = int64(48022)
 	)
-	stale := openAIWaitRecheckAccount(targetID, 4, 1)
+	stale := openAIWaitRecheckAccount(targetID, 4)
 	stale.GroupIDs = []int64{groupID}
 	stale.Extra["privacy_mode"] = PrivacyModeTrainingOff
 	ineligible := stale
-	ineligible.Extra = map[string]any{
-		AccountExtraAffinityConcurrencyReserve: 1,
-	}
-	fallback := openAIWaitRecheckAccount(fallbackID, 3, 1)
+	ineligible.Extra = map[string]any{}
+	fallback := openAIWaitRecheckAccount(fallbackID, 3)
 	fallback.GroupIDs = []int64{groupID}
 	fallback.Extra["privacy_mode"] = PrivacyModeTrainingOff
 
@@ -198,9 +196,10 @@ func TestFinalizeAcquiredOpenAISelection_ReschedulesAfterWaitTargetLosesRequired
 	ctx := context.WithValue(context.Background(), ctxkey.Group, group)
 	initialReleaseCount := 0
 	req := OpenAIAccountScheduleRequest{
-		GroupID:           &groupID,
-		Platform:          PlatformOpenAI,
-		RequirePrivacySet: true,
+		GroupID:                &groupID,
+		Platform:               PlatformOpenAI,
+		RequirePrivacySet:      true,
+		AffinityReservePercent: intPtrForTest(34),
 	}
 	selection := attachOpenAISelectionRequest(&AccountSelectionResult{
 		Account:     &stale,
@@ -208,7 +207,7 @@ func TestFinalizeAcquiredOpenAISelection_ReschedulesAfterWaitTargetLosesRequired
 		ReleaseFunc: func() { initialReleaseCount++ },
 		WaitPlan: &AccountWaitPlan{
 			AccountID:      targetID,
-			MaxConcurrency: stale.GeneralConcurrencyLimit(),
+			MaxConcurrency: stale.GeneralConcurrencyLimit(34),
 			Timeout:        time.Second,
 			MaxWaiting:     2,
 		},
@@ -221,7 +220,7 @@ func TestFinalizeAcquiredOpenAISelection_ReschedulesAfterWaitTargetLosesRequired
 	require.True(t, finalized.Acquired)
 	require.Equal(t, fallbackID, finalized.Account.ID)
 	require.Equal(t, 1, initialReleaseCount)
-	require.Equal(t, []int{fallback.GeneralConcurrencyLimit()}, concurrencyCache.acquireLimits)
+	require.Equal(t, []int{fallback.GeneralConcurrencyLimit(34)}, concurrencyCache.acquireLimits)
 
 	finalized.ReleaseFunc()
 	require.Equal(t, 1, concurrencyCache.releaseCount)
@@ -232,10 +231,10 @@ func TestFinalizeAcquiredOpenAISelection_MigratesIneligibleWaitOwner(t *testing.
 		ownerID    = int64(48004)
 		fallbackID = int64(48005)
 	)
-	staleOwner := openAIWaitRecheckAccount(ownerID, 4, 1)
+	staleOwner := openAIWaitRecheckAccount(ownerID, 4)
 	ineligibleOwner := staleOwner
 	ineligibleOwner.Schedulable = false
-	fallback := openAIWaitRecheckAccount(fallbackID, 3, 1)
+	fallback := openAIWaitRecheckAccount(fallbackID, 3)
 	sessionHash := "wait-owner-ineligible"
 	sessionCache := &prioritySaturationSessionCache{
 		schedulerTestGatewayCache: schedulerTestGatewayCache{

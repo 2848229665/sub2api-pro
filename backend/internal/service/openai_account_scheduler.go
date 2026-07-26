@@ -48,6 +48,7 @@ type cachedOpenAIAdvancedSchedulerSetting struct {
 	oauthSchedulingRateMultiplier  float64
 	enabled                        bool
 	prioritySaturationEnabled      bool
+	affinityReservePercent         int
 	stickyWeightedEnabled          bool
 	subscriptionPriorityEnabled    bool
 	lbTopKOverride                 int
@@ -60,6 +61,7 @@ type openAIAdvancedSchedulerRuntimeSettings struct {
 	oauthSchedulingRateMultiplier  float64
 	enabled                        bool
 	prioritySaturationEnabled      bool
+	affinityReservePercent         int
 	stickyWeightedEnabled          bool
 	subscriptionPriorityEnabled    bool
 	lbTopKOverride                 int
@@ -89,7 +91,15 @@ type OpenAIAccountScheduleRequest struct {
 	RequireCompact          bool
 	RequirePrivacySet       bool
 	ExcludedIDs             map[int64]struct{}
+	AffinityReservePercent  *int
 	generalRejectCounter    *openAIGeneralRejectCounter
+}
+
+func (r OpenAIAccountScheduleRequest) affinityReservePercent() int {
+	if r.AffinityReservePercent == nil {
+		return DefaultOpenAIPrioritySaturationAffinityReservePercent
+	}
+	return normalizeOpenAIPrioritySaturationAffinityReservePercent(*r.AffinityReservePercent)
 }
 
 // OpenAIAccountSchedulingOptions makes request migration semantics explicit at
@@ -322,6 +332,7 @@ func (m *openAIAccountSchedulerMetrics) recordSwitch() {
 func applyOpenAIAffinityRouteDecision(
 	decision *OpenAIAccountScheduleDecision,
 	route openAIAffinityRouteResult,
+	req OpenAIAccountScheduleRequest,
 ) {
 	if decision == nil {
 		return
@@ -335,7 +346,7 @@ func applyOpenAIAffinityRouteDecision(
 	decision.StickyPreviousHit = route.Layer == openAIAccountScheduleLayerPreviousResponse
 	decision.StickySessionHit = route.Layer == openAIAccountScheduleLayerSessionSticky
 	decision.AffinityWait = route.Selection.WaitPlan != nil
-	setOpenAIAccountScheduleDecisionAccount(decision, route.Selection.Account)
+	setOpenAIAccountScheduleDecisionAccount(decision, route.Selection.Account, req.affinityReservePercent())
 }
 
 type openAIAccountRuntimeStats struct {
@@ -554,7 +565,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		}
 		return shouldEscape
 	})
-	applyOpenAIAffinityRouteDecision(&decision, route)
+	applyOpenAIAffinityRouteDecision(&decision, route, req)
 	if err != nil {
 		return nil, decision, err
 	}
@@ -574,7 +585,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			(errors.Is(err, ErrNoAvailableAccounts) || errors.Is(err, ErrNoAvailableCompactAccounts)) {
 			selection = s.service.openAIAffinityWaitSelection(req, route.OverflowAccount)
 			decision.AffinityWait = true
-			setOpenAIAccountScheduleDecisionAccount(&decision, selection.Account)
+			setOpenAIAccountScheduleDecisionAccount(&decision, selection.Account, req.affinityReservePercent())
 			return selection, decision, nil
 		}
 		return nil, decision, err
@@ -584,7 +595,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		decision.AffinityWait = true
 	}
 	if selection != nil && selection.Account != nil {
-		setOpenAIAccountScheduleDecisionAccount(&decision, selection.Account)
+		setOpenAIAccountScheduleDecisionAccount(&decision, selection.Account, req.affinityReservePercent())
 		decision.TemporaryOverflow = route.OverflowAccount != nil &&
 			selection.Acquired &&
 			selection.Account.ID != route.OverflowAccount.ID
@@ -1181,7 +1192,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 		}
 		affinity := candidate.account.ID == req.StickyAccountID ||
 			candidate.account.ID == req.StickyPreviousAccountID
-		limit := candidate.account.ConcurrencyLimitForAffinity(affinity)
+		limit := candidate.account.ConcurrencyLimitForAffinity(affinity, req.affinityReservePercent())
 
 		result, attempted, acquireErr := s.tryAcquireOpenAIAccountSlot(ctx, candidate.account.ID, limit, budget)
 		if !attempted {
@@ -1215,7 +1226,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			continue
 		}
 
-		freshLimit := fresh.ConcurrencyLimitForAffinity(affinity)
+		freshLimit := fresh.ConcurrencyLimitForAffinity(affinity, req.affinityReservePercent())
 		if freshLimit != limit {
 			release(result)
 			result, attempted, acquireErr = s.tryAcquireOpenAIAccountSlot(ctx, fresh.ID, freshLimit, budget)
@@ -1309,7 +1320,7 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 		if req.RequireCompact && openAICompactSupportTier(account) == 0 {
 			continue
 		}
-		limit := account.ConcurrencyLimitForAffinity(true)
+		limit := account.ConcurrencyLimitForAffinity(true, req.affinityReservePercent())
 		result, acquireErr := s.service.tryAcquireAccountSlot(ctx, account.ID, limit)
 		if acquireErr != nil {
 			return nil, acquireErr
@@ -1663,7 +1674,7 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 			}
 			affinity := candidate.account.ID == req.StickyAccountID ||
 				candidate.account.ID == req.StickyPreviousAccountID
-			limit := candidate.account.ConcurrencyLimitForAffinity(affinity)
+			limit := candidate.account.ConcurrencyLimitForAffinity(affinity, req.affinityReservePercent())
 			if budget != nil && budget.limited {
 				knownFull := candidate.loadKnown && limit > 0 &&
 					candidate.loadInfo.CurrentConcurrency >= limit
@@ -1686,7 +1697,7 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 				compactBlocked = true
 				continue
 			}
-			freshLimit := fresh.ConcurrencyLimitForAffinity(affinity)
+			freshLimit := fresh.ConcurrencyLimitForAffinity(affinity, req.affinityReservePercent())
 			return attachOpenAISelectionRequest(&AccountSelectionResult{
 				Account:        fresh,
 				SessionOwnerID: req.StickyAccountID,
@@ -1890,6 +1901,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 				oauthSchedulingRateMultiplier:  cached.oauthSchedulingRateMultiplier,
 				enabled:                        cached.enabled,
 				prioritySaturationEnabled:      cached.prioritySaturationEnabled,
+				affinityReservePercent:         normalizeOpenAIPrioritySaturationAffinityReservePercent(cached.affinityReservePercent),
 				stickyWeightedEnabled:          cached.stickyWeightedEnabled,
 				subscriptionPriorityEnabled:    cached.subscriptionPriorityEnabled,
 				lbTopKOverride:                 cached.lbTopKOverride,
@@ -1906,6 +1918,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 					oauthSchedulingRateMultiplier:  cached.oauthSchedulingRateMultiplier,
 					enabled:                        cached.enabled,
 					prioritySaturationEnabled:      cached.prioritySaturationEnabled,
+					affinityReservePercent:         normalizeOpenAIPrioritySaturationAffinityReservePercent(cached.affinityReservePercent),
 					stickyWeightedEnabled:          cached.stickyWeightedEnabled,
 					subscriptionPriorityEnabled:    cached.subscriptionPriorityEnabled,
 					lbTopKOverride:                 cached.lbTopKOverride,
@@ -1918,6 +1931,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 		oauthSchedulingRateMultiplier := defaultOpenAIOAuthSchedulingRateMultiplier
 		enabled := false
 		prioritySaturationEnabled := false
+		affinityReservePercent := DefaultOpenAIPrioritySaturationAffinityReservePercent
 		stickyWeightedEnabled := false
 		subscriptionPriorityEnabled := false
 		lbTopKOverride := 0
@@ -1931,6 +1945,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 				oauthSchedulingRateMultiplier = parseOpenAIOAuthSchedulingRateMultiplier(values[SettingKeyOpenAIOAuthSchedulingRateMultiplier])
 				enabled = strings.EqualFold(strings.TrimSpace(values[openAIAdvancedSchedulerSettingKey]), "true")
 				prioritySaturationEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAIPrioritySaturationEnabled]), "true")
+				affinityReservePercent = parseOpenAIPrioritySaturationAffinityReservePercent(values[SettingKeyOpenAIPrioritySaturationAffinityReservePercent])
 				stickyWeightedEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled]), "true")
 				subscriptionPriorityEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled]), "true")
 				lbTopKOverride = parsePositiveIntOverride(values[SettingKeyOpenAIAdvancedSchedulerLBTopK])
@@ -1949,6 +1964,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 				oauthSchedulingRateMultiplier = parseOpenAIOAuthSchedulingRateMultiplier(fallbackValues[SettingKeyOpenAIOAuthSchedulingRateMultiplier])
 				enabled = strings.EqualFold(strings.TrimSpace(fallbackValues[openAIAdvancedSchedulerSettingKey]), "true")
 				prioritySaturationEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAIPrioritySaturationEnabled]), "true")
+				affinityReservePercent = parseOpenAIPrioritySaturationAffinityReservePercent(fallbackValues[SettingKeyOpenAIPrioritySaturationAffinityReservePercent])
 				stickyWeightedEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled]), "true")
 				subscriptionPriorityEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled]), "true")
 				lbTopKOverride = parsePositiveIntOverride(fallbackValues[SettingKeyOpenAIAdvancedSchedulerLBTopK])
@@ -1961,6 +1977,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 			oauthSchedulingRateMultiplier:  oauthSchedulingRateMultiplier,
 			enabled:                        enabled,
 			prioritySaturationEnabled:      prioritySaturationEnabled,
+			affinityReservePercent:         affinityReservePercent,
 			stickyWeightedEnabled:          stickyWeightedEnabled,
 			subscriptionPriorityEnabled:    subscriptionPriorityEnabled,
 			lbTopKOverride:                 lbTopKOverride,
@@ -1972,6 +1989,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 			oauthSchedulingRateMultiplier:  oauthSchedulingRateMultiplier,
 			enabled:                        enabled,
 			prioritySaturationEnabled:      prioritySaturationEnabled,
+			affinityReservePercent:         affinityReservePercent,
 			stickyWeightedEnabled:          stickyWeightedEnabled,
 			subscriptionPriorityEnabled:    subscriptionPriorityEnabled,
 			lbTopKOverride:                 lbTopKOverride,
@@ -2017,6 +2035,7 @@ func openAIAdvancedSchedulerRuntimeSettingKeys() []string {
 		SettingKeyOpenAIOAuthSchedulingRateMultiplier,
 		openAIAdvancedSchedulerSettingKey,
 		SettingKeyOpenAIPrioritySaturationEnabled,
+		SettingKeyOpenAIPrioritySaturationAffinityReservePercent,
 		SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled,
 		SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
 		SettingKeyOpenAIAdvancedSchedulerLBTopK,
@@ -2102,15 +2121,14 @@ func (s *OpenAIGatewayService) getOpenAIAccountScheduler(ctx context.Context) Op
 	if s == nil {
 		return nil
 	}
-	settings := s.openAIAdvancedSchedulerRuntimeSettings(ctx)
-	if settings.enabled && settings.prioritySaturationEnabled {
-		s.openaiSchedulerConflictLogOnce.Do(func() {
-			slog.Error(
-				"invalid OpenAI scheduler configuration; priority saturation selected",
-				"openai_advanced_scheduler_enabled", true,
-				"openai_priority_saturation_enabled", true,
-			)
-		})
+	return s.getOpenAIAccountSchedulerForRuntimeSettings(s.openAIAdvancedSchedulerRuntimeSettings(ctx))
+}
+
+func (s *OpenAIGatewayService) getOpenAIAccountSchedulerForRuntimeSettings(
+	settings openAIAdvancedSchedulerRuntimeSettings,
+) OpenAIAccountScheduler {
+	if s == nil {
+		return nil
 	}
 	if settings.prioritySaturationEnabled {
 		s.openaiPrioritySaturationOnce.Do(func() {
@@ -2149,7 +2167,7 @@ func (s *OpenAIGatewayService) SelectAccountWithScheduler(
 	requiredTransport OpenAIUpstreamTransport,
 	requireCompact bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
-	return s.selectAccountWithScheduler(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, "", "", requireCompact, PlatformOpenAI, false, false, true)
+	return s.selectAccountWithScheduler(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, "", "", requireCompact, PlatformOpenAI, false, false, true, nil)
 }
 
 // SelectAccountWithSchedulerForCapability 按能力要求调度账号。
@@ -2173,7 +2191,7 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForCapability(
 	if len(platformOverride) > 0 {
 		platform = platformOverride[0]
 	}
-	return s.selectAccountWithScheduler(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, "", requireCompact, platform, previousResponseCanMove, previousResponseCanMove, useUpstreamTokenCost)
+	return s.selectAccountWithScheduler(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, "", requireCompact, platform, previousResponseCanMove, previousResponseCanMove, useUpstreamTokenCost, nil)
 }
 
 // SelectAccountWithSchedulerForCapabilityOptions is the explicit protocol
@@ -2210,6 +2228,7 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForCapabilityOptions(
 		options.PreviousResponseCanMove,
 		options.CanTemporarilyOverflow,
 		options.UseUpstreamTokenCost,
+		nil,
 	)
 }
 
@@ -2241,6 +2260,7 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImagesOptions(
 	requiredCapability OpenAIImagesCapability,
 	options OpenAIAccountSchedulingOptions,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	affinityReservePercent := s.openAIAdvancedSchedulerRuntimeSettings(ctx).affinityReservePercent
 	selection, decision, err := s.selectAccountWithScheduler(
 		ctx,
 		groupID,
@@ -2256,6 +2276,7 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImagesOptions(
 		false,
 		options.CanTemporarilyOverflow,
 		false,
+		&affinityReservePercent,
 	)
 	if err == nil && selection != nil && selection.Account != nil {
 		return selection, decision, nil
@@ -2277,6 +2298,7 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImagesOptions(
 			false,
 			options.CanTemporarilyOverflow,
 			false,
+			&affinityReservePercent,
 		)
 	}
 	return selection, decision, err
@@ -2297,6 +2319,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	previousResponseCanMove bool,
 	canTemporarilyOverflow bool,
 	useUpstreamTokenCost bool,
+	affinityReservePercentSnapshot *int,
 ) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
 	observedAt := time.Now()
 	schedulerPolicy := openAIAccountSchedulerPolicyLegacy
@@ -2326,6 +2349,11 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	}()
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	platform = normalizeOpenAICompatiblePlatform(platform)
+	runtimeSettings := s.openAIAdvancedSchedulerRuntimeSettings(ctx)
+	if affinityReservePercentSnapshot == nil {
+		affinityReservePercent := runtimeSettings.affinityReservePercent
+		affinityReservePercentSnapshot = &affinityReservePercent
+	}
 	requirePrivacySet, err := s.resolveOpenAISchedulingRequirePrivacySet(ctx, groupID)
 	if err != nil {
 		return nil, decision, err
@@ -2352,9 +2380,10 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		RequireCompact:          requireCompact,
 		RequirePrivacySet:       requirePrivacySet,
 		ExcludedIDs:             excludedIDs,
+		AffinityReservePercent:  affinityReservePercentSnapshot,
 	}
 
-	scheduler := s.getOpenAIAccountScheduler(ctx)
+	scheduler := s.getOpenAIAccountSchedulerForRuntimeSettings(runtimeSettings)
 	switch scheduler.(type) {
 	case *prioritySaturationOpenAIAccountScheduler:
 		schedulerPolicy = openAIAccountSchedulerPolicyPrioritySaturation
@@ -2363,7 +2392,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	}
 	if scheduler == nil {
 		route, err := s.routeOpenAIAffinity(ctx, baseReq, nil)
-		applyOpenAIAffinityRouteDecision(&decision, route)
+		applyOpenAIAffinityRouteDecision(&decision, route, baseReq)
 		if err != nil {
 			return nil, decision, err
 		}
@@ -2391,7 +2420,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			}
 			selection, finalizeErr := finalizeLegacySelection(selection, effectiveExcludedIDs)
 			if selection != nil && selection.Account != nil {
-				setOpenAIAccountScheduleDecisionAccount(&decision, selection.Account)
+				setOpenAIAccountScheduleDecisionAccount(&decision, selection.Account, scheduleReq.affinityReservePercent())
 				decision.TemporaryOverflow = route.OverflowAccount != nil &&
 					selection.Acquired &&
 					selection.Account.ID != route.OverflowAccount.ID
@@ -2412,7 +2441,19 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		if requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE {
 			effectiveExcludedIDs := newLegacyExcludedIDs()
 			for {
-				selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, "", requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost, scheduleReq.RequirePrivacySet)
+				selection, err := s.selectAccountWithLoadAwareness(
+					ctx,
+					groupID,
+					platform,
+					"",
+					requestedModel,
+					effectiveExcludedIDs,
+					requireCompact,
+					requiredCapability,
+					useUpstreamTokenCost,
+					scheduleReq.RequirePrivacySet,
+					scheduleReq.affinityReservePercent(),
+				)
 				if err != nil {
 					if canWaitForOverflow &&
 						(errors.Is(err, ErrNoAvailableAccounts) || errors.Is(err, ErrNoAvailableCompactAccounts)) {
@@ -2443,7 +2484,19 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 
 		effectiveExcludedIDs := newLegacyExcludedIDs()
 		for {
-			selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, "", requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost, scheduleReq.RequirePrivacySet)
+			selection, err := s.selectAccountWithLoadAwareness(
+				ctx,
+				groupID,
+				platform,
+				"",
+				requestedModel,
+				effectiveExcludedIDs,
+				requireCompact,
+				requiredCapability,
+				useUpstreamTokenCost,
+				scheduleReq.RequirePrivacySet,
+				scheduleReq.affinityReservePercent(),
+			)
 			if err != nil {
 				if canWaitForOverflow &&
 					(errors.Is(err, ErrNoAvailableAccounts) || errors.Is(err, ErrNoAvailableCompactAccounts)) {

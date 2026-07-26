@@ -659,13 +659,6 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 		if existing != nil {
 			credentials = mergeMap(existing.Credentials, credentials)
 		}
-		if err := ValidateAccountAffinityConcurrencyReserve(PlatformOpenAI, concurrency, extra); err != nil {
-			item.Action = "failed"
-			item.Error = "invalid OpenAI concurrency capacity: " + err.Error()
-			result.Failed++
-			result.Items = append(result.Items, item)
-			continue
-		}
 		reconcileCRSUpstreamBillingProbeExtra(existing, PlatformOpenAI, AccountTypeOAuth, credentials, extra)
 
 		if existing == nil {
@@ -816,13 +809,6 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 		}
 		if existing != nil {
 			credentials = mergeMap(existing.Credentials, credentials)
-		}
-		if err := ValidateAccountAffinityConcurrencyReserve(PlatformOpenAI, concurrency, extra); err != nil {
-			item.Action = "failed"
-			item.Error = "invalid OpenAI concurrency capacity: " + err.Error()
-			result.Failed++
-			result.Items = append(result.Items, item)
-			continue
 		}
 		reconcileCRSUpstreamBillingProbeExtra(existing, PlatformOpenAI, AccountTypeAPIKey, credentials, extra)
 

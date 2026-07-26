@@ -79,7 +79,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	if err := s.normalizeOpenAIAdvancedSchedulerOverrides(settings); err != nil {
 		return nil, err
 	}
-	if err := validateOpenAISchedulerSwitches(settings); err != nil {
+	if err := validateOpenAIPrioritySaturationAffinityReservePercent(settings.OpenAIPrioritySaturationAffinityReservePercent); err != nil {
 		return nil, err
 	}
 	settings.PaymentVisibleMethodAlipaySource = alipaySource
@@ -402,6 +402,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyOpenAIOAuthSchedulingRateMultiplier] = strconv.FormatFloat(settings.OpenAIOAuthSchedulingRateMultiplier, 'f', -1, 64)
 	updates[openAIAdvancedSchedulerSettingKey] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerEnabled)
 	updates[SettingKeyOpenAIPrioritySaturationEnabled] = strconv.FormatBool(settings.OpenAIPrioritySaturationEnabled)
+	updates[SettingKeyOpenAIPrioritySaturationAffinityReservePercent] = strconv.Itoa(settings.OpenAIPrioritySaturationAffinityReservePercent)
 	updates[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerStickyWeightedEnabled)
 	updates[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled)
 	updates[SettingKeyOpenAIAdvancedSchedulerLBTopK] = settings.OpenAIAdvancedSchedulerLBTopK
@@ -566,6 +567,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		oauthSchedulingRateMultiplier:  settings.OpenAIOAuthSchedulingRateMultiplier,
 		enabled:                        settings.OpenAIAdvancedSchedulerEnabled,
 		prioritySaturationEnabled:      settings.OpenAIPrioritySaturationEnabled,
+		affinityReservePercent:         settings.OpenAIPrioritySaturationAffinityReservePercent,
 		stickyWeightedEnabled:          settings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
 		subscriptionPriorityEnabled:    settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
 		lbTopKOverride:                 parsePositiveIntOverride(settings.OpenAIAdvancedSchedulerLBTopK),

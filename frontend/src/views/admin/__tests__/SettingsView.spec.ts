@@ -184,23 +184,16 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.openaiPrioritySaturation.description": "独立于实验加权调度。按 Priority 升序、账号 ID 升序逐个填满普通容量。",
     "admin.settings.openaiPrioritySaturation.enable": "启用优先级饱和调度",
     "admin.settings.openaiPrioritySaturation.enableHint": "新会话使用普通容量；已有粘性会话可使用完整容量。",
-    "admin.settings.openaiPrioritySaturation.activeHint": "启用后，实验加权调度与低倍率优先不生效。",
+    "admin.settings.openaiPrioritySaturation.reservePercentLabel": "亲和会话预留百分比",
+    "admin.settings.openaiPrioritySaturation.reservePercentHint": "全局应用于所有 OpenAI 账号。",
+    "admin.settings.openaiPrioritySaturation.reservePercentError": "亲和会话预留百分比必须是 0 到 99 之间的整数。",
     "admin.settings.openaiPrioritySaturation.orderLabel": "账号顺序",
     "admin.settings.openaiPrioritySaturation.orderValue": "Priority 升序，Priority 相同时按账号 ID 升序",
     "admin.settings.openaiPrioritySaturation.generalLabel": "新会话与临时溢出",
     "admin.settings.openaiPrioritySaturation.generalValue": "只使用普通容量 G = C - R",
     "admin.settings.openaiPrioritySaturation.affinityLabel": "原账号亲和请求",
     "admin.settings.openaiPrioritySaturation.affinityValue": "优先使用完整硬上限 C",
-    "admin.settings.openaiPrioritySaturation.reserveLabel": "保护槽位",
-    "admin.settings.openaiPrioritySaturation.reserveValue": "逐账号配置亲和预留 R",
     "admin.settings.openaiPrioritySaturation.capacityWarning": "容量告警",
-    "admin.settings.openaiPrioritySaturation.manageAccounts": "前往账号管理",
-    "admin.settings.openaiPrioritySaturation.switchToPriorityTitle": "切换到优先级饱和调度？",
-    "admin.settings.openaiPrioritySaturation.switchToPriorityMessage": "将关闭 TopK 加权调度。",
-    "admin.settings.openaiPrioritySaturation.switchToAdvancedTitle": "切换到实验加权调度？",
-    "admin.settings.openaiPrioritySaturation.switchToAdvancedMessage": "将关闭优先级饱和调度。",
-    "admin.settings.openaiPrioritySaturation.switchConfirm": "确认切换",
-    "admin.settings.openaiPrioritySaturation.mutualExclusionError": "两个调度策略不能同时启用。",
     "admin.settings.openaiExperimentalScheduler.title": "OpenAI 实验调度策略",
     "admin.settings.openaiExperimentalScheduler.description": "默认关闭。开启后仅影响本网关在 OpenAI 账号间的实验性调度选择逻辑，不代表上游 OpenAI 官方能力。",
     "admin.settings.openaiExperimentalScheduler.lowRatePriorityTitle": "低倍率优先",
@@ -490,6 +483,7 @@ const baseSettingsResponse = {
   openai_oauth_scheduling_rate_multiplier: 1,
   openai_advanced_scheduler_enabled: false,
   openai_priority_saturation_enabled: false,
+  openai_priority_saturation_affinity_reserve_percent: 20,
   openai_advanced_scheduler_sticky_weighted_enabled: false,
   openai_advanced_scheduler_subscription_priority_enabled: false,
   openai_advanced_scheduler_lb_top_k: "",
@@ -985,84 +979,44 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(wrapper.text()).not.toContain("OpenAI 高级调度器");
   });
 
-  it("keeps priority saturation independent from the legacy weighted selector", async () => {
+  it("lets priority saturation coexist with the weighted selector and saves the global reserve", async () => {
     const wrapper = mountView();
-    const schedulerToggle = (testId: string) =>
-      wrapper
-        .findAllComponents(ToggleStub)
-        .find((toggle) => toggle.attributes("data-testid") === testId);
-    const schedulerToggleValue = (testId: string) =>
-      schedulerToggle(testId)?.props("modelValue");
 
     await flushPromises();
 
     const priorityCard = wrapper.get('[data-testid="openai-priority-saturation-settings"]');
     expect(priorityCard.text()).toContain("OpenAI 优先级饱和调度");
     expect(priorityCard.text()).toContain("按 Priority 升序、账号 ID 升序");
-
-    await priorityCard
-      .get('[data-testid="openai-priority-saturation-toggle"]')
-      .setValue(true);
     expect(
-      (wrapper.get('[data-testid="openai-advanced-scheduler-toggle"]').element as HTMLInputElement)
-        .disabled,
-    ).toBe(false);
+      priorityCard
+        .find('[data-testid="openai-priority-saturation-affinity-reserve-percent"]')
+        .exists(),
+    ).toBe(true);
+
+    await wrapper.get('[data-testid="openai-priority-saturation-toggle"]').setValue(true);
+    await wrapper.get('[data-testid="openai-advanced-scheduler-toggle"]').setValue(true);
+    await priorityCard
+      .get('[data-testid="openai-priority-saturation-affinity-reserve-percent"]')
+      .setValue("35");
     expect(wrapper.find('[data-testid="openai-low-rate-priority-toggle"]').exists()).toBe(false);
     expect(priorityCard.text()).toContain("Priority 升序，Priority 相同时按账号 ID 升序");
+    expect(wrapper.find('[data-testid="openai-scheduler-switch-confirm"]').exists()).toBe(false);
 
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
     expect(updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
         openai_priority_saturation_enabled: true,
-        openai_advanced_scheduler_enabled: false,
+        openai_priority_saturation_affinity_reserve_percent: 35,
+        openai_advanced_scheduler_enabled: true,
       }),
     );
-
-    schedulerToggle("openai-priority-saturation-toggle")?.vm.$emit("update:modelValue", false);
-    await wrapper.vm.$nextTick();
-    schedulerToggle("openai-advanced-scheduler-toggle")?.vm.$emit("update:modelValue", true);
-    await wrapper.vm.$nextTick();
-    expect(schedulerToggleValue("openai-advanced-scheduler-toggle")).toBe(true);
-
-    schedulerToggle("openai-priority-saturation-toggle")?.vm.$emit("update:modelValue", true);
-    await wrapper.vm.$nextTick();
-    expect(schedulerToggleValue("openai-advanced-scheduler-toggle")).toBe(true);
-    expect(schedulerToggleValue("openai-priority-saturation-toggle")).toBe(false);
-
-    let schedulerDialog = wrapper
-      .findAllComponents({ name: "ConfirmDialog" })
-      .find((dialog) => dialog.props("show"));
-    expect(schedulerDialog).toBeDefined();
-    schedulerDialog?.vm.$emit("cancel");
-    await wrapper.vm.$nextTick();
-    expect(schedulerToggleValue("openai-advanced-scheduler-toggle")).toBe(true);
-    expect(schedulerToggleValue("openai-priority-saturation-toggle")).toBe(false);
-
-    schedulerToggle("openai-priority-saturation-toggle")?.vm.$emit("update:modelValue", true);
-    await wrapper.vm.$nextTick();
-    schedulerDialog = wrapper
-      .findAllComponents({ name: "ConfirmDialog" })
-      .find((dialog) => dialog.props("show"));
-    schedulerDialog?.vm.$emit("confirm");
-    await wrapper.vm.$nextTick();
-    expect(schedulerToggleValue("openai-advanced-scheduler-toggle")).toBe(false);
-    expect(schedulerToggleValue("openai-priority-saturation-toggle")).toBe(true);
-
-    schedulerToggle("openai-advanced-scheduler-toggle")?.vm.$emit("update:modelValue", true);
-    await wrapper.vm.$nextTick();
-    schedulerDialog = wrapper
-      .findAllComponents({ name: "ConfirmDialog" })
-      .find((dialog) => dialog.props("show"));
-    schedulerDialog?.vm.$emit("confirm");
-    await wrapper.vm.$nextTick();
-    expect(schedulerToggleValue("openai-advanced-scheduler-toggle")).toBe(true);
-    expect(schedulerToggleValue("openai-priority-saturation-toggle")).toBe(false);
   });
 
-  it("defaults the priority saturation switch to true for legacy settings responses", async () => {
+  it("defaults priority saturation and its reserve to true and 20 for legacy responses", async () => {
     const {
       openai_priority_saturation_enabled: _omitted,
+      openai_priority_saturation_affinity_reserve_percent: _reserveOmitted,
       ...legacySettingsResponse
     } = baseSettingsResponse;
     getSettings.mockResolvedValueOnce(legacySettingsResponse);
@@ -1084,14 +1038,16 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
         openai_priority_saturation_enabled: true,
+        openai_priority_saturation_affinity_reserve_percent: 20,
         openai_advanced_scheduler_enabled: false,
       }),
     );
   });
 
-  it("preserves an enabled advanced scheduler when a legacy response omits priority saturation", async () => {
+  it("enables priority saturation above an enabled advanced scheduler for legacy responses", async () => {
     const {
       openai_priority_saturation_enabled: _omitted,
+      openai_priority_saturation_affinity_reserve_percent: _reserveOmitted,
       ...legacySettingsResponse
     } = baseSettingsResponse;
     getSettings.mockResolvedValueOnce({
@@ -1108,10 +1064,43 @@ describe("admin SettingsView payment visible method controls", () => {
     await flushPromises();
 
     expect(schedulerToggleValue("openai-advanced-scheduler-toggle")).toBe(true);
-    expect(schedulerToggleValue("openai-priority-saturation-toggle")).toBe(false);
+    expect(schedulerToggleValue("openai-priority-saturation-toggle")).toBe(true);
   });
 
-  it("rejects a dirty configuration with both OpenAI schedulers enabled", async () => {
+  it("rejects an invalid affinity reserve percentage", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="openai-priority-saturation-toggle"]').setValue(true);
+    await wrapper
+      .get('[data-testid="openai-priority-saturation-affinity-reserve-percent"]')
+      .setValue("100");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(showError).toHaveBeenCalledWith(
+      "亲和会话预留百分比必须是 0 到 99 之间的整数。",
+    );
+  });
+
+  it("does not coerce an empty affinity reserve percentage to zero", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper
+      .get('[data-testid="openai-priority-saturation-affinity-reserve-percent"]')
+      .setValue("");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(showError).toHaveBeenCalledWith(
+      "亲和会话预留百分比必须是 0 到 99 之间的整数。",
+    );
+  });
+
+  it("saves a response that already has both OpenAI schedulers enabled", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
       openai_priority_saturation_enabled: true,
@@ -1123,8 +1112,12 @@ describe("admin SettingsView payment visible method controls", () => {
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
-    expect(updateSettings).not.toHaveBeenCalled();
-    expect(showError).toHaveBeenCalledWith("两个调度策略不能同时启用。");
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        openai_priority_saturation_enabled: true,
+        openai_advanced_scheduler_enabled: true,
+      }),
+    );
   });
 
   it("loads and saves upstream billing probe settings from the gateway tab", async () => {

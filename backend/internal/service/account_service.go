@@ -231,10 +231,6 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 	} else {
 		account.AutoPauseOnExpired = true
 	}
-	if err := ValidateAccountAffinityConcurrencyReserve(account.Platform, account.Concurrency, account.Extra); err != nil {
-		return nil, err
-	}
-
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, fmt.Errorf("create account: %w", err)
 	}
@@ -349,10 +345,6 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	if req.AutoPauseOnExpired != nil {
 		account.AutoPauseOnExpired = *req.AutoPauseOnExpired
 	}
-	if err := ValidateAccountAffinityConcurrencyReserve(account.Platform, account.Concurrency, account.Extra); err != nil {
-		return nil, err
-	}
-
 	// 先验证分组是否存在（在任何写操作之前）
 	if req.GroupIDs != nil {
 		if err := s.validateGroupIDsExist(ctx, *req.GroupIDs); err != nil {

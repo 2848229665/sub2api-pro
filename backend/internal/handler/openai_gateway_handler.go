@@ -1845,7 +1845,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		account := selection.Account
 		affinity := sessionHash != "" && !selection.PreserveStickyBinding &&
 			selection.SessionOwnerID == account.ID
-		accountMaxConcurrency := account.ConcurrencyLimitForAffinity(affinity)
+		accountMaxConcurrency := account.ConcurrencyLimitForAffinity(
+			affinity,
+			selection.OpenAIAffinityReservePercent(),
+		)
 		currentAccountRelease = wrapReleaseOnDone(ctx, selection.ReleaseFunc)
 
 		token, _, err := h.gatewayService.GetRequestCredential(ctx, c, account)
@@ -1961,7 +1964,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					result,
 					reqLog,
 				) {
-					accountMaxConcurrency = account.ConcurrencyLimitForAffinity(true)
+					accountMaxConcurrency = account.ConcurrencyLimitForAffinity(
+						true,
+						selection.OpenAIAffinityReservePercent(),
+					)
 				}
 				releaseTurnSlots()
 				h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, service.ContentModerationProtocolOpenAIResponses, cyberAuditPayload, turnErr != nil, cyberBlockKey, clientRequestedUsageFields(c, channelMappingWS, reqModel, ""), requestPayloadHash)

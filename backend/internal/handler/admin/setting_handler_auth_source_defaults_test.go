@@ -283,6 +283,7 @@ func TestSettingHandler_UpdateSettings_PersistsPrioritySaturationScheduler(t *te
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "true", repo.values[service.SettingKeyOpenAIPrioritySaturationEnabled])
+	require.Equal(t, "20", repo.values[service.SettingKeyOpenAIPrioritySaturationAffinityReservePercent])
 	require.Equal(t, "false", repo.values["openai_advanced_scheduler_enabled"])
 
 	var resp response.Response
@@ -290,10 +291,11 @@ func TestSettingHandler_UpdateSettings_PersistsPrioritySaturationScheduler(t *te
 	data, ok := resp.Data.(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, true, data["openai_priority_saturation_enabled"])
+	require.Equal(t, float64(20), data["openai_priority_saturation_affinity_reserve_percent"])
 	require.Equal(t, false, data["openai_advanced_scheduler_enabled"])
 }
 
-func TestSettingHandler_UpdateSettings_RejectsConflictingOpenAISchedulers(t *testing.T) {
+func TestSettingHandler_UpdateSettings_AllowsCoexistingOpenAISchedulers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{
 		values: map[string]string{
@@ -306,8 +308,9 @@ func TestSettingHandler_UpdateSettings_RejectsConflictingOpenAISchedulers(t *tes
 	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
 
 	rawBody, err := json.Marshal(map[string]any{
-		"promo_code_enabled":                 true,
-		"openai_priority_saturation_enabled": true,
+		"promo_code_enabled":                                  true,
+		"openai_priority_saturation_enabled":                  true,
+		"openai_priority_saturation_affinity_reserve_percent": 35,
 	})
 	require.NoError(t, err)
 
@@ -318,9 +321,18 @@ func TestSettingHandler_UpdateSettings_RejectsConflictingOpenAISchedulers(t *tes
 
 	handler.UpdateSettings(c)
 
-	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "true", repo.values["openai_advanced_scheduler_enabled"])
-	require.Equal(t, "false", repo.values[service.SettingKeyOpenAIPrioritySaturationEnabled])
+	require.Equal(t, "true", repo.values[service.SettingKeyOpenAIPrioritySaturationEnabled])
+	require.Equal(t, "35", repo.values[service.SettingKeyOpenAIPrioritySaturationAffinityReservePercent])
+
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, data["openai_advanced_scheduler_enabled"])
+	require.Equal(t, true, data["openai_priority_saturation_enabled"])
+	require.Equal(t, float64(35), data["openai_priority_saturation_affinity_reserve_percent"])
 }
 
 func TestSettingHandler_UpdateSettings_PreservesLegacyBlankPaymentVisibleMethodSource(t *testing.T) {

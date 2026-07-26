@@ -4297,15 +4297,42 @@
                 </div>
                 <Toggle
                   class="self-end sm:self-auto"
-                  :model-value="form.openai_priority_saturation_enabled"
+                  v-model="form.openai_priority_saturation_enabled"
                   data-testid="openai-priority-saturation-toggle"
-                  @update:model-value="handlePrioritySaturationToggle"
                 />
               </div>
               <div
-                v-if="form.openai_priority_saturation_enabled"
                 class="space-y-4 border-t border-gray-100 pt-4 dark:border-dark-700"
               >
+                <div class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+                  <div class="min-w-0">
+                    <label
+                      class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                      for="openai-priority-saturation-affinity-reserve-percent"
+                    >
+                      {{ t("admin.settings.openaiPrioritySaturation.reservePercentLabel") }}
+                    </label>
+                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.openaiPrioritySaturation.reservePercentHint") }}
+                    </p>
+                  </div>
+                  <div class="relative w-full shrink-0 sm:w-32">
+                    <input
+                      id="openai-priority-saturation-affinity-reserve-percent"
+                      v-model.number="form.openai_priority_saturation_affinity_reserve_percent"
+                      class="input pr-8"
+                      data-testid="openai-priority-saturation-affinity-reserve-percent"
+                      min="0"
+                      max="99"
+                      required
+                      step="1"
+                      type="number"
+                    />
+                    <span
+                      class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400"
+                    >%</span>
+                  </div>
+                </div>
                 <dl class="grid grid-cols-1 gap-x-6 gap-y-3 text-xs sm:grid-cols-2">
                   <div>
                     <dt class="font-medium text-gray-700 dark:text-gray-300">
@@ -4331,24 +4358,10 @@
                       {{ t("admin.settings.openaiPrioritySaturation.affinityValue") }}
                     </dd>
                   </div>
-                  <div>
-                    <dt class="font-medium text-gray-700 dark:text-gray-300">
-                      {{ t("admin.settings.openaiPrioritySaturation.reserveLabel") }}
-                    </dt>
-                    <dd class="mt-0.5 text-gray-500 dark:text-gray-400">
-                      {{ t("admin.settings.openaiPrioritySaturation.reserveValue") }}
-                    </dd>
-                  </div>
                 </dl>
                 <p class="border-l-2 border-amber-400 pl-3 text-xs text-amber-700 dark:text-amber-300">
                   {{ t("admin.settings.openaiPrioritySaturation.capacityWarning") }}
                 </p>
-                <router-link
-                  class="inline-flex text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-                  to="/admin/accounts"
-                >
-                  {{ t("admin.settings.openaiPrioritySaturation.manageAccounts") }}
-                </router-link>
               </div>
             </div>
           </div>
@@ -4448,9 +4461,8 @@
                   </p>
                 </div>
                 <Toggle
-                  :model-value="form.openai_advanced_scheduler_enabled"
+                  v-model="form.openai_advanced_scheduler_enabled"
                   data-testid="openai-advanced-scheduler-toggle"
-                  @update:model-value="handleAdvancedSchedulerToggle"
                 />
               </div>
 
@@ -7807,15 +7819,6 @@
         @save="handleSaveProvider"
       />
       <ConfirmDialog
-        :show="schedulerModeConfirmation.show"
-        :title="schedulerModeConfirmationTitle"
-        :message="schedulerModeConfirmationMessage"
-        :confirm-text="t('admin.settings.openaiPrioritySaturation.switchConfirm')"
-        data-testid="openai-scheduler-switch-confirm"
-        @confirm="confirmOpenAISchedulerModeSwitch"
-        @cancel="cancelOpenAISchedulerModeSwitch"
-      />
-      <ConfirmDialog
         :show="showDeleteProviderDialog"
         :title="t('admin.settings.payment.deleteProvider')"
         :message="t('admin.settings.payment.deleteProviderConfirm')"
@@ -8562,6 +8565,7 @@ type SettingsForm = Omit<
   openai_oauth_scheduling_rate_multiplier: number;
   openai_advanced_scheduler_enabled: boolean;
   openai_priority_saturation_enabled: boolean;
+  openai_priority_saturation_affinity_reserve_percent: number;
   openai_advanced_scheduler_sticky_weighted_enabled: boolean;
   openai_advanced_scheduler_subscription_priority_enabled: boolean;
   openai_advanced_scheduler_lb_top_k: string;
@@ -8776,6 +8780,7 @@ const form = reactive<SettingsForm>({
   openai_oauth_scheduling_rate_multiplier: 1,
   openai_advanced_scheduler_enabled: false,
   openai_priority_saturation_enabled: true,
+  openai_priority_saturation_affinity_reserve_percent: 20,
   openai_advanced_scheduler_sticky_weighted_enabled: false,
   openai_advanced_scheduler_subscription_priority_enabled: false,
   openai_advanced_scheduler_lb_top_k: "",
@@ -8825,71 +8830,6 @@ const form = reactive<SettingsForm>({
   // Allow user view error requests
   allow_user_view_error_requests: false,
 });
-
-type OpenAISchedulerMode = "priority_saturation" | "advanced";
-
-const schedulerModeConfirmation = reactive<{
-  show: boolean;
-  target: OpenAISchedulerMode | null;
-}>({
-  show: false,
-  target: null,
-});
-
-const schedulerModeConfirmationTitle = computed(() =>
-  schedulerModeConfirmation.target === "advanced"
-    ? t("admin.settings.openaiPrioritySaturation.switchToAdvancedTitle")
-    : t("admin.settings.openaiPrioritySaturation.switchToPriorityTitle"),
-);
-
-const schedulerModeConfirmationMessage = computed(() =>
-  schedulerModeConfirmation.target === "advanced"
-    ? t("admin.settings.openaiPrioritySaturation.switchToAdvancedMessage")
-    : t("admin.settings.openaiPrioritySaturation.switchToPriorityMessage"),
-);
-
-function handlePrioritySaturationToggle(enabled: boolean) {
-  if (!enabled) {
-    form.openai_priority_saturation_enabled = false;
-    return;
-  }
-  if (form.openai_advanced_scheduler_enabled) {
-    schedulerModeConfirmation.target = "priority_saturation";
-    schedulerModeConfirmation.show = true;
-    return;
-  }
-  form.openai_priority_saturation_enabled = true;
-}
-
-function handleAdvancedSchedulerToggle(enabled: boolean) {
-  if (!enabled) {
-    form.openai_advanced_scheduler_enabled = false;
-    return;
-  }
-  if (form.openai_priority_saturation_enabled) {
-    schedulerModeConfirmation.target = "advanced";
-    schedulerModeConfirmation.show = true;
-    return;
-  }
-  form.openai_advanced_scheduler_enabled = true;
-}
-
-function confirmOpenAISchedulerModeSwitch() {
-  if (schedulerModeConfirmation.target === "priority_saturation") {
-    form.openai_advanced_scheduler_enabled = false;
-    form.openai_priority_saturation_enabled = true;
-  } else if (schedulerModeConfirmation.target === "advanced") {
-    form.openai_priority_saturation_enabled = false;
-    form.openai_advanced_scheduler_enabled = true;
-  }
-  schedulerModeConfirmation.show = false;
-  schedulerModeConfirmation.target = null;
-}
-
-function cancelOpenAISchedulerModeSwitch() {
-  schedulerModeConfirmation.show = false;
-  schedulerModeConfirmation.target = null;
-}
 
 type OpenAIAdvancedSchedulerOverrideKey =
   | "openai_advanced_scheduler_lb_top_k"
@@ -9789,8 +9729,10 @@ async function loadSettings() {
     settings.payment_load_balance_strategy =
       settings.payment_load_balance_strategy || "round-robin";
     if (settings.openai_priority_saturation_enabled == null) {
-      form.openai_priority_saturation_enabled =
-        !settings.openai_advanced_scheduler_enabled;
+      form.openai_priority_saturation_enabled = true;
+    }
+    if (settings.openai_priority_saturation_affinity_reserve_percent == null) {
+      form.openai_priority_saturation_affinity_reserve_percent = 20;
     }
     // Only assign non-null values from backend (null means unconfigured, keep defaults)
     for (const [key, value] of Object.entries(settings)) {
@@ -10012,12 +9954,16 @@ function findDuplicateDefaultSubscription(
 }
 
 async function saveSettings() {
+  const affinityReservePercent =
+    form.openai_priority_saturation_affinity_reserve_percent;
   if (
-    form.openai_priority_saturation_enabled &&
-    form.openai_advanced_scheduler_enabled
+    typeof affinityReservePercent !== "number" ||
+    !Number.isInteger(affinityReservePercent) ||
+    affinityReservePercent < 0 ||
+    affinityReservePercent > 99
   ) {
     appStore.showError(
-      t("admin.settings.openaiPrioritySaturation.mutualExclusionError"),
+      t("admin.settings.openaiPrioritySaturation.reservePercentError"),
     );
     return;
   }
@@ -10401,6 +10347,8 @@ async function saveSettings() {
       openai_advanced_scheduler_enabled: form.openai_advanced_scheduler_enabled,
       openai_priority_saturation_enabled:
         form.openai_priority_saturation_enabled,
+      openai_priority_saturation_affinity_reserve_percent:
+        affinityReservePercent,
       openai_advanced_scheduler_sticky_weighted_enabled:
         form.openai_advanced_scheduler_sticky_weighted_enabled,
       openai_advanced_scheduler_subscription_priority_enabled:

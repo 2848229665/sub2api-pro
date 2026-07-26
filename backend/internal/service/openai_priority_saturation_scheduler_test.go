@@ -171,11 +171,7 @@ func (c *prioritySaturationSessionCache) DeleteSessionAccountIfOwner(_ context.C
 	return true, nil
 }
 
-func prioritySaturationTestAccount(id int64, priority, concurrency, reserve int) Account {
-	extra := map[string]any{}
-	if reserve > 0 {
-		extra[AccountExtraAffinityConcurrencyReserve] = reserve
-	}
+func prioritySaturationTestAccount(id int64, priority, concurrency int) Account {
 	return Account{
 		ID:          id,
 		Name:        "priority-saturation-test",
@@ -185,7 +181,7 @@ func prioritySaturationTestAccount(id int64, priority, concurrency, reserve int)
 		Schedulable: true,
 		Concurrency: concurrency,
 		Priority:    priority,
-		Extra:       extra,
+		Extra:       map[string]any{},
 	}
 }
 
@@ -211,24 +207,29 @@ func newPrioritySaturationTestScheduler(
 	return scheduler, concurrencyCache, sessionCache
 }
 
-func prioritySaturationRequest(sessionHash string, stickyAccountID int64) OpenAIAccountScheduleRequest {
-	return OpenAIAccountScheduleRequest{
+func prioritySaturationRequest(sessionHash string, stickyAccountID int64, reservePercent ...int) OpenAIAccountScheduleRequest {
+	req := OpenAIAccountScheduleRequest{
 		Platform:          PlatformOpenAI,
 		SessionHash:       sessionHash,
 		StickyAccountID:   stickyAccountID,
 		RequiredTransport: OpenAIUpstreamTransportHTTPSSE,
 	}
+	if len(reservePercent) > 0 {
+		percent := reservePercent[0]
+		req.AffinityReservePercent = &percent
+	}
+	return req
 }
 
 func TestPrioritySaturationScheduler_NewSessionsUsePriorityThenIDAndGeneralLimit(t *testing.T) {
 	accounts := []Account{
-		prioritySaturationTestAccount(20, 1, 3, 1),
-		prioritySaturationTestAccount(10, 1, 3, 1),
-		prioritySaturationTestAccount(30, 2, 3, 0),
+		prioritySaturationTestAccount(20, 1, 3),
+		prioritySaturationTestAccount(10, 1, 3),
+		prioritySaturationTestAccount(30, 2, 3),
 	}
 	scheduler, cache, _ := newPrioritySaturationTestScheduler(accounts, map[int64]int{10: 2}, nil)
 
-	selection, decision, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0))
+	selection, decision, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 34))
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.True(t, selection.Acquired)
@@ -242,8 +243,8 @@ func TestPrioritySaturationScheduler_NewSessionsUsePriorityThenIDAndGeneralLimit
 }
 
 func TestPrioritySaturationScheduler_RequiresPrivacyAcrossPriorityCandidates(t *testing.T) {
-	ineligible := prioritySaturationTestAccount(10, 1, 3, 0)
-	eligible := prioritySaturationTestAccount(20, 2, 3, 0)
+	ineligible := prioritySaturationTestAccount(10, 1, 3)
+	eligible := prioritySaturationTestAccount(20, 2, 3)
 	eligible.Extra["privacy_mode"] = PrivacyModeTrainingOff
 	scheduler, cache, _ := newPrioritySaturationTestScheduler(
 		[]Account{ineligible, eligible},
@@ -267,8 +268,8 @@ func TestPrioritySaturationScheduler_RequiresPrivacyAcrossPriorityCandidates(t *
 }
 
 func TestPrioritySaturationScheduler_PrivacyIneligibleStickyOwnerMigratesWhenAllowed(t *testing.T) {
-	owner := prioritySaturationTestAccount(10, 1, 3, 1)
-	fallback := prioritySaturationTestAccount(20, 2, 3, 0)
+	owner := prioritySaturationTestAccount(10, 1, 3)
+	fallback := prioritySaturationTestAccount(20, 2, 3)
 	fallback.Extra["privacy_mode"] = PrivacyModeTrainingOff
 	sessionHash := "privacy-owner"
 	scheduler, _, sessionCache := newPrioritySaturationTestScheduler(
@@ -294,8 +295,8 @@ func TestPrioritySaturationScheduler_PrivacyIneligibleStickyOwnerMigratesWhenAll
 }
 
 func TestPrioritySaturationScheduler_PrivacyIneligibleStickyOwnerRejectsWhenMoveForbidden(t *testing.T) {
-	owner := prioritySaturationTestAccount(10, 1, 3, 1)
-	fallback := prioritySaturationTestAccount(20, 2, 3, 0)
+	owner := prioritySaturationTestAccount(10, 1, 3)
+	fallback := prioritySaturationTestAccount(20, 2, 3)
 	fallback.Extra["privacy_mode"] = PrivacyModeTrainingOff
 	sessionHash := "privacy-owner-locked"
 	scheduler, cache, sessionCache := newPrioritySaturationTestScheduler(
@@ -318,16 +319,16 @@ func TestPrioritySaturationScheduler_PrivacyIneligibleStickyOwnerRejectsWhenMove
 
 func TestPrioritySaturationScheduler_FillsAccountsInPriorityThenIDOrder(t *testing.T) {
 	accounts := []Account{
-		prioritySaturationTestAccount(30, 2, 2, 0),
-		prioritySaturationTestAccount(20, 1, 3, 0),
-		prioritySaturationTestAccount(10, 1, 4, 1),
+		prioritySaturationTestAccount(30, 2, 2),
+		prioritySaturationTestAccount(20, 1, 3),
+		prioritySaturationTestAccount(10, 1, 4),
 	}
 	scheduler, _, _ := newPrioritySaturationTestScheduler(accounts, nil, nil)
 
 	wantAccountIDs := []int64{10, 10, 10, 20, 20, 20, 30, 30}
 	selections := make([]*AccountSelectionResult, 0, len(wantAccountIDs))
 	for _, wantAccountID := range wantAccountIDs {
-		selection, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0))
+		selection, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 25))
 		require.NoError(t, err)
 		require.NotNil(t, selection)
 		require.True(t, selection.Acquired)
@@ -335,7 +336,7 @@ func TestPrioritySaturationScheduler_FillsAccountsInPriorityThenIDOrder(t *testi
 		selections = append(selections, selection)
 	}
 
-	waiting, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0))
+	waiting, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 25))
 	require.NoError(t, err)
 	require.False(t, waiting.Acquired)
 	require.NotNil(t, waiting.WaitPlan)
@@ -349,9 +350,9 @@ func TestPrioritySaturationScheduler_FillsAccountsInPriorityThenIDOrder(t *testi
 
 func TestPrioritySaturationScheduler_RefillsLeadingAccountAfterRelease(t *testing.T) {
 	accounts := []Account{
-		prioritySaturationTestAccount(10, 1, 2, 0),
-		prioritySaturationTestAccount(20, 2, 2, 0),
-		prioritySaturationTestAccount(30, 3, 2, 0),
+		prioritySaturationTestAccount(10, 1, 2),
+		prioritySaturationTestAccount(20, 2, 2),
+		prioritySaturationTestAccount(30, 3, 2),
 	}
 	scheduler, _, _ := newPrioritySaturationTestScheduler(accounts, nil, nil)
 
@@ -382,8 +383,8 @@ func TestPrioritySaturationScheduler_StableOrderIgnoresDynamicSignals(t *testing
 	expensive := 9.0
 	cheap := 0.1
 	accounts := []Account{
-		prioritySaturationTestAccount(20, 2, 3, 0),
-		prioritySaturationTestAccount(10, 1, 3, 0),
+		prioritySaturationTestAccount(20, 2, 3),
+		prioritySaturationTestAccount(10, 1, 3),
 	}
 	accounts[0].LastUsedAt = &earlier
 	accounts[0].RateMultiplier = &cheap
@@ -414,9 +415,9 @@ func TestPrioritySaturationScheduler_StableOrderIgnoresDynamicSignals(t *testing
 
 func TestPrioritySaturationScheduler_ConcurrentNewSessionsRespectAtomicOrder(t *testing.T) {
 	accounts := []Account{
-		prioritySaturationTestAccount(10, 1, 35, 0),
-		prioritySaturationTestAccount(20, 2, 35, 0),
-		prioritySaturationTestAccount(30, 3, 35, 0),
+		prioritySaturationTestAccount(10, 1, 35),
+		prioritySaturationTestAccount(20, 2, 35),
+		prioritySaturationTestAccount(30, 3, 35),
 	}
 	scheduler, cache, _ := newPrioritySaturationTestScheduler(accounts, nil, nil)
 
@@ -430,7 +431,7 @@ func TestPrioritySaturationScheduler_ConcurrentNewSessionsRespectAtomicOrder(t *
 		go func() {
 			defer wg.Done()
 			<-start
-			selection, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0))
+			selection, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 0))
 			if err != nil {
 				errs <- err
 				return
@@ -478,9 +479,9 @@ func TestPrioritySaturationScheduler_ConcurrentNewSessionsRespectAtomicOrder(t *
 
 func TestPrioritySaturationScheduler_ConcurrentGeneralTrafficCannotConsumeReserve(t *testing.T) {
 	accounts := []Account{
-		prioritySaturationTestAccount(10, 1, 35, 5),
-		prioritySaturationTestAccount(20, 2, 35, 5),
-		prioritySaturationTestAccount(30, 3, 35, 5),
+		prioritySaturationTestAccount(10, 1, 35),
+		prioritySaturationTestAccount(20, 2, 35),
+		prioritySaturationTestAccount(30, 3, 35),
 	}
 	scheduler, cache, _ := newPrioritySaturationTestScheduler(accounts, nil, nil)
 
@@ -494,7 +495,7 @@ func TestPrioritySaturationScheduler_ConcurrentGeneralTrafficCannotConsumeReserv
 		go func() {
 			defer wg.Done()
 			<-start
-			selection, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0))
+			selection, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 15))
 			if err != nil {
 				errs <- err
 				return
@@ -520,7 +521,7 @@ func TestPrioritySaturationScheduler_ConcurrentGeneralTrafficCannotConsumeReserv
 		}
 		require.NotNil(t, selection.WaitPlan)
 		require.Equal(t, accounts[0].ID, selection.WaitPlan.AccountID)
-		require.Equal(t, accounts[0].GeneralConcurrencyLimit(), selection.WaitPlan.MaxConcurrency)
+		require.Equal(t, accounts[0].GeneralConcurrencyLimit(15), selection.WaitPlan.MaxConcurrency)
 		waiting++
 	}
 	require.Len(t, acquired, 90)
@@ -538,7 +539,7 @@ func TestPrioritySaturationScheduler_ConcurrentGeneralTrafficCannotConsumeReserv
 }
 
 func TestPrioritySaturationScheduler_ConcurrentGeneralAndAffinityRespectBothLimits(t *testing.T) {
-	account := prioritySaturationTestAccount(10, 1, 35, 5)
+	account := prioritySaturationTestAccount(10, 1, 35)
 	scheduler, cache, _ := newPrioritySaturationTestScheduler(
 		[]Account{account},
 		map[int64]int{account.ID: 29},
@@ -562,8 +563,8 @@ func TestPrioritySaturationScheduler_ConcurrentGeneralAndAffinityRespectBothLimi
 	}
 	wg.Add(requestsPerClass * 2)
 	for range requestsPerClass {
-		go run(prioritySaturationRequest("", 0))
-		go run(prioritySaturationRequest("mixed-owner", account.ID))
+		go run(prioritySaturationRequest("", 0, 15))
+		go run(prioritySaturationRequest("mixed-owner", account.ID, 15))
 	}
 	close(start)
 	wg.Wait()
@@ -606,14 +607,14 @@ func TestPrioritySaturationScheduler_ConcurrentGeneralAndAffinityRespectBothLimi
 }
 
 func TestPrioritySaturationScheduler_EstablishedAffinityUsesReservedCapacity(t *testing.T) {
-	account := prioritySaturationTestAccount(11, 1, 3, 1)
+	account := prioritySaturationTestAccount(11, 1, 3)
 	scheduler, cache, _ := newPrioritySaturationTestScheduler(
 		[]Account{account},
 		map[int64]int{account.ID: 2},
 		map[string]int64{"openai:sticky": account.ID},
 	)
 
-	selection, decision, err := scheduler.Select(context.Background(), prioritySaturationRequest("sticky", account.ID))
+	selection, decision, err := scheduler.Select(context.Background(), prioritySaturationRequest("sticky", account.ID, 34))
 	require.NoError(t, err)
 	require.True(t, selection.Acquired)
 	require.Equal(t, account.ID, selection.Account.ID)
@@ -628,12 +629,12 @@ func TestPrioritySaturationScheduler_EstablishedAffinityUsesReservedCapacity(t *
 }
 
 func TestPrioritySaturationScheduler_PreviousResponseAffinityUsesReservedCapacity(t *testing.T) {
-	preferred := prioritySaturationTestAccount(22, 2, 3, 1)
+	preferred := prioritySaturationTestAccount(22, 2, 3)
 	preferred.Extra["openai_apikey_responses_websockets_v2_enabled"] = true
-	lowerPriority := prioritySaturationTestAccount(11, 1, 3, 0)
+	lowerPriority := prioritySaturationTestAccount(11, 1, 3)
 	scheduler, cache, _ := newPrioritySaturationTestScheduler(
 		[]Account{lowerPriority, preferred},
-		map[int64]int{preferred.ID: preferred.GeneralConcurrencyLimit()},
+		map[int64]int{preferred.ID: preferred.GeneralConcurrencyLimit(34)},
 		nil,
 	)
 	scheduler.base.service.cfg = newSchedulerTestOpenAIWSV2Config()
@@ -646,7 +647,7 @@ func TestPrioritySaturationScheduler_PreviousResponseAffinityUsesReservedCapacit
 		time.Hour,
 	))
 
-	req := prioritySaturationRequest("", 0)
+	req := prioritySaturationRequest("", 0, 34)
 	req.PreviousResponseID = "resp-priority-affinity"
 	req.PreviousResponseCanMove = false
 	selection, decision, err := scheduler.Select(ctx, req)
@@ -660,15 +661,15 @@ func TestPrioritySaturationScheduler_PreviousResponseAffinityUsesReservedCapacit
 }
 
 func TestPrioritySaturationScheduler_FullAffinityTemporarilyOverflowsWithoutRebinding(t *testing.T) {
-	owner := prioritySaturationTestAccount(11, 1, 3, 1)
-	overflow := prioritySaturationTestAccount(22, 2, 4, 1)
+	owner := prioritySaturationTestAccount(11, 1, 3)
+	overflow := prioritySaturationTestAccount(22, 2, 4)
 	scheduler, cache, sessionCache := newPrioritySaturationTestScheduler(
 		[]Account{owner, overflow},
 		map[int64]int{owner.ID: 3},
 		map[string]int64{"openai:sticky": owner.ID},
 	)
 
-	req := prioritySaturationRequest("sticky", owner.ID)
+	req := prioritySaturationRequest("sticky", owner.ID, 25)
 	req.CanTemporarilyOverflow = true
 	selection, decision, err := scheduler.Select(context.Background(), req)
 	require.NoError(t, err)
@@ -686,7 +687,7 @@ func TestPrioritySaturationScheduler_FullAffinityTemporarilyOverflowsWithoutRebi
 }
 
 func TestPrioritySaturationScheduler_FullAffinityWithNoOverflowCandidateWaitsOnOwner(t *testing.T) {
-	owner := prioritySaturationTestAccount(11, 1, 3, 1)
+	owner := prioritySaturationTestAccount(11, 1, 3)
 	scheduler, cache, sessionCache := newPrioritySaturationTestScheduler(
 		[]Account{owner},
 		map[int64]int{owner.ID: owner.Concurrency},
@@ -713,8 +714,8 @@ func TestPrioritySaturationScheduler_FullAffinityWithNoOverflowCandidateWaitsOnO
 }
 
 func TestPrioritySaturationScheduler_FullAffinityWaitsWhenTemporaryOverflowIsNotAllowed(t *testing.T) {
-	owner := prioritySaturationTestAccount(11, 1, 3, 1)
-	overflow := prioritySaturationTestAccount(22, 2, 4, 1)
+	owner := prioritySaturationTestAccount(11, 1, 3)
+	overflow := prioritySaturationTestAccount(22, 2, 4)
 	scheduler, cache, sessionCache := newPrioritySaturationTestScheduler(
 		[]Account{owner, overflow},
 		map[int64]int{owner.ID: 3},
@@ -739,8 +740,8 @@ func TestPrioritySaturationScheduler_FullAffinityWaitsWhenTemporaryOverflowIsNot
 }
 
 func TestPrioritySaturationScheduler_ExcludedAffinityDoesNotMoveWhenTemporaryOverflowIsNotAllowed(t *testing.T) {
-	owner := prioritySaturationTestAccount(11, 1, 3, 1)
-	overflow := prioritySaturationTestAccount(22, 2, 4, 1)
+	owner := prioritySaturationTestAccount(11, 1, 3)
+	overflow := prioritySaturationTestAccount(22, 2, 4)
 	scheduler, cache, sessionCache := newPrioritySaturationTestScheduler(
 		[]Account{owner, overflow},
 		nil,
@@ -759,7 +760,7 @@ func TestPrioritySaturationScheduler_ExcludedAffinityDoesNotMoveWhenTemporaryOve
 }
 
 func TestPrioritySaturationScheduler_MissingPreviousResponseDoesNotMoveWithoutBothPermissions(t *testing.T) {
-	account := prioritySaturationTestAccount(11, 1, 3, 0)
+	account := prioritySaturationTestAccount(11, 1, 3)
 	scheduler, cache, _ := newPrioritySaturationTestScheduler([]Account{account}, nil, nil)
 	req := prioritySaturationRequest("", 0)
 	req.PreviousResponseID = "missing-response"
@@ -772,15 +773,15 @@ func TestPrioritySaturationScheduler_MissingPreviousResponseDoesNotMoveWithoutBo
 }
 
 func TestPrioritySaturationScheduler_ClaimRaceConvergesToCanonicalOwner(t *testing.T) {
-	candidate := prioritySaturationTestAccount(22, 1, 4, 1)
-	owner := prioritySaturationTestAccount(11, 2, 3, 1)
+	candidate := prioritySaturationTestAccount(22, 1, 4)
+	owner := prioritySaturationTestAccount(11, 2, 3)
 	scheduler, cache, sessionCache := newPrioritySaturationTestScheduler(
 		[]Account{candidate, owner},
 		map[int64]int{},
 		map[string]int64{"openai:race": owner.ID},
 	)
 
-	selection, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("race", 0))
+	selection, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("race", 0, 34))
 	require.NoError(t, err)
 	require.True(t, selection.Acquired)
 	require.Equal(t, owner.ID, selection.Account.ID)
@@ -795,9 +796,9 @@ func TestPrioritySaturationScheduler_ClaimRaceConvergesToCanonicalOwner(t *testi
 
 func TestPrioritySaturationScheduler_ReconciliationExhaustionReleasesCurrentProvisionalSlot(t *testing.T) {
 	accounts := []Account{
-		prioritySaturationTestAccount(10, 1, 2, 0),
-		prioritySaturationTestAccount(20, 2, 2, 0),
-		prioritySaturationTestAccount(30, 3, 2, 0),
+		prioritySaturationTestAccount(10, 1, 2),
+		prioritySaturationTestAccount(20, 2, 2),
+		prioritySaturationTestAccount(30, 3, 2),
 	}
 	concurrencyCache := &prioritySaturationConcurrencyCache{}
 	sessionCache := &rotatingPrioritySaturationSessionCache{
@@ -824,15 +825,15 @@ func TestPrioritySaturationScheduler_ReconciliationExhaustionReleasesCurrentProv
 }
 
 func TestPrioritySaturationScheduler_AllGeneralPoolsFullWaitsOnFirstPriority(t *testing.T) {
-	first := prioritySaturationTestAccount(12, 1, 3, 1)
-	second := prioritySaturationTestAccount(21, 2, 4, 1)
+	first := prioritySaturationTestAccount(12, 1, 3)
+	second := prioritySaturationTestAccount(21, 2, 4)
 	scheduler, cache, _ := newPrioritySaturationTestScheduler(
 		[]Account{second, first},
 		map[int64]int{first.ID: 2, second.ID: 3},
 		nil,
 	)
 
-	selection, decision, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0))
+	selection, decision, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 34))
 	require.NoError(t, err)
 	require.False(t, selection.Acquired)
 	require.NotNil(t, selection.WaitPlan)
@@ -847,11 +848,11 @@ func TestPrioritySaturationScheduler_AllGeneralPoolsFullWaitsOnFirstPriority(t *
 }
 
 func TestPrioritySaturationScheduler_StaleFirstCandidateWaitsOnNextValidFullAccount(t *testing.T) {
-	stale := prioritySaturationTestAccount(12, 1, 3, 1)
-	waitable := prioritySaturationTestAccount(21, 2, 4, 1)
+	stale := prioritySaturationTestAccount(12, 1, 3)
+	waitable := prioritySaturationTestAccount(21, 2, 4)
 	scheduler, cache, _ := newPrioritySaturationTestScheduler(
 		[]Account{stale, waitable},
-		map[int64]int{waitable.ID: waitable.GeneralConcurrencyLimit()},
+		map[int64]int{waitable.ID: waitable.GeneralConcurrencyLimit(34)},
 		nil,
 	)
 	scheduler.base.service.accountRepo = stalePriorityWaitAccountRepo{
@@ -859,12 +860,12 @@ func TestPrioritySaturationScheduler_StaleFirstCandidateWaitsOnNextValidFullAcco
 		staleAccountID:                 stale.ID,
 	}
 
-	selection, decision, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0))
+	selection, decision, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 34))
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.WaitPlan)
 	require.Equal(t, waitable.ID, selection.WaitPlan.AccountID)
-	require.Equal(t, waitable.GeneralConcurrencyLimit(), selection.WaitPlan.MaxConcurrency)
+	require.Equal(t, waitable.GeneralConcurrencyLimit(34), selection.WaitPlan.MaxConcurrency)
 	require.Equal(t, 1, decision.GeneralRejectCount)
 	require.Equal(t, []int64{stale.ID}, cache.released)
 }
@@ -957,8 +958,8 @@ func TestOpenAIAccountSchedulers_TwoServiceInstancesConvergeOnAtomicOwner(t *tes
 	for _, winnerRole := range []string{"weighted", "priority"} {
 		t.Run(winnerRole+" wins initial claim", func(t *testing.T) {
 			accounts := []Account{
-				prioritySaturationTestAccount(10, 1, 1, 0),
-				prioritySaturationTestAccount(20, 2, 1, 0),
+				prioritySaturationTestAccount(10, 1, 1),
+				prioritySaturationTestAccount(20, 2, 1),
 			}
 			sessionCache := newCrossPolicySessionCache(winnerRole)
 			concurrencyCache := &prioritySaturationConcurrencyCache{}

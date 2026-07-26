@@ -41,20 +41,20 @@ Priority ASC, AccountID ASC
 
 ### 3.1 两级并发上限
 
-每个有限并发账号增加一个存放在 `Account.Extra` 中的整数配置：
+系统设置增加一个全局整数百分比：
 
 ```text
-affinity_concurrency_reserve
+openai_priority_saturation_affinity_reserve_percent (P)
 ```
 
-该名称与现有按美元计量的 `window_cost_sticky_reserve` 无关。默认值为 `0`；管理员可以逐账号配置，也可以通过批量编辑给所有账号设置相同值。
+`P` 默认 `20`，允许范围为 `0..99`。该值由设置页统一配置，不在账号创建、编辑或批量编辑中重复配置。历史 `Account.Extra.affinity_concurrency_reserve` 仅作为旧数据兼容保留，调度器不得读取或使用。
 
 对每个账号定义：
 
 ```text
 C = Account.Concurrency
 if C > 0:
-    R = clamp(Account.AffinityConcurrencyReserve, 0, C - 1)
+    R = floor(C * P / 100)
     G = C - R
 else:
     R = 0
@@ -80,6 +80,8 @@ G: general_limit，新会话和临时溢出请求的上限
 | CAS 永久迁移后的下一轮请求 | affinity | `C` |
 
 新会话的首次请求必须先在 general 区成功，之后才能 claim 成为 owner；不能先创建绑定再用预留槽位绕过 `G`。临时溢出请求不是目标账号的亲和请求，也不能消耗目标账号为自身历史会话保留的 `R`。
+
+`session_hash` 和 `previous_response_id` 命中都属于 affinity，共享同一个账号的 `C` 和同一份 `R`，不分别划分保护区或重复计算预留容量。
 
 ### 3.2 原子实现
 
@@ -123,7 +125,7 @@ G = 30
 
 A 的普通区已有 30 个请求时，绑定 A 的历史会话仍可再获取 5 个槽位；第 6 个亲和请求在 A 达到 35 后，按请求可迁移性临时溢出或等待。新会话不能使用 A 的第 31..35 个槽位。
 
-如果 `R=0`，则 `G=C`，行为退化为不预留槽位的原始顺序饱和。配置必须满足 `R >= 0`；管理 API 在 `C > 0` 时拒绝 `R >= C`，并在修改 `Concurrency` 时联合校验。运行时仍需防御性 clamp 并记录告警，避免旧数据或并发配置更新产生无普通槽位的账号。
+如果 `R=0`，则 `G=C`，行为退化为不预留槽位的原始顺序饱和。由于 `0 <= P <= 99` 且使用向下取整，任意 `C > 0` 都天然满足 `0 <= R < C`，因此不需要把百分比与单个账号的 `Concurrency` 联合校验；运行时只需对非法存量百分比回退到默认 `20`。
 
 `Concurrency <= 0` 表示不受有限槽位约束，此时预留没有意义并按 `R=0` 处理。排序第一的无限并发账号仍会持续承接流量；启用顺序饱和策略时应在管理界面和日志中给出配置告警。
 
@@ -396,11 +398,11 @@ openai_priority_saturation_enabled
 | `false` | `false` | 现有 legacy selector |
 | `true` | `false` | 当前 `weighted_topk` |
 | `false` | `true` | `priority_saturation` |
-| `true` | `true` | 非法配置 |
+| `true` | `true` | `priority_saturation` 优先生效 |
 
-后端设置更新必须基于更新后的完整有效值校验两个开关互斥，不能只校验本次 payload 中出现的字段。新安装默认启用 `priority_saturation`；升级迁移遇到缺失字段时，仅当现有 advanced scheduler 已显式开启才写入 `false`，其他情况写入 `true`，因此不会产生两个调度器同时开启的状态。
+两个开关是可共存的独立配置，不做互斥校验，也不因开启其中一个而自动关闭另一个。新安装以及从官方 `sub2api` 首次迁入 Pro 时默认启用 `priority_saturation`；旧设置响应缺少该字段时，管理端也按启用处理。不处理已经执行过旧 Pro 专属迁移的数据库状态转换。
 
-正常配置不得同时开启两个开关。为防手工改数据库、旧管理端或滚动升级产生脏状态，运行时检测到二者同时为 `true` 时必须记录高优先级错误并确定性选择 `priority_saturation`，不能在请求之间随机分派；管理 API 和新 UI 仍阻止保存该状态。
+运行时只执行一次确定性优先级判断：只要 `openai_priority_saturation_enabled=true` 就选择 `priority_saturation`；仅在其关闭且 advanced 开启时选择 `weighted_topk`，两个都关闭时选择 legacy selector。关闭 priority 后，已保存的 advanced 配置立即恢复生效。
 
 ### 8.2 独立的 `SettingsView` 配置卡
 
@@ -411,66 +413,48 @@ openai_priority_saturation_enabled
 ```text
 OpenAI 顺序饱和调度
   [开关] openai_priority_saturation_enabled
+  [百分比] openai_priority_saturation_affinity_reserve_percent
 ```
 
-新卡片不得把现有 advanced toggle 改名、替换成 Select 或复用其 `v-model`。新开关关闭时只显示功能说明；开启时显示：
+新卡片不得把现有 advanced toggle 改名、替换成 Select 或复用其 `v-model`。卡片显示：
 
 ```text
 账号顺序：Priority ASC, Account ID ASC
 新会话/临时溢出：使用 general_limit (G)
 原账号亲和请求：使用 hard_limit (C)
-保护槽位：逐账号配置 affinity_concurrency_reserve (R)
+亲和会话预留比例 P：默认 20%
 ```
 
-互斥交互必须明确：
+两个开关允许同时打开和保存，不弹互斥确认，也不自动改写另一个开关。卡片必须明确提示：priority 开启时优先生效，关闭后才回落到 advanced 或 legacy。开关变化仍必须经过现有“保存设置”和 step-up 流程。
 
-- 开启新开关时若现有 advanced switch 已开启，弹出确认说明“将同时关闭 TopK 加权调度”；确认后在同一表单状态中设为 `advanced=false, priority_saturation=true`；
-- 开启现有 advanced switch 时若新开关已开启，执行对称确认并设为 `priority_saturation=false, advanced=true`；
-- 取消确认时恢复触发前的开关状态；
-- 两个变更必须在一次 Settings 保存请求中提交，不能出现先关闭一个、网络失败后未开启另一个的中间自动保存；
-- 开关变化不得绕过现有“保存设置”和 step-up 流程。
-
-关闭或切换开关不得清空 TopK、权值或账号预留配置；重新启用原策略时原值继续存在。
+关闭或切换开关不得清空 TopK、权值或全局预留百分比；重新启用原策略时原值继续存在。
 
 顺序是分组相关的，新卡片不能展示一个误导性的全局账号列表。应提供“前往账号管理”入口；账号管理页在当前分组过滤下按 `Priority, ID` 展示实际顺序。
 
-### 8.3 账号级保护槽位 UI
+### 8.3 全局亲和预留百分比 UI
 
-`affinity_concurrency_reserve` 是账号容量属性，不是全局调度权值。必须在 OpenAI-compatible 账号的以下位置增加配置：
+唯一可编辑的亲和容量参数是全局百分比 `P`。它直接放在顺序饱和调度设置卡中，不在每个账号上重复设置。
 
-- `CreateAccountModal.vue`：放在“并发数”旁边；
-- `EditAccountModal.vue`：放在“并发数”旁边；
-- `BulkEditAccountModal.vue`：使用现有“启用本字段批量修改”的 checkbox 模式；
-- 账号列表容量展示：显示当前值以及 `G/C`，例如 `28 / 30 / 35`，tooltip 解释 30 是普通上限、35 是硬上限。
+设置要求：
 
-表单只编辑 `C` 和 `R`，`G=C-R` 必须只读计算，不能再增加第三个可独立修改的字段。示例预览：
-
-```text
-总并发上限 C        35
-亲和预留 R           5
-普通请求上限 G      30
-```
-
-交互要求：
-
-- 默认 `R=0`；
-- 输入必须为整数且 `0 <= R < C`；
-- C 或 R 改变时实时更新 G；
-- `R>=C` 时阻止提交并显示字段级错误，不能静默 clamp；
-- `C<=0` 时禁用 R 并显示“无限并发账号不使用保护槽位”；
+- 默认 `P=20`；
+- 输入必须为整数且 `0 <= P <= 99`，非法输入阻止提交；
+- 旧 API 响应缺少该字段时回退为 `20`；
+- 后端遇到非法存量值时运行时回退为 `20`；
+- `P=0` 时不保留亲和容量；
+- `C<=0` 的账号始终 `R=0`，沿用无限并发语义；
 - 明确提示“硬预留可能在没有亲和流量时保持空闲”；
-- 明确区分并发槽位字段与现有美元额度字段 `window_cost_sticky_reserve`；
-- 平台切换为不适用类型时不把隐藏字段意外写成 0 或删除已有值。
+- 百分比输入、说明和错误文本必须覆盖现有语言并在移动端不溢出。
 
-亲和预留与选择策略正交。只要账号 `R>0`，`weighted_topk`、`priority_saturation`、旧选择器及全部 HTTP/WS 入口都必须遵守相同的 affinity/general 分类；UI 不得暗示切回 `weighted_topk` 会自动关闭预留。管理员若要恢复全部普通容量，应显式把 R 改为 0。
+亲和预留与选择策略正交。`weighted_topk`、`priority_saturation`、旧选择器及全部 HTTP/WS 入口都必须使用同一个百分比快照和相同的 affinity/general 分类。管理员若要恢复全部普通容量，应把 `P` 设为 `0`。
 
 ### 8.4 UI 状态和提示
 
-- Settings API 类型增加独立布尔字段 `openai_priority_saturation_enabled`，表单默认值为 `true`；兼容旧响应时若 advanced scheduler 已开启则回落为 `false`；
-- Account 类型通过现有 `extra` 写入 `affinity_concurrency_reserve`，列表 DTO 同时暴露归一化后的只读值；
-- 新开关开启时显示非阻断告警：`R=0` 的账号没有亲和保护，`Concurrency<=0` 的前置账号不会自然扩散；
-- 两个调度开关、C、R、G 的名称和帮助文本必须覆盖项目现有语言，并在移动端不横向溢出；
-- UI 只负责互斥交互、提前校验和解释；后端必须重复执行开关互斥及 `0 <= R < C` 校验。
+- Settings API 类型增加 `openai_priority_saturation_enabled` 和 `openai_priority_saturation_affinity_reserve_percent`；
+- priority 开关和百分比的表单默认值分别为 `true`、`20`，旧响应缺字段时使用相同默认值；
+- Account DTO、创建、编辑和批量编辑表单不得暴露 `affinity_concurrency_reserve`；
+- 账号列表继续显示当前并发和账号硬上限，不展示可被误认为逐账号配置的 `R/G/C` 拆分；
+- 前端执行整数与范围校验，后端重复执行 `0 <= P <= 99` 校验。
 
 ### 8.5 策略语义
 
@@ -484,7 +468,7 @@ OpenAI 顺序饱和调度
 - `subscription priority` 不改变全局 Priority 顺序；
 - 评分权值保留在数据库中，切回 `weighted_topk` 后继续生效。
 
-实现不新增业务表、Ent schema 或池级 Redis 状态；账号级预留值存入现有 `Account.Extra`，并复用现有账号并发集合。owner-aware 写入和两级槽位上限必须对所有 OpenAI 调度策略同时生效，不能放在策略分支内部。
+实现不新增业务表、Ent schema 或池级 Redis 状态；全局百分比存入现有 `settings`，历史账号 `Account.Extra.affinity_concurrency_reserve` 仅兼容保留且不参与计算，并复用现有账号并发集合。owner-aware 写入和两级槽位上限必须对所有 OpenAI 调度策略同时生效，不能放在策略分支内部。
 
 ## 9. 实现边界
 
@@ -499,23 +483,23 @@ backend/internal/service/openai_priority_saturation_scheduler_test.go
 
 | 文件 | 修改 |
 |---|---|
-| `openai_account_scheduler.go` | 读取独立开关并在候选过滤后分派一次；脏状态下 priority saturation 优先 |
-| settings service/DTO | 增加独立布尔开关、默认值、完整状态互斥校验和脏状态告警 |
-| `frontend/src/api/admin/settings.ts` | 增加 `openai_priority_saturation_enabled` 读写字段 |
-| `SettingsView.vue` | 保留现有 advanced 卡片；增加独立顺序饱和卡片、开关及双向互斥确认 |
-| Settings UI tests | 验证两个独立开关、取消确认、单次保存、旧配置兼容和字段保值 |
-| `frontend/src/types/index.ts` | 暴露账号预留值和 create/update extra 类型约束 |
-| Create/Edit/Bulk account modals | 在并发数旁配置 R，实时预览 G，并联合校验 C/R |
-| `AccountCapacityCell.vue` | 展示 current/general/hard 和保护槽位 tooltip |
-| account management list/view | 在分组过滤下按 `Priority, ID` 预览实际顺序，并提供 R/G/C 容量信息 |
-| 共享 affinity reserve utility | 统一计算 C/R/G 和前端校验，避免三个 modal 各自实现不同规则 |
-| i18n 和前端组件测试 | 增加策略、保护槽位、容量成本、错误提示和切换保值用例 |
+| `openai_account_scheduler.go` | 读取两个独立开关；priority saturation 开启时始终优先，否则回落 advanced/legacy |
+| settings service/DTO | 增加独立布尔开关、全局百分比、默认值和范围校验 |
+| `frontend/src/api/admin/settings.ts` | 增加开关和全局百分比读写字段 |
+| `SettingsView.vue` | 保留 advanced 卡片；增加独立顺序饱和卡片、开关和百分比输入 |
+| Settings UI tests | 验证两个开关可共存、priority 优先、默认 `20`、旧配置兼容和字段保值 |
+| `frontend/src/types/index.ts` | 移除逐账号亲和预留字段 |
+| Create/Edit/Bulk account modals | 移除逐账号预留输入，不读写历史 Extra |
+| `AccountCapacityCell.vue` | 继续展示当前并发和硬上限，不展示逐账号 G/R |
+| account management list/view | 在分组过滤下按 `Priority, ID` 预览实际顺序 |
+| affinity capacity helper | 根据同一全局百分比统一计算 C/R/G，忽略账号 Extra |
+| i18n 和前端组件测试 | 增加策略优先级、全局百分比、容量成本和范围错误用例 |
 | `openai_gateway_count_tokens.go` | 未获取账号槽位时禁止直接转发 |
 | `gateway_service.go` / `repository/gateway_cache.go` | 为现有 session 绑定增加原子 claim、CAS、按 owner 刷新和删除 |
 | `openai_sticky_compat.go` | 取消权威 key 的普通 `SET`，兼容旧 hash 时先 claim 当前格式 key |
 | OpenAI scheduler/handler 的全部绑定调用点 | 统一消费 owner 结果；claim 失败时释放错误槽位并收敛到 owner，删除 post-select 覆盖写 |
-| `account.go` / account DTO | 读写并校验 `affinity_concurrency_reserve`，并与美元额度预留明确区分 |
-| `repository/scheduler_cache.go` | 把 `affinity_concurrency_reserve` 纳入账号调度快照 |
+| `account.go` / account DTO | 不再暴露或校验逐账号 `affinity_concurrency_reserve` |
+| `repository/scheduler_cache.go` | 不把旧逐账号预留字段纳入调度快照 |
 | OpenAI 的全部账号槽位获取和 WaitPlan 调用点 | 按 owner 身份统一选择 `C` 或 `G`，禁止普通请求直接使用 `Account.Concurrency` |
 
 新文件应复用现有：
@@ -534,7 +518,7 @@ backend/internal/service/openai_priority_saturation_scheduler_test.go
 
 ### 10.1 顺序和并发
 
-构造账号 A、B、C，Priority 分别为 10、20、30，并发上限均为 2，预留均为 0：
+设置 `P=0`，构造账号 A、B、C，Priority 分别为 10、20、30，并发上限均为 2：
 
 1. 连续请求且不释放，选择结果必须为 `A, A, B, B, C, C`；
 2. A 释放一个槽位后，下一无粘性请求必须立即选择 A；
@@ -544,7 +528,7 @@ backend/internal/service/openai_priority_saturation_scheduler_test.go
 
 ### 10.2 原子竞态
 
-构造 3 个账号、每个并发 35、预留为 0，同时启动 100 个 goroutine：
+设置 `P=0`，构造 3 个账号、每个并发 35，同时启动 100 个 goroutine：
 
 - A 最多获取 35 个槽位；
 - B 只在 A 满后获取，最多 35 个；
@@ -554,7 +538,7 @@ backend/internal/service/openai_priority_saturation_scheduler_test.go
 
 ### 10.3 亲和保护槽位
 
-构造 A、B、C，均为 `C=35, R=5, G=30`：
+设置全局 `P=15`，构造 A、B、C，均得到 `C=35, R=floor(35×15/100)=5, G=30`：
 
 - 100 个无绑定并发请求只能在 A/B/C 各获取 30 个，剩余 10 个进入 general 等待或繁忙路径；
 - A 的 `total_active=30` 时，新会话必须跳过 A，但 owner=A 的历史会话还能连续获取 5 个槽位；
@@ -562,8 +546,8 @@ backend/internal/service/openai_priority_saturation_scheduler_test.go
 - 从 A 临时溢出到 B 的请求按 B 的 `G=30` 获取，不能消耗 B 的保护槽位；
 - owner 的 `WaitPlan.MaxConcurrency=35`，无绑定和临时溢出的 `WaitPlan.MaxConcurrency=30`；
 - `total_active=29` 时并发执行普通和亲和抢槽，不得让普通请求把总数推进到 30 以上，也不得让总数超过 35；
-- `R=0` 时保持 10.1 和 10.2 的原行为；
-- `R<0`、`R>=C`、降低 C 后 R 失效以及 `C<=0` 的配置校验和运行时防御行为均有测试。
+- `P=0` 时保持 10.1 和 10.2 的原行为；
+- `P<0`、`P>99`、非法存量字符串、大整数防溢出以及 `C<=0` 的运行时行为均有测试。
 
 ### 10.4 稳定顺序
 
@@ -610,26 +594,24 @@ backend/internal/service/openai_priority_saturation_scheduler_test.go
 - owner 迁移与旧请求刷新 TTL 并发时，旧请求不得延长或恢复旧 owner；
 - 测试必须覆盖两个服务实例而不是只在单 scheduler 对象内并发。
 
-- 配置 `C=35, R=5` 时，两种策略的普通请求都不得在账号总并发达到 30 后继续获取；任何旧路径以 35 获取普通请求都必须使测试失败。
+- 配置 `P=15, C=35` 时，两种策略均计算出 `R=5, G=30`；普通请求不得在账号总并发达到 30 后继续获取，任何旧路径以 35 获取普通请求都必须使测试失败。
 
 ### 10.8 管理 UI
 
-- 旧设置缺少新字段时，advanced scheduler 已开启则迁移为 `openai_priority_saturation_enabled=false`，否则迁移为 `true`；
+- 旧设置响应缺少新字段时，表单默认 `openai_priority_saturation_enabled=true`、`P=20`；
 - 两个开关都关闭时使用 legacy selector；
 - 仅现有 advanced 开关开启时使用 `weighted_topk`，其 TopK/权值 UI 保持原样；
-- 仅新开关开启时使用 `priority_saturation`，独立卡片显示顺序、C/R/G、溢出语义和账号管理入口；
-- UI 开启任一开关时对另一个执行带确认的关闭；取消确认恢复原状态；
-- 一次保存同时提交两个开关，后端拒绝二者同时为 true；运行时脏状态确定性选择 priority saturation 并记录错误；
-- 反复启停两个开关不会清空或重置 TopK、权值和 R；
-- Create/Edit 表单实时显示 G，并拒绝小数、负数及 `R>=C`；
-- Bulk Edit 只有启用预留字段时才更新 R，未勾选时不触碰已有账号值；
-- `C<=0`、平台切换、后端返回旧数据和并发修改 C/R 均不会产生无普通槽位的静默配置；
-- 账号容量展示正确区分 `current / G / C`，移动端无横向溢出；
-- Settings 和 account payload round-trip 后值不丢失，后端拒绝非法枚举和非法 C/R。
+- 新开关开启时使用 `priority_saturation`；两个开关同时开启也保存成功，且 priority 优先生效；
+- priority 关闭且 advanced 保持开启时立即回落 `weighted_topk`；
+- 独立卡片显示稳定顺序、C/R/G 语义、全局百分比和账号管理入口；
+- 反复启停两个开关不会清空或重置 TopK、权值和 `P`；
+- 百分比拒绝小数、负数及大于 99 的值，并接受边界 `0`、`99`；
+- Create/Edit/Bulk account payload 不新增、不改写逐账号 `affinity_concurrency_reserve`；
+- Settings payload round-trip 后百分比不丢失，后端拒绝非法 `P`。
 
 ### 10.9 回归和入口
 
-- `affinity_concurrency_reserve=0` 时，`weighted_topk` 下现有 scheduler tests 保持不变；
+- `P=0` 时，`weighted_topk` 下现有 scheduler tests 保持不变；
 - Responses、Chat Completions、Messages、Images、Embeddings、Alpha Search 和 Count Tokens 均验证“前满后溢”；
 - Count Tokens 未获取槽位时不得调用上游；
 - WebSocket 验证快速抢槽和 TryAgainLater 行为；
@@ -641,14 +623,14 @@ backend/internal/service/openai_priority_saturation_scheduler_test.go
 
 共享 sticky key 和账号并发集合时，禁止直接把旧实例与 owner/reserve-aware 新实例混合 canary。安全发布必须分两步：
 
-1. 发布兼容版本：实现原子 owner 接口和两级槽位 helper，让 `weighted_topk`、旧选择器及所有 OpenAI handler 都按请求身份使用 `C/G`；迁移仅在 advanced scheduler 未开启时默认启用 `openai_priority_saturation_enabled`，所有账号的 `affinity_concurrency_reserve` 暂时保持 `0`；
+1. 发布兼容版本：实现原子 owner 接口和两级槽位 helper，让 `weighted_topk`、旧选择器及所有 OpenAI handler 都按请求身份使用同一请求快照中的 `C/G`；新增全局 `P`，默认 `20`；
 2. 把兼容版本部署到所有实例，确认集群中不存在普通 `SET` owner 或始终以 `Account.Concurrency` 获取普通请求的旧实例；
 3. 通过 10.7 节混合策略并发测试，并观察 claim 冲突、保护槽位命中、general 拒绝、错误槽位释放和 CAS 失败指标；
-4. 为目标账号配置小规模 `affinity_concurrency_reserve`，验证历史会话可以使用保护区且普通容量下降符合预期；
-5. 确认现有 `openai_advanced_scheduler_enabled=false`，并在 canary 实例或低峰窗口验证迁移已启用独立的 `openai_priority_saturation_enabled`；
+4. 在测试环境调整全局 `P`，验证所有有限并发账号按公式得到保护区且普通容量下降符合预期；
+5. 在 canary 实例或低峰窗口验证迁移已启用独立的 `openai_priority_saturation_enabled`；advanced 可保持开启，priority 仍应优先生效；
 6. 观察各账号普通区、保护区、临时溢出、sticky 等待、上游错误和额度下降速度；
 7. 确认顺序及会话亲和均符合预期后扩大范围。
 
 如果无法先升级所有 writer，只能让 canary 使用独立 Redis key namespace，并按稳定 session hash 把整个会话固定到同一实例池；不能让两种写入语义共享 key。
 
-策略回滚只关闭 `openai_priority_saturation_enabled`；需要回到 TopK 时在同一次设置更新中开启 `openai_advanced_scheduler_enabled`，否则回到 legacy selector。owner-aware 写入和两级槽位 helper 必须保留。需要恢复全部普通容量时可把 `affinity_concurrency_reserve` 调回 `0`；不得把运行中实例回滚到会普通 `SET` owner 或让普通请求直接使用 `C` 的旧二进制。
+策略回滚只关闭 `openai_priority_saturation_enabled`；advanced 已开启时自动回到 TopK，否则回到 legacy selector。owner-aware 写入和两级槽位 helper 必须保留。需要恢复全部普通容量时可把全局 `P` 调为 `0`；不得把运行中实例回滚到会普通 `SET` owner 或让普通请求直接使用 `C` 的旧二进制。

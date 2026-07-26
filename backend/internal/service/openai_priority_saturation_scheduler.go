@@ -41,7 +41,7 @@ func (s *prioritySaturationOpenAIAccountScheduler) Select(
 	}()
 
 	route, err := s.base.service.routeOpenAIAffinity(ctx, req, nil)
-	applyOpenAIAffinityRouteDecision(&decision, route)
+	applyOpenAIAffinityRouteDecision(&decision, route, req)
 	if err != nil {
 		return nil, decision, err
 	}
@@ -61,7 +61,7 @@ func (s *prioritySaturationOpenAIAccountScheduler) Select(
 			(errors.Is(err, ErrNoAvailableAccounts) || errors.Is(err, ErrNoAvailableCompactAccounts)) {
 			selection = s.base.service.openAIAffinityWaitSelection(req, overflowAffinityAccount)
 			decision.AffinityWait = true
-			setOpenAIAccountScheduleDecisionAccount(&decision, selection.Account)
+			setOpenAIAccountScheduleDecisionAccount(&decision, selection.Account, req.affinityReservePercent())
 			return selection, decision, nil
 		}
 		return nil, decision, err
@@ -71,7 +71,7 @@ func (s *prioritySaturationOpenAIAccountScheduler) Select(
 		decision.AffinityWait = true
 	}
 	if selection != nil {
-		setOpenAIAccountScheduleDecisionAccount(&decision, selection.Account)
+		setOpenAIAccountScheduleDecisionAccount(&decision, selection.Account, req.affinityReservePercent())
 		decision.TemporaryOverflow = overflowAffinityAccount != nil &&
 			selection.Acquired &&
 			selection.Account != nil &&
@@ -122,7 +122,7 @@ func (s *prioritySaturationOpenAIAccountScheduler) selectGeneralAccount(
 			continue
 		}
 		return attachOpenAISelectionRequest(
-			s.waitPlan(fresh, fresh.ConcurrencyLimitForAffinity(false), false),
+			s.waitPlan(fresh, fresh.ConcurrencyLimitForAffinity(false, req.affinityReservePercent()), false),
 			req,
 		), len(accounts), len(waitableAccountIDs), nil
 	}
@@ -193,6 +193,24 @@ func warnPrioritySaturationUnlimitedLeadingAccount(account *Account) {
 	)
 }
 
+func storeAccountWarningSignature(warnings *sync.Map, accountID int64, signature string) bool {
+	if warnings == nil || accountID <= 0 {
+		return false
+	}
+	for {
+		previous, loaded := warnings.LoadOrStore(accountID, signature)
+		if !loaded {
+			return true
+		}
+		if previous == signature {
+			return false
+		}
+		if warnings.CompareAndSwap(accountID, previous, signature) {
+			return true
+		}
+	}
+}
+
 func (s *prioritySaturationOpenAIAccountScheduler) freshEligibleAccount(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
@@ -207,7 +225,7 @@ func (s *prioritySaturationOpenAIAccountScheduler) acquireWithFreshLimit(
 	account *Account,
 	affinity bool,
 ) (*AccountSelectionResult, *Account, bool, error) {
-	limit := account.ConcurrencyLimitForAffinity(affinity)
+	limit := account.ConcurrencyLimitForAffinity(affinity, req.affinityReservePercent())
 	result, err := s.base.service.tryAcquireAccountSlot(ctx, account.ID, limit)
 	if err != nil || result == nil || !result.Acquired {
 		return nil, account, false, err
@@ -218,7 +236,7 @@ func (s *prioritySaturationOpenAIAccountScheduler) acquireWithFreshLimit(
 		result.ReleaseFunc()
 		return nil, nil, false, nil
 	}
-	freshLimit := fresh.ConcurrencyLimitForAffinity(affinity)
+	freshLimit := fresh.ConcurrencyLimitForAffinity(affinity, req.affinityReservePercent())
 	if freshLimit != limit {
 		result.ReleaseFunc()
 		result, err = s.base.service.tryAcquireAccountSlot(ctx, fresh.ID, freshLimit)
@@ -255,15 +273,19 @@ func (s *prioritySaturationOpenAIAccountScheduler) waitPlan(account *Account, li
 	}
 }
 
-func setOpenAIAccountScheduleDecisionAccount(decision *OpenAIAccountScheduleDecision, account *Account) {
+func setOpenAIAccountScheduleDecisionAccount(
+	decision *OpenAIAccountScheduleDecision,
+	account *Account,
+	reservePercent int,
+) {
 	if decision == nil || account == nil {
 		return
 	}
 	decision.SelectedAccountID = account.ID
 	decision.SelectedAccountType = account.Type
-	decision.GeneralLimit = account.GeneralConcurrencyLimit()
+	decision.GeneralLimit = account.GeneralConcurrencyLimit(reservePercent)
 	decision.HardLimit = account.Concurrency
-	decision.AffinityReserve = account.GetAffinityConcurrencyReserve()
+	decision.AffinityReserve = account.GetAffinityConcurrencyReserve(reservePercent)
 }
 
 func (s *prioritySaturationOpenAIAccountScheduler) ReportResult(accountID int64, success bool, firstTokenMs *int) {

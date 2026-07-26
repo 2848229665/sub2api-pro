@@ -69,78 +69,20 @@ function mountCapacity(overrides: Partial<Account>) {
 }
 
 describe('AccountCapacityCell', () => {
-  it('shows deterministic OpenAI general, reserve, and total capacities', () => {
+  it('shows the configured account concurrency without a per-account reserve split', () => {
     const wrapper = mountCapacity({
       id: 1,
       platform: 'openai',
       type: 'apikey',
       concurrency: 10,
       current_concurrency: 7,
-      affinity_concurrency_reserve: 3,
-      general_concurrency_limit: 7,
-      extra: {}
-    })
-
-    const badge = wrapper.get('[data-testid="capacity-badge"]')
-    expect(badge.attributes('data-max')).toBe('G7')
-    expect(badge.attributes('data-suffix')).toBe('R3 C10')
-    expect(badge.attributes('data-tooltip')).toBe('admin.accounts.capacity.concurrency.affinity')
-  })
-
-  it('falls back to account extra and shows zero reserve for OpenAI', () => {
-    const withReserve = mountCapacity({
-      id: 2,
-      platform: 'openai',
-      type: 'oauth',
-      concurrency: 6,
-      current_concurrency: 0,
-      extra: { affinity_concurrency_reserve: 2 }
-    })
-    expect(withReserve.get('[data-testid="capacity-badge"]').attributes('data-max')).toBe('G4')
-    expect(withReserve.get('[data-testid="capacity-badge"]').attributes('data-suffix')).toBe('R2 C6')
-
-    const withoutReserve = mountCapacity({
-      id: 3,
-      platform: 'openai',
-      type: 'apikey',
-      concurrency: 4,
-      current_concurrency: 0,
-      extra: {}
-    })
-    expect(withoutReserve.get('[data-testid="capacity-badge"]').attributes('data-max')).toBe('G4')
-    expect(withoutReserve.get('[data-testid="capacity-badge"]').attributes('data-suffix')).toBe('R0 C4')
-  })
-
-  it('clamps invalid legacy reserve data to preserve one general slot', () => {
-    const wrapper = mountCapacity({
-      id: 6,
-      platform: 'openai',
-      type: 'apikey',
-      concurrency: 4,
-      current_concurrency: 0,
       extra: { affinity_concurrency_reserve: 9 }
     })
 
     const badge = wrapper.get('[data-testid="capacity-badge"]')
-    expect(badge.attributes('data-max')).toBe('G1')
-    expect(badge.attributes('data-suffix')).toBe('R3 C4')
-  })
-
-  it('rejects malformed legacy values and repairs an inconsistent backend split', () => {
-    const wrapper = mountCapacity({
-      id: 7,
-      platform: 'openai',
-      type: 'apikey',
-      concurrency: 6,
-      current_concurrency: 0,
-      affinity_concurrency_reserve: -1,
-      general_concurrency_limit: 99,
-      extra: { affinity_concurrency_reserve: 2.5 }
-    })
-
-    const badge = wrapper.get('[data-testid="capacity-badge"]')
-    expect(badge.attributes('data-max')).toBe('G6')
-    expect(badge.attributes('data-suffix')).toBe('R0 C6')
+    expect(badge.attributes('data-max')).toBe('10')
+    expect(badge.attributes('data-suffix')).toBe('')
+    expect(badge.attributes('data-tooltip')).toBe('')
   })
 
   it('keeps non-OpenAI capacity badges unchanged', () => {
@@ -163,14 +105,12 @@ describe('AccountCapacityCell', () => {
       type: 'apikey',
       concurrency: 0,
       current_concurrency: 12,
-      affinity_concurrency_reserve: 0,
-      general_concurrency_limit: 0,
       extra: {}
     })
 
     const badge = wrapper.get('[data-testid="capacity-badge"]')
-    expect(badge.attributes('data-max')).toBe('G∞')
-    expect(badge.attributes('data-suffix')).toBe('R0 C∞')
+    expect(badge.attributes('data-max')).toBe('∞')
+    expect(badge.attributes('data-suffix')).toBe('')
     expect(badge.attributes('data-tooltip')).toBe('admin.accounts.capacity.concurrency.unlimited')
     expect(badge.attributes('data-color-class')).not.toContain('red')
   })
