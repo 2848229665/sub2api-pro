@@ -555,6 +555,13 @@ type AccountSelectionResult struct {
 	stickyBindingLegacyClaimed   bool
 }
 
+func (r *AccountSelectionResult) OpenAIAffinityReservePercent() int {
+	if r == nil || r.openAIRequest == nil {
+		return DefaultOpenAIPrioritySaturationAffinityReservePercent
+	}
+	return r.openAIRequest.affinityReservePercent()
+}
+
 // ClaudeUsage 表示Claude API返回的usage信息
 type ClaudeUsage struct {
 	InputTokens              int `json:"input_tokens"`

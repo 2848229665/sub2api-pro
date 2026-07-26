@@ -178,7 +178,7 @@ func (s *OpenAIGatewayService) selectOpenAIAffinityAccount(
 		return nil, account, false, nil
 	}
 
-	limit := account.ConcurrencyLimitForAffinity(true)
+	limit := account.ConcurrencyLimitForAffinity(true, req.affinityReservePercent())
 	result, err := s.tryAcquireAccountSlot(ctx, accountID, limit)
 	if err != nil {
 		return nil, account, false, err
@@ -197,7 +197,7 @@ func (s *OpenAIGatewayService) selectOpenAIAffinityAccount(
 		if err != nil {
 			return nil, account, false, err
 		}
-		return selection, account, s.openAIAffinityReserveInUse(ctx, account), nil
+		return selection, account, s.openAIAffinityReserveInUse(ctx, account, req.affinityReservePercent()), nil
 	}
 	if !waitWhenFull {
 		return nil, account, false, nil
@@ -220,12 +220,17 @@ func (s *OpenAIGatewayService) selectOpenAIAffinityAccount(
 	return selection, account, false, nil
 }
 
-func (s *OpenAIGatewayService) openAIAffinityReserveInUse(ctx context.Context, account *Account) bool {
-	if s == nil || s.concurrencyService == nil || account == nil || account.GetAffinityConcurrencyReserve() <= 0 {
+func (s *OpenAIGatewayService) openAIAffinityReserveInUse(
+	ctx context.Context,
+	account *Account,
+	reservePercent int,
+) bool {
+	if s == nil || s.concurrencyService == nil || account == nil ||
+		account.GetAffinityConcurrencyReserve(reservePercent) <= 0 {
 		return false
 	}
 	counts, err := s.concurrencyService.GetAccountConcurrencyBatch(ctx, []int64{account.ID})
-	return err == nil && counts[account.ID] > account.GeneralConcurrencyLimit()
+	return err == nil && counts[account.ID] > account.GeneralConcurrencyLimit(reservePercent)
 }
 
 func (s *OpenAIGatewayService) openAIAffinityWaitSelection(
@@ -242,7 +247,7 @@ func (s *OpenAIGatewayService) openAIAffinityWaitSelection(
 		PreserveStickyBinding: req.PreserveStickyBinding,
 		WaitPlan: &AccountWaitPlan{
 			AccountID:      account.ID,
-			MaxConcurrency: account.ConcurrencyLimitForAffinity(true),
+			MaxConcurrency: account.ConcurrencyLimitForAffinity(true, req.affinityReservePercent()),
 			Timeout:        cfg.StickySessionWaitTimeout,
 			MaxWaiting:     cfg.StickySessionMaxWaiting,
 		},
@@ -413,6 +418,7 @@ func (s *OpenAIGatewayService) rescheduleOpenAISelectionAfterStaleWait(
 		req.PreviousResponseCanMove,
 		req.CanTemporarilyOverflow,
 		req.UseUpstreamTokenCost,
+		req.AffinityReservePercent,
 	)
 	return selection, err
 }
@@ -444,7 +450,7 @@ func (s *OpenAIGatewayService) revalidateAcquiredOpenAIWaitSelection(
 		ownerID = req.StickyAccountID
 	}
 	affinity := ownerID > 0 && ownerID == fresh.ID
-	freshLimit := fresh.ConcurrencyLimitForAffinity(affinity)
+	freshLimit := fresh.ConcurrencyLimitForAffinity(affinity, req.affinityReservePercent())
 	selection.Account = fresh
 
 	if plan.MaxConcurrency == freshLimit {
@@ -680,7 +686,7 @@ func (s *OpenAIGatewayService) followCanonicalStickyOwner(
 		}
 
 		releaseOpenAISelection(provisional)
-		limit := owner.ConcurrencyLimitForAffinity(true)
+		limit := owner.ConcurrencyLimitForAffinity(true, req.affinityReservePercent())
 		result, err := s.tryAcquireAccountSlot(ctx, owner.ID, limit)
 		if err != nil {
 			return nil, err

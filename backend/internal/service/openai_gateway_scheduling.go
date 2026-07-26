@@ -881,24 +881,50 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, "", true, requirePrivacySet)
+	affinityReservePercent := s.openAIAdvancedSchedulerRuntimeSettings(ctx).affinityReservePercent
+	selection, err := s.selectAccountWithLoadAwareness(
+		ctx,
+		groupID,
+		PlatformOpenAI,
+		sessionHash,
+		requestedModel,
+		excludedIDs,
+		false,
+		"",
+		true,
+		requirePrivacySet,
+		affinityReservePercent,
+	)
 	if err != nil {
 		return nil, err
 	}
 	req := OpenAIAccountScheduleRequest{
-		GroupID:              groupID,
-		Platform:             PlatformOpenAI,
-		SessionHash:          sessionHash,
-		RequestedModel:       requestedModel,
-		ExcludedIDs:          excludedIDs,
-		StickyAccountID:      selectionSessionOwnerID(selection),
-		UseUpstreamTokenCost: true,
-		RequirePrivacySet:    requirePrivacySet,
+		GroupID:                groupID,
+		Platform:               PlatformOpenAI,
+		SessionHash:            sessionHash,
+		RequestedModel:         requestedModel,
+		ExcludedIDs:            excludedIDs,
+		StickyAccountID:        selectionSessionOwnerID(selection),
+		UseUpstreamTokenCost:   true,
+		RequirePrivacySet:      requirePrivacySet,
+		AffinityReservePercent: &affinityReservePercent,
 	}
 	return s.finalizeLegacyOpenAISelection(ctx, req, selection)
 }
 
-func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool, requirePrivacySet bool) (*AccountSelectionResult, error) {
+func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(
+	ctx context.Context,
+	groupID *int64,
+	platform string,
+	sessionHash string,
+	requestedModel string,
+	excludedIDs map[int64]struct{},
+	requireCompact bool,
+	requiredCapability OpenAIEndpointCapability,
+	useUpstreamTokenCost bool,
+	requirePrivacySet bool,
+	affinityReservePercent int,
+) (*AccountSelectionResult, error) {
 	platform = normalizeOpenAICompatiblePlatform(platform)
 	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
 		slog.Warn("channel pricing restriction blocked request",
@@ -917,16 +943,17 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		}
 	}
 	scheduleReq := OpenAIAccountScheduleRequest{
-		GroupID:              groupID,
-		Platform:             platform,
-		SessionHash:          sessionHash,
-		RequestedModel:       requestedModel,
-		ExcludedIDs:          excludedIDs,
-		RequireCompact:       requireCompact,
-		RequiredCapability:   requiredCapability,
-		StickyAccountID:      stickyAccountID,
-		UseUpstreamTokenCost: useUpstreamTokenCost,
-		RequirePrivacySet:    requirePrivacySet,
+		GroupID:                groupID,
+		Platform:               platform,
+		SessionHash:            sessionHash,
+		RequestedModel:         requestedModel,
+		ExcludedIDs:            excludedIDs,
+		RequireCompact:         requireCompact,
+		RequiredCapability:     requiredCapability,
+		StickyAccountID:        stickyAccountID,
+		UseUpstreamTokenCost:   useUpstreamTokenCost,
+		RequirePrivacySet:      requirePrivacySet,
+		AffinityReservePercent: &affinityReservePercent,
 	}
 	prepareSelection := func(selection *AccountSelectionResult, err error) (*AccountSelectionResult, error) {
 		if err != nil || selection == nil {
@@ -965,7 +992,10 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			}
 			effectiveExcludedIDs[account.ID] = struct{}{}
 		}
-		limit := account.ConcurrencyLimitForAffinity(stickyAccountID > 0 && stickyAccountID == account.ID)
+		limit := account.ConcurrencyLimitForAffinity(
+			stickyAccountID > 0 && stickyAccountID == account.ID,
+			scheduleReq.affinityReservePercent(),
+		)
 		result, err := s.tryAcquireAccountSlot(ctx, account.ID, limit)
 		if err == nil && result != nil && result.Acquired {
 			return prepareSelection(s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc))
@@ -978,7 +1008,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			if waitingCount < cfg.StickySessionMaxWaiting {
 				return prepareSelection(s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
 					AccountID:      account.ID,
-					MaxConcurrency: account.ConcurrencyLimitForAffinity(true),
+					MaxConcurrency: account.ConcurrencyLimitForAffinity(true, scheduleReq.affinityReservePercent()),
 					Timeout:        cfg.StickySessionWaitTimeout,
 					MaxWaiting:     cfg.StickySessionMaxWaiting,
 				}))
@@ -1034,7 +1064,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 					} else if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash, accountID)
 					} else {
-						result, err := s.tryAcquireAccountSlot(ctx, accountID, account.ConcurrencyLimitForAffinity(true))
+						result, err := s.tryAcquireAccountSlot(
+							ctx,
+							accountID,
+							account.ConcurrencyLimitForAffinity(true, scheduleReq.affinityReservePercent()),
+						)
 						if err == nil && result != nil && result.Acquired {
 							return prepareSelection(s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc))
 						}
@@ -1043,7 +1077,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 						if waitingCount < cfg.StickySessionMaxWaiting {
 							return prepareSelection(s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
 								AccountID:      accountID,
-								MaxConcurrency: account.ConcurrencyLimitForAffinity(true),
+								MaxConcurrency: account.ConcurrencyLimitForAffinity(true, scheduleReq.affinityReservePercent()),
 								Timeout:        cfg.StickySessionWaitTimeout,
 								MaxWaiting:     cfg.StickySessionMaxWaiting,
 							}))
@@ -1195,7 +1229,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				continue
 			}
 			affinity := stickyAccountID > 0 && fresh.ID == stickyAccountID
-			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.ConcurrencyLimitForAffinity(affinity))
+			result, err := s.tryAcquireAccountSlot(
+				ctx,
+				fresh.ID,
+				fresh.ConcurrencyLimitForAffinity(affinity, scheduleReq.affinityReservePercent()),
+			)
 			if err == nil && result != nil && result.Acquired {
 				selection, selectErr := prepareSelection(s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc))
 				return selection, true, selectErr
@@ -1235,7 +1273,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				continue
 			}
 			affinity := stickyAccountID > 0 && fresh.ID == stickyAccountID
-			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.ConcurrencyLimitForAffinity(affinity))
+			result, err := s.tryAcquireAccountSlot(
+				ctx,
+				fresh.ID,
+				fresh.ConcurrencyLimitForAffinity(affinity, scheduleReq.affinityReservePercent()),
+			)
 			if err == nil && result != nil && result.Acquired {
 				return prepareSelection(s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc))
 			}
@@ -1287,7 +1329,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		affinity := stickyAccountID > 0 && fresh.ID == stickyAccountID
 		return prepareSelection(s.newSelectionResult(ctx, fresh, false, nil, &AccountWaitPlan{
 			AccountID:      fresh.ID,
-			MaxConcurrency: fresh.ConcurrencyLimitForAffinity(affinity),
+			MaxConcurrency: fresh.ConcurrencyLimitForAffinity(affinity, scheduleReq.affinityReservePercent()),
 			Timeout:        cfg.FallbackWaitTimeout,
 			MaxWaiting:     cfg.FallbackMaxWaiting,
 		}))

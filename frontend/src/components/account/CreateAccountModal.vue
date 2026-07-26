@@ -2759,43 +2759,6 @@
           <p class="input-hint">{{ t('admin.accounts.billingRateMultiplierHint') }}</p>
         </div>
       </div>
-      <div
-        v-if="form.platform === 'openai'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <label class="input-label">{{ t('admin.accounts.affinityConcurrencyReserve') }}</label>
-        <input
-          v-model.number="affinityConcurrencyReserve"
-          type="number"
-          min="0"
-          step="1"
-          :max="accountCapacity.concurrency !== null && accountCapacity.concurrency > 0
-            ? accountCapacity.concurrency - 1
-            : undefined"
-          :disabled="accountCapacity.unlimited && affinityConcurrencyReserve === 0"
-          class="input"
-          data-testid="account-affinity-concurrency-reserve"
-          :aria-invalid="Boolean(accountCapacity.reserveError)"
-        />
-        <p v-if="accountCapacity.unlimited" class="input-hint">
-          {{ t('admin.accounts.affinityConcurrencyReserveUnlimited') }}
-        </p>
-        <p v-else class="input-hint">
-          {{ t('admin.accounts.affinityConcurrencyReserveHint', {
-            general: accountCapacity.general ?? '-',
-            reserve: accountCapacity.reserve ?? affinityConcurrencyReserve,
-            total: accountCapacity.concurrency ?? form.concurrency
-          }) }}
-        </p>
-        <p class="input-hint">{{ t('admin.accounts.affinityConcurrencyReserveIdleHint') }}</p>
-        <p
-          v-if="accountCapacity.reserveError"
-          class="mt-1 text-xs text-red-600 dark:text-red-400"
-          data-testid="account-affinity-concurrency-reserve-error"
-        >
-          {{ capacityErrorText(accountCapacity.reserveError) }}
-        </p>
-      </div>
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
         <input v-model="expiresAtInput" type="datetime-local" class="input" />
@@ -3834,7 +3797,6 @@ const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
 const openaiPassthroughEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
-const affinityConcurrencyReserve = ref(0)
 const openAILongContextBillingTouched = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
@@ -4130,7 +4092,6 @@ const form = reactive({
 const accountCapacity = computed(() =>
   validateAccountCapacity(
     form.concurrency,
-    form.platform === 'openai' ? affinityConcurrencyReserve.value : 0,
     { allowUnlimited: accountAllowsUnlimitedConcurrency.value }
   )
 )
@@ -4684,7 +4645,6 @@ const resetForm = () => {
   form.credentials = {}
   form.proxy_id = null
   form.concurrency = 10
-  affinityConcurrencyReserve.value = 0
   form.load_factor = null
   form.priority = 1
   form.rate_multiplier = 1
@@ -4795,7 +4755,6 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   }
 
   const extra: Record<string, unknown> = { ...(base || {}) }
-  extra.affinity_concurrency_reserve = affinityConcurrencyReserve.value
   if (accountCategory.value === 'oauth-based') {
     extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
     extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
@@ -4981,11 +4940,6 @@ const handleSubmit = async () => {
     appStore.showError(capacityErrorText(capacity.concurrencyError))
     return
   }
-  if (form.platform === 'openai' && capacity.reserveError) {
-    appStore.showError(capacityErrorText(capacity.reserveError))
-    return
-  }
-
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
     if (!isGrokSSOInputMethod.value && !form.name.trim()) {

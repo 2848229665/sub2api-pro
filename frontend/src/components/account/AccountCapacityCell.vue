@@ -39,7 +39,6 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
-import { isNonNegativeInteger } from '@/utils/accountCapacity'
 import CapacityBadge from '@/components/account/CapacityBadge.vue'
 import QuotaBadge from '@/components/account/QuotaBadge.vue'
 
@@ -52,51 +51,14 @@ const { t } = useI18n()
 // ====== 并发 ======
 const currentConcurrency = computed(() => props.account.current_concurrency || 0)
 const isUnlimitedConcurrency = computed(() => props.account.concurrency <= 0)
-const showOpenAIConcurrencySplit = computed(() => props.account.platform === 'openai')
-const configuredAffinityConcurrencyReserve = computed(() => {
-  const value = props.account.affinity_concurrency_reserve
-  if (isNonNegativeInteger(value)) return value
-  const extraValue = props.account.extra?.affinity_concurrency_reserve
-  return isNonNegativeInteger(extraValue) ? extraValue : 0
-})
-
-const affinityConcurrencyReserve = computed(() => {
-  if (isUnlimitedConcurrency.value) return 0
-  return Math.min(configuredAffinityConcurrencyReserve.value, props.account.concurrency - 1)
-})
-
-const generalConcurrencyLimit = computed(() => {
-  const derived = props.account.concurrency - affinityConcurrencyReserve.value
-  const backendValue = props.account.general_concurrency_limit
-  return isNonNegativeInteger(backendValue) &&
-    backendValue + affinityConcurrencyReserve.value === props.account.concurrency
-    ? backendValue
-    : derived
-})
-
-const concurrencyMaxDisplay = computed(() => {
-  if (!showOpenAIConcurrencySplit.value) {
-    return isUnlimitedConcurrency.value ? '∞' : props.account.concurrency
-  }
-  return isUnlimitedConcurrency.value ? 'G∞' : `G${generalConcurrencyLimit.value}`
-})
-const concurrencySuffix = computed(() =>
-  showOpenAIConcurrencySplit.value
-    ? isUnlimitedConcurrency.value
-      ? 'R0 C∞'
-      : `R${affinityConcurrencyReserve.value} C${props.account.concurrency}`
-    : ''
+const concurrencyMaxDisplay = computed(() =>
+  isUnlimitedConcurrency.value ? '∞' : props.account.concurrency
 )
+const concurrencySuffix = ''
 
 const concurrencyTooltip = computed(() =>
   isUnlimitedConcurrency.value
     ? t('admin.accounts.capacity.concurrency.unlimited')
-    : showOpenAIConcurrencySplit.value
-    ? t('admin.accounts.capacity.concurrency.affinity', {
-        total: props.account.concurrency,
-        general: generalConcurrencyLimit.value,
-        reserve: affinityConcurrencyReserve.value
-      })
     : ''
 )
 
@@ -109,9 +71,6 @@ const concurrencyClass = computed(() => {
       : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
   }
   if (current >= max) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-  if (affinityConcurrencyReserve.value > 0 && current >= generalConcurrencyLimit.value) {
-    return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-  }
   if (current > 0) return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
   return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
 })

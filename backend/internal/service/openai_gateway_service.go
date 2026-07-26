@@ -418,24 +418,23 @@ type OpenAIGatewayService struct {
 	liveAttestation       liveattestation.Provider
 	liveAttestationCipher SecretEncryptor
 
-	openaiWSPoolOnce               sync.Once
-	openaiWSStateStoreOnce         sync.Once
-	openaiAccountStatsOnce         sync.Once
-	openaiSchedulerOnce            sync.Once
-	openaiPrioritySaturationOnce   sync.Once
-	openaiSchedulerConflictLogOnce sync.Once
-	openaiProxyStreamCircuitOnce   sync.Once
-	openaiWSPassthroughDialerOnce  sync.Once
-	openaiModelTransientOnce       sync.Once
-	agentIdentityTaskMu            sync.Mutex
-	openaiWSPool                   *openAIWSConnPool
-	openaiWSStateStore             OpenAIWSStateStore
-	openaiScheduler                OpenAIAccountScheduler
-	openaiPrioritySaturation       OpenAIAccountScheduler
-	openaiWSPassthroughDialer      openAIWSClientDialer
-	openaiAccountStats             *openAIAccountRuntimeStats
-	openaiModelTransient           *openAIAccountModelTransientState
-	openaiProxyStreamCircuit       *openAIProxyStreamCircuit
+	openaiWSPoolOnce              sync.Once
+	openaiWSStateStoreOnce        sync.Once
+	openaiAccountStatsOnce        sync.Once
+	openaiSchedulerOnce           sync.Once
+	openaiPrioritySaturationOnce  sync.Once
+	openaiProxyStreamCircuitOnce  sync.Once
+	openaiWSPassthroughDialerOnce sync.Once
+	openaiModelTransientOnce      sync.Once
+	agentIdentityTaskMu           sync.Mutex
+	openaiWSPool                  *openAIWSConnPool
+	openaiWSStateStore            OpenAIWSStateStore
+	openaiScheduler               OpenAIAccountScheduler
+	openaiPrioritySaturation      OpenAIAccountScheduler
+	openaiWSPassthroughDialer     openAIWSClientDialer
+	openaiAccountStats            *openAIAccountRuntimeStats
+	openaiModelTransient          *openAIAccountModelTransientState
+	openaiProxyStreamCircuit      *openAIProxyStreamCircuit
 
 	openaiWSFallbackUntil               sync.Map // key: int64(accountID), value: time.Time
 	openaiAccountRuntimeBlockUntil      sync.Map // key: int64(accountID), value: time.Time

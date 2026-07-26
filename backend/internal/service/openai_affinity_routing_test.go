@@ -29,9 +29,9 @@ func TestOpenAIAffinityRouting_FullSessionOverflowHonorsExplicitPermissionAcross
 	for _, tc := range openAIAffinityPolicyTestCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			groupID := int64(81)
-			owner := prioritySaturationTestAccount(8101, 1, 1, 0)
+			owner := prioritySaturationTestAccount(8101, 1, 1)
 			owner.GroupIDs = []int64{groupID}
-			overflow := prioritySaturationTestAccount(8102, 2, 2, 0)
+			overflow := prioritySaturationTestAccount(8102, 2, 2)
 			overflow.GroupIDs = []int64{groupID}
 			cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{
 				"openai:affinity-policy-session": owner.ID,
@@ -87,9 +87,9 @@ func TestOpenAIAffinityRouting_ImmovableSessionWaitsAcrossPolicies(t *testing.T)
 	for _, tc := range openAIAffinityPolicyTestCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			groupID := int64(82)
-			owner := prioritySaturationTestAccount(8201, 1, 1, 0)
+			owner := prioritySaturationTestAccount(8201, 1, 1)
 			owner.GroupIDs = []int64{groupID}
-			other := prioritySaturationTestAccount(8202, 2, 1, 0)
+			other := prioritySaturationTestAccount(8202, 2, 1)
 			other.GroupIDs = []int64{groupID}
 			cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{
 				"openai:immovable-policy-session": owner.ID,
@@ -137,10 +137,10 @@ func TestOpenAIAffinityRouting_MovablePreviousResponseOverflowsAcrossPolicies(t 
 	for _, tc := range openAIAffinityPolicyTestCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			groupID := int64(83)
-			owner := prioritySaturationTestAccount(8301, 1, 1, 0)
+			owner := prioritySaturationTestAccount(8301, 1, 1)
 			owner.GroupIDs = []int64{groupID}
 			owner.Extra["openai_apikey_responses_websockets_v2_enabled"] = true
-			overflow := prioritySaturationTestAccount(8302, 2, 2, 0)
+			overflow := prioritySaturationTestAccount(8302, 2, 2)
 			overflow.GroupIDs = []int64{groupID}
 			overflow.Extra["openai_apikey_responses_websockets_v2_enabled"] = true
 			cache := &schedulerTestGatewayCache{}
@@ -203,7 +203,7 @@ func TestOpenAIAffinityRouting_MissingImmovablePreviousResponseRejectsAcrossPoli
 	for _, tc := range openAIAffinityPolicyTestCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			groupID := int64(84)
-			account := prioritySaturationTestAccount(8401, 1, 1, 0)
+			account := prioritySaturationTestAccount(8401, 1, 1)
 			account.GroupIDs = []int64{groupID}
 			svc := &OpenAIGatewayService{
 				accountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{account}},
@@ -242,7 +242,7 @@ func TestOpenAIAffinityRouting_ExcludedOwnerWithoutFallbackNeverWaitsAcrossPolic
 	for _, tc := range openAIAffinityPolicyTestCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			groupID := int64(85)
-			owner := prioritySaturationTestAccount(8501, 1, 1, 0)
+			owner := prioritySaturationTestAccount(8501, 1, 1)
 			owner.GroupIDs = []int64{groupID}
 			cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{
 				"openai:excluded-owner-session": owner.ID,
@@ -290,9 +290,9 @@ func TestOpenAIAffinityRouting_ImmovableClaimRaceRejectsExcludedOwnerAcrossPolic
 	for _, tc := range openAIAffinityPolicyTestCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			groupID := int64(86)
-			owner := prioritySaturationTestAccount(8601, 1, 2, 0)
+			owner := prioritySaturationTestAccount(8601, 1, 2)
 			owner.GroupIDs = []int64{groupID}
-			provisional := prioritySaturationTestAccount(8602, 2, 2, 0)
+			provisional := prioritySaturationTestAccount(8602, 2, 2)
 			provisional.GroupIDs = []int64{groupID}
 			sessionCache := &rotatingPrioritySaturationSessionCache{
 				prioritySaturationSessionCache: &prioritySaturationSessionCache{

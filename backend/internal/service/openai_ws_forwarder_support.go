@@ -404,7 +404,18 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 		return nil, nil
 	}
 
-	limit := account.ConcurrencyLimitForAffinity(true)
+	affinityReservePercent := s.openAIAdvancedSchedulerRuntimeSettings(ctx).affinityReservePercent
+	req := OpenAIAccountScheduleRequest{
+		GroupID:                groupID,
+		Platform:               PlatformOpenAI,
+		PreviousResponseID:     previousResponseID,
+		RequestedModel:         requestedModel,
+		RequiredCapability:     requiredCapability,
+		RequireCompact:         requireCompact,
+		ExcludedIDs:            excludedIDs,
+		AffinityReservePercent: &affinityReservePercent,
+	}
+	limit := account.ConcurrencyLimitForAffinity(true, req.affinityReservePercent())
 	result, acquireErr := s.tryAcquireAccountSlot(ctx, accountID, limit)
 	if acquireErr == nil && result.Acquired {
 		logOpenAIWSBindResponseAccountWarn(
@@ -413,16 +424,16 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 			responseID,
 			store.BindResponseAccount(ctx, derefGroupID(groupID), responseID, accountID, s.openAIWSResponseStickyTTL()),
 		)
-		return &AccountSelectionResult{
+		return attachOpenAISelectionRequest(&AccountSelectionResult{
 			Account:     account,
 			Acquired:    true,
 			ReleaseFunc: result.ReleaseFunc,
-		}, nil
+		}, req), nil
 	}
 
 	cfg := s.schedulingConfig()
 	if s.concurrencyService != nil {
-		return &AccountSelectionResult{
+		return attachOpenAISelectionRequest(&AccountSelectionResult{
 			Account: account,
 			WaitPlan: &AccountWaitPlan{
 				AccountID:      accountID,
@@ -430,7 +441,7 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 				Timeout:        cfg.StickySessionWaitTimeout,
 				MaxWaiting:     cfg.StickySessionMaxWaiting,
 			},
-		}, nil
+		}, req), nil
 	}
 	return nil, nil
 }

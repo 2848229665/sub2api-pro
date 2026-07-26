@@ -461,6 +461,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.OpenAIPrioritySaturationEnabled != after.OpenAIPrioritySaturationEnabled {
 		changed = append(changed, service.SettingKeyOpenAIPrioritySaturationEnabled)
 	}
+	if before.OpenAIPrioritySaturationAffinityReservePercent != after.OpenAIPrioritySaturationAffinityReservePercent {
+		changed = append(changed, service.SettingKeyOpenAIPrioritySaturationAffinityReservePercent)
+	}
 	if before.OpenAIAdvancedSchedulerStickyWeightedEnabled != after.OpenAIAdvancedSchedulerStickyWeightedEnabled {
 		changed = append(changed, "openai_advanced_scheduler_sticky_weighted_enabled")
 	}

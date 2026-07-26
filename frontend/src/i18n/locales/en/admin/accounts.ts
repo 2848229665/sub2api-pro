@@ -795,17 +795,9 @@ export default {
       proxy: 'Proxy',
       noProxy: 'No Proxy',
       concurrency: 'Concurrency',
-      affinityConcurrencyReserve: 'Session-affinity concurrency reserve',
-      affinityConcurrencyReserveHint: 'General G={general}, affinity reserve R={reserve}, total C={total}. Every OpenAI scheduling policy observes this capacity split.',
-      affinityConcurrencyReserveBulkHint: 'When only R changes, the backend validates it against each account’s existing C. When C also changes, 0 ≤ R < C is required.',
-      affinityConcurrencyReserveUnlimited: 'C=0 means unlimited concurrency. Unlimited accounts do not use protected affinity slots, so R must be 0.',
-      affinityConcurrencyReserveIdleHint: 'The hard reserve is only available to requests with established account affinity and may remain idle without affinity traffic.',
       capacityValidation: {
         concurrencyNonNegativeInteger: 'Total concurrency C must be a non-negative integer.',
-        concurrencyMustBePositiveInteger: 'This account type requires total concurrency C to be a positive integer.',
-        reserveNonNegativeInteger: 'Affinity reserve R must be a non-negative integer.',
-        reserveMustBeZeroWhenUnlimited: 'C=0 means unlimited concurrency, so affinity reserve R must be 0.',
-        reserveMustBeLessThanConcurrency: 'Affinity reserve R must be lower than total concurrency C.'
+        concurrencyMustBePositiveInteger: 'This account type requires total concurrency C to be a positive integer.'
       },
       loadFactor: 'Load Factor',
       loadFactorHint: 'Higher load factor increases scheduling frequency',

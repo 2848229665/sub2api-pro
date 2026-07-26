@@ -356,7 +356,11 @@ func TestAdvancedSchedulerReacquiresOnceWhenDBConcurrencyChanges(t *testing.T) {
 		concurrencyService: NewConcurrencyService(cache),
 	}}
 
-	selection, _, err := scheduler.tryAcquireOpenAISelectionOrder(context.Background(), OpenAIAccountScheduleRequest{Platform: PlatformOpenAI}, []openAIAccountCandidateScore{{
+	reservePercent := 0
+	selection, _, err := scheduler.tryAcquireOpenAISelectionOrder(context.Background(), OpenAIAccountScheduleRequest{
+		Platform:               PlatformOpenAI,
+		AffinityReservePercent: &reservePercent,
+	}, []openAIAccountCandidateScore{{
 		account: stale, loadInfo: &AccountLoadInfo{AccountID: stale.ID}, loadKnown: true,
 	}})
 	require.NoError(t, err)

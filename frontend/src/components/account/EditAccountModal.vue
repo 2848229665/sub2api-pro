@@ -1459,43 +1459,6 @@
           <p class="input-hint">{{ t('admin.accounts.billingRateMultiplierHint') }}</p>
         </div>
       </div>
-      <div
-        v-if="account?.platform === 'openai'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <label class="input-label">{{ t('admin.accounts.affinityConcurrencyReserve') }}</label>
-        <input
-          v-model.number="affinityConcurrencyReserve"
-          type="number"
-          min="0"
-          step="1"
-          :max="accountCapacity.concurrency !== null && accountCapacity.concurrency > 0
-            ? accountCapacity.concurrency - 1
-            : undefined"
-          :disabled="accountCapacity.unlimited && affinityConcurrencyReserve === 0"
-          class="input"
-          data-testid="account-affinity-concurrency-reserve"
-          :aria-invalid="Boolean(accountCapacity.reserveError)"
-        />
-        <p v-if="accountCapacity.unlimited" class="input-hint">
-          {{ t('admin.accounts.affinityConcurrencyReserveUnlimited') }}
-        </p>
-        <p v-else class="input-hint">
-          {{ t('admin.accounts.affinityConcurrencyReserveHint', {
-            general: accountCapacity.general ?? '-',
-            reserve: accountCapacity.reserve ?? affinityConcurrencyReserve,
-            total: accountCapacity.concurrency ?? form.concurrency
-          }) }}
-        </p>
-        <p class="input-hint">{{ t('admin.accounts.affinityConcurrencyReserveIdleHint') }}</p>
-        <p
-          v-if="accountCapacity.reserveError"
-          class="mt-1 text-xs text-red-600 dark:text-red-400"
-          data-testid="account-affinity-concurrency-reserve-error"
-        >
-          {{ capacityErrorText(accountCapacity.reserveError) }}
-        </p>
-      </div>
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
         <input v-model="expiresAtInput" type="datetime-local" class="input" />
@@ -2897,7 +2860,6 @@ const customBaseUrl = ref('')
 // OpenAI 自动透传开关（OAuth/API Key）
 const openaiPassthroughEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
-const affinityConcurrencyReserve = ref(0)
 // OpenAI 订阅档位（Plus/Pro/Free）手动覆盖值,存于 credentials.plan_type;'' 表示清空/自动识别
 const editPlanType = ref<string>('')
 const openAICompactMode = ref<OpenAICompactMode>('auto')
@@ -3217,7 +3179,6 @@ const form = reactive({
 const accountCapacity = computed(() =>
   validateAccountCapacity(
     form.concurrency,
-    props.account?.platform === 'openai' ? affinityConcurrencyReserve.value : 0,
     { allowUnlimited: accountAllowsUnlimitedConcurrency.value }
   )
 )
@@ -3343,11 +3304,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 	autoPause5hDisabled.value = extra?.auto_pause_5h_disabled === true
 	autoPause7dDisabled.value = extra?.auto_pause_7d_disabled === true
 	upstreamBillingAutoProbeEnabled.value = extra?.upstream_billing_probe_enabled === true
-	const reserveValue =
-		newAccount.affinity_concurrency_reserve ?? extra?.affinity_concurrency_reserve
-	affinityConcurrencyReserve.value =
-		typeof reserveValue === 'number' ? reserveValue : 0
-
   // Load OpenAI passthrough toggle (OpenAI OAuth/SetupToken/API Key)
   openaiPassthroughEnabled.value = false
   openAILongContextBillingEnabled.value = false
@@ -4109,11 +4065,6 @@ const handleSubmit = async () => {
     appStore.showError(capacityErrorText(capacity.concurrencyError))
     return
   }
-  if (props.account.platform === 'openai' && capacity.reserveError) {
-    appStore.showError(capacityErrorText(capacity.reserveError))
-    return
-  }
-
   if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
     appStore.showError(t('admin.accounts.pleaseSelectStatus'))
     return
@@ -4587,14 +4538,6 @@ const handleSubmit = async () => {
       } else {
         newExtra.web_search_emulation = webSearchEmulationMode.value
       }
-      updatePayload.extra = newExtra
-    }
-
-    if (props.account.platform === 'openai') {
-      const currentExtra = (updatePayload.extra as Record<string, unknown>) ||
-        (props.account.extra as Record<string, unknown>) || {}
-      const newExtra: Record<string, unknown> = { ...currentExtra }
-      newExtra.affinity_concurrency_reserve = affinityConcurrencyReserve.value
       updatePayload.extra = newExtra
     }
 

@@ -36,23 +36,20 @@ func TestInitializeDefaultSettingsEnablesPrioritySaturation(t *testing.T) {
 
 	require.NoError(t, svc.InitializeDefaultSettings(context.Background()))
 	require.Equal(t, "true", repo.values[SettingKeyOpenAIPrioritySaturationEnabled])
+	require.Equal(t, "20", repo.values[SettingKeyOpenAIPrioritySaturationAffinityReservePercent])
 	require.Equal(t, "false", repo.values[openAIAdvancedSchedulerSettingKey])
 }
 
-func TestValidateOpenAISchedulerSwitches(t *testing.T) {
-	for _, settings := range []*SystemSettings{
-		{},
-		{OpenAIAdvancedSchedulerEnabled: true},
-		{OpenAIPrioritySaturationEnabled: true},
-	} {
-		require.NoError(t, validateOpenAISchedulerSwitches(settings))
+func TestValidateOpenAIPrioritySaturationAffinityReservePercent(t *testing.T) {
+	for _, percent := range []int{0, 20, 99} {
+		require.NoError(t, validateOpenAIPrioritySaturationAffinityReservePercent(percent))
 	}
-
-	err := validateOpenAISchedulerSwitches(&SystemSettings{
-		OpenAIAdvancedSchedulerEnabled:  true,
-		OpenAIPrioritySaturationEnabled: true,
-	})
-	require.ErrorContains(t, err, "cannot both be enabled")
+	require.Error(t, validateOpenAIPrioritySaturationAffinityReservePercent(-1))
+	require.Error(t, validateOpenAIPrioritySaturationAffinityReservePercent(100))
+	require.Equal(t, 20, parseOpenAIPrioritySaturationAffinityReservePercent(""))
+	require.Equal(t, 20, parseOpenAIPrioritySaturationAffinityReservePercent("invalid"))
+	require.Equal(t, 20, parseOpenAIPrioritySaturationAffinityReservePercent("100"))
+	require.Equal(t, 0, parseOpenAIPrioritySaturationAffinityReservePercent("0"))
 }
 
 func TestRefreshCachedSettingsPreservesPrioritySaturationSwitch(t *testing.T) {
@@ -61,14 +58,32 @@ func TestRefreshCachedSettingsPreservesPrioritySaturationSwitch(t *testing.T) {
 
 	service := &SettingService{}
 	service.refreshCachedSettings(&SystemSettings{
-		OpenAIPrioritySaturationEnabled: true,
+		OpenAIPrioritySaturationEnabled:                true,
+		OpenAIPrioritySaturationAffinityReservePercent: 35,
 	})
 
 	cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting)
 	require.True(t, ok)
 	require.NotNil(t, cached)
 	require.True(t, cached.prioritySaturationEnabled)
+	require.Equal(t, 35, cached.affinityReservePercent)
 	require.False(t, cached.enabled)
+}
+
+func TestPrioritySaturationTakesPrecedenceWhenBothSchedulersAreEnabled(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
+
+	svc := &OpenAIGatewayService{}
+	openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
+		enabled:                   true,
+		prioritySaturationEnabled: true,
+		affinityReservePercent:    20,
+		expiresAt:                 time.Now().Add(time.Minute).UnixNano(),
+	})
+
+	_, ok := svc.getOpenAIAccountScheduler(t.Context()).(*prioritySaturationOpenAIAccountScheduler)
+	require.True(t, ok)
 }
 
 func TestOpenAIAccountSchedulersShareRuntimeStatsAcrossPolicySwitch(t *testing.T) {

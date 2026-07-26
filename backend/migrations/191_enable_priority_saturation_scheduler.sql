@@ -1,18 +1,6 @@
--- Enable deterministic priority-saturation scheduling by default. Preserve an
--- explicitly enabled weighted-topk scheduler so the two mutually exclusive
--- switches cannot both become true during upgrade.
+-- Enable deterministic priority-saturation scheduling by default. The
+-- weighted-topk switch is independent and may remain enabled; priority
+-- saturation takes precedence while its switch is on.
 INSERT INTO settings (key, value, updated_at)
-SELECT
-    'openai_priority_saturation_enabled',
-    CASE
-        WHEN EXISTS (
-            SELECT 1
-            FROM settings
-            WHERE key = 'openai_advanced_scheduler_enabled'
-              AND LOWER(TRIM(value)) = 'true'
-        )
-        THEN 'false'
-        ELSE 'true'
-    END,
-    NOW()
+VALUES ('openai_priority_saturation_enabled', 'true', NOW())
 ON CONFLICT (key) DO NOTHING;

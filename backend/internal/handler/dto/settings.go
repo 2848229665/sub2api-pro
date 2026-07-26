@@ -217,6 +217,7 @@ type SystemSettings struct {
 	OpenAIOAuthSchedulingRateMultiplier                    float64 `json:"openai_oauth_scheduling_rate_multiplier"`
 	OpenAIAdvancedSchedulerEnabled                         bool    `json:"openai_advanced_scheduler_enabled"`
 	OpenAIPrioritySaturationEnabled                        bool    `json:"openai_priority_saturation_enabled"`
+	OpenAIPrioritySaturationAffinityReservePercent         int     `json:"openai_priority_saturation_affinity_reserve_percent"`
 	OpenAIAdvancedSchedulerStickyWeightedEnabled           bool    `json:"openai_advanced_scheduler_sticky_weighted_enabled"`
 	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled     bool    `json:"openai_advanced_scheduler_subscription_priority_enabled"`
 	OpenAIAdvancedSchedulerLBTopK                          string  `json:"openai_advanced_scheduler_lb_top_k"`

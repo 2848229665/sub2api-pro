@@ -250,16 +250,13 @@ func TestDefaultOpenAIAccountScheduler_AtomicAcquireOverridesStaleFullSnapshot(t
 		Schedulable: true,
 		Concurrency: 3,
 		Priority:    1,
-		Extra: map[string]any{
-			AccountExtraAffinityConcurrencyReserve: 1,
-		},
 	}
 	acquiredIDs := make([]int64, 0, 1)
 	cache := schedulerTestConcurrencyCache{
 		loadMap: map[int64]*AccountLoadInfo{
 			account.ID: {
 				AccountID:          account.ID,
-				CurrentConcurrency: account.GeneralConcurrencyLimit(),
+				CurrentConcurrency: account.GeneralConcurrencyLimit(34),
 				LoadRate:           100,
 			},
 		},
@@ -274,8 +271,9 @@ func TestDefaultOpenAIAccountScheduler_AtomicAcquireOverridesStaleFullSnapshot(t
 	selection, _, err := scheduler.tryAcquireOpenAISelectionOrder(
 		context.Background(),
 		OpenAIAccountScheduleRequest{
-			Platform:          PlatformOpenAI,
-			RequiredTransport: OpenAIUpstreamTransportHTTPSSE,
+			Platform:               PlatformOpenAI,
+			RequiredTransport:      OpenAIUpstreamTransportHTTPSSE,
+			AffinityReservePercent: intPtrForTest(34),
 		},
 		[]openAIAccountCandidateScore{{
 			account:   &account,
@@ -301,9 +299,6 @@ func TestOpenAISelectAccountWithLoadAwareness_AtomicAcquireOverridesStaleFullSna
 		Schedulable: true,
 		Concurrency: 3,
 		Priority:    1,
-		Extra: map[string]any{
-			AccountExtraAffinityConcurrencyReserve: 1,
-		},
 	}
 	acquiredIDs := make([]int64, 0, 1)
 	cache := schedulerTestConcurrencyCache{
@@ -3468,6 +3463,9 @@ func TestOpenAIGatewayService_OpenAIAccountSchedulerMetrics(t *testing.T) {
 }
 
 func TestOpenAIAccountSchedulerMetrics_CountGeneralReserveRejectionsAcrossPolicies(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
+
 	ctx := context.Background()
 	groupID := int64(13)
 	account := Account{
@@ -3478,9 +3476,6 @@ func TestOpenAIAccountSchedulerMetrics_CountGeneralReserveRejectionsAcrossPolici
 		Schedulable: true,
 		Concurrency: 2,
 		GroupIDs:    []int64{groupID},
-		Extra: map[string]any{
-			AccountExtraAffinityConcurrencyReserve: 1,
-		},
 	}
 	newService := func() *OpenAIGatewayService {
 		return &OpenAIGatewayService{
@@ -3497,19 +3492,25 @@ func TestOpenAIAccountSchedulerMetrics_CountGeneralReserveRejectionsAcrossPolici
 		svc := newService()
 		scheduler := newDefaultOpenAIAccountScheduler(svc, nil)
 		selection, decision, err := scheduler.Select(ctx, OpenAIAccountScheduleRequest{
-			GroupID:        &groupID,
-			Platform:       PlatformOpenAI,
-			RequestedModel: "gpt-5.1",
+			GroupID:                &groupID,
+			Platform:               PlatformOpenAI,
+			RequestedModel:         "gpt-5.1",
+			AffinityReservePercent: intPtrForTest(50),
 		})
 		require.NoError(t, err)
 		require.NotNil(t, selection)
 		require.NotNil(t, selection.WaitPlan)
 		require.Equal(t, 1, decision.GeneralRejectCount)
+		require.Equal(t, 1, decision.AffinityReserve)
 		require.Equal(t, int64(1), scheduler.SnapshotMetrics().GeneralRejectTotal)
 	})
 
 	t.Run("legacy scheduler decision and shared snapshot", func(t *testing.T) {
 		resetOpenAIAdvancedSchedulerSettingCacheForTest()
+		openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
+			affinityReservePercent: 50,
+			expiresAt:              time.Now().Add(time.Minute).UnixNano(),
+		})
 		svc := newService()
 		selection, decision, err := svc.SelectAccountWithSchedulerForCapabilityOptions(
 			ctx,
@@ -3530,6 +3531,7 @@ func TestOpenAIAccountSchedulerMetrics_CountGeneralReserveRejectionsAcrossPolici
 		require.NotNil(t, selection)
 		require.NotNil(t, selection.WaitPlan)
 		require.Equal(t, 1, decision.GeneralRejectCount)
+		require.Equal(t, 1, decision.AffinityReserve)
 		require.Equal(t, int64(1), svc.SnapshotOpenAIAccountSchedulerMetrics().GeneralRejectTotal)
 	})
 }
