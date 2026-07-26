@@ -117,7 +117,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 	routingStart := time.Now()
 
 	for {
-		selection, _, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
+		selection, _, err := h.gatewayService.SelectAccountWithSchedulerForCapabilityOptions(
 			c.Request.Context(),
 			apiKey.GroupID,
 			"",
@@ -127,8 +127,11 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 			service.OpenAIUpstreamTransportHTTPSSE,
 			service.OpenAIEndpointCapabilityEmbeddings,
 			false,
-			false,
-			true,
+			service.OpenAIAccountSchedulingOptions{
+				CanTemporarilyOverflow: true,
+				UseUpstreamTokenCost:   true,
+				Platform:               service.PlatformOpenAI,
+			},
 		)
 		if err != nil {
 			if failoverClientGone(c) {
@@ -165,10 +168,12 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		account := selection.Account
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, accountAcquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, "", selection, false, &streamStarted, reqLog)
+		accountReleaseFunc, accountAcquired, _ := h.acquireResponsesAccountSlot(c, apiKey.GroupID, "", selection, false, false, &streamStarted, reqLog)
 		if !accountAcquired {
 			return
 		}
+		account = selection.Account
+		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()

@@ -188,6 +188,38 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	if maxAccountSwitches <= 0 {
 		maxAccountSwitches = 3
 	}
+	retryAfterEligibilityRejection := func(
+		selection *service.AccountSelectionResult,
+		account *service.Account,
+		eligibilityReason string,
+		eligibilityErr error,
+	) bool {
+		if rejectErr := h.gatewayService.RejectAcquiredOpenAISelection(
+			requestCtx,
+			apiKey.GroupID,
+			sessionHash,
+			selection,
+		); rejectErr != nil {
+			reqLog.Warn("grok_media.account_selection_rollback_failed",
+				zap.Int64("account_id", account.ID),
+				zap.Error(rejectErr),
+			)
+		}
+		mediaEligibilityRejected = true
+		failedAccountIDs[account.ID] = struct{}{}
+		reqLog.Warn("grok_media.account_eligibility_rejected",
+			zap.Int64("account_id", account.ID),
+			zap.String("reason", eligibilityReason),
+			zap.Bool("probe_failed", eligibilityErr != nil),
+		)
+		if switchCount >= maxAccountSwitches {
+			markOpsRoutingCapacityLimited(c)
+			h.errorResponse(c, http.StatusServiceUnavailable, "grok_media_no_eligible_account", "No eligible Grok media accounts")
+			return false
+		}
+		switchCount++
+		return true
+	}
 	routingStart := time.Now()
 	requiredCapability := grokMediaRequiredCapability(endpoint)
 
@@ -195,7 +227,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		if failoverClientGone(c) {
 			return
 		}
-		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
+		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForCapabilityOptions(
 			requestCtx,
 			apiKey.GroupID,
 			"",
@@ -205,9 +237,10 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			service.OpenAIUpstreamTransportHTTPSSE,
 			requiredCapability,
 			false,
-			false,
-			false,
-			service.PlatformGrok,
+			service.OpenAIAccountSchedulingOptions{
+				CanTemporarilyOverflow: endpoint.IsGenerationRequest(),
+				Platform:               service.PlatformGrok,
+			},
 		)
 		if err != nil {
 			if failoverClientGone(c) {
@@ -253,6 +286,17 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			return
 		}
 		if boundLookupAccountID > 0 && selection.Account.ID != boundLookupAccountID {
+			if rejectErr := h.gatewayService.RejectAcquiredOpenAISelection(
+				requestCtx,
+				apiKey.GroupID,
+				sessionHash,
+				selection,
+			); rejectErr != nil {
+				reqLog.Warn("grok_media.video_lookup_selection_rollback_failed",
+					zap.Int64("selected_account_id", selection.Account.ID),
+					zap.Error(rejectErr),
+				)
+			}
 			reqLog.Warn("grok_media.video_lookup_bound_account_unavailable",
 				zap.Int64("bound_account_id", boundLookupAccountID),
 				zap.Int64("selected_account_id", selection.Account.ID),
@@ -268,35 +312,76 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			zap.Int("top_k", scheduleDecision.TopK),
 			zap.Int64("latency_ms", scheduleDecision.LatencyMs),
 			zap.Float64("load_skew", scheduleDecision.LoadSkew),
+			zap.Int("general_limit", scheduleDecision.GeneralLimit),
+			zap.Int("hard_limit", scheduleDecision.HardLimit),
+			zap.Int("affinity_reserve", scheduleDecision.AffinityReserve),
+			zap.Int("general_reject_count", scheduleDecision.GeneralRejectCount),
+			zap.Bool("affinity_reserve_hit", scheduleDecision.AffinityReserveHit),
+			zap.Bool("temporary_overflow", scheduleDecision.TemporaryOverflow),
+			zap.Bool("affinity_wait", scheduleDecision.AffinityWait),
+			zap.Bool("affinity_rejected", scheduleDecision.AffinityRejected),
 		)
 
 		account := selection.Account
 		if endpoint.IsGenerationRequest() {
 			eligible, eligibilityReason, eligibilityErr := h.ensureGrokMediaAccountEligibility(requestCtx, account)
 			if !eligible {
-				mediaEligibilityRejected = true
-				failedAccountIDs[account.ID] = struct{}{}
-				reqLog.Warn("grok_media.account_eligibility_rejected",
-					zap.Int64("account_id", account.ID),
-					zap.String("reason", eligibilityReason),
-					zap.Bool("probe_failed", eligibilityErr != nil),
-				)
-				if switchCount >= maxAccountSwitches {
-					markOpsRoutingCapacityLimited(c)
-					h.errorResponse(c, http.StatusServiceUnavailable, "grok_media_no_eligible_account", "No eligible Grok media accounts")
+				if !retryAfterEligibilityRejection(selection, account, eligibilityReason, eligibilityErr) {
 					return
 				}
-				switchCount++
 				continue
 			}
 		}
+		checkedAccountID := account.ID
+		selectedFromWaitPlan := selection.WaitPlan != nil
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, accountAcquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, false, &streamStarted, reqLog)
+		accountReleaseFunc, accountAcquired, resolvedSessionHash := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, true, false, &streamStarted, reqLog)
+		sessionHash = resolvedSessionHash
 		if !accountAcquired {
 			return
 		}
+		account = selection.Account
+		if endpoint.IsGenerationRequest() {
+			eligible, eligibilityReason, eligibilityErr := h.ensureFinalGrokMediaSelectionEligibility(
+				requestCtx,
+				selection,
+				checkedAccountID,
+				selectedFromWaitPlan,
+			)
+			if !eligible {
+				if !retryAfterEligibilityRejection(selection, account, eligibilityReason, eligibilityErr) {
+					return
+				}
+				continue
+			}
+			if confirmErr := h.gatewayService.ConfirmAcquiredOpenAISelection(
+				requestCtx,
+				apiKey.GroupID,
+				sessionHash,
+				selection,
+			); confirmErr != nil {
+				reqLog.Warn("grok_media.account_selection_confirmation_failed",
+					zap.Int64("account_id", account.ID),
+					zap.Error(confirmErr),
+				)
+				if rejectErr := h.gatewayService.RejectAcquiredOpenAISelection(
+					requestCtx,
+					apiKey.GroupID,
+					sessionHash,
+					selection,
+				); rejectErr != nil {
+					reqLog.Warn("grok_media.account_selection_rollback_failed",
+						zap.Int64("account_id", account.ID),
+						zap.Error(rejectErr),
+					)
+				}
+				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts")
+				return
+			}
+		}
+		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
@@ -427,6 +512,21 @@ func (h *OpenAIGatewayHandler) ensureGrokMediaAccountEligibility(ctx context.Con
 		return false, "billing_probe_unavailable", errors.New("grok media eligibility probe is not configured")
 	}
 	return h.grokMediaEligibilityProber.ProbeMediaEligibility(ctx, account.ID)
+}
+
+func (h *OpenAIGatewayHandler) ensureFinalGrokMediaSelectionEligibility(
+	ctx context.Context,
+	selection *service.AccountSelectionResult,
+	checkedAccountID int64,
+	selectedFromWaitPlan bool,
+) (bool, string, error) {
+	if selection == nil || selection.Account == nil {
+		return h.ensureGrokMediaAccountEligibility(ctx, nil)
+	}
+	if !selectedFromWaitPlan && selection.Account.ID == checkedAccountID {
+		return true, "already_checked", nil
+	}
+	return h.ensureGrokMediaAccountEligibility(ctx, selection.Account)
 }
 
 func grokMediaRequiredCapability(endpoint service.GrokMediaEndpoint) service.OpenAIEndpointCapability {
