@@ -201,55 +201,187 @@
         </div>
         <!-- /Tab: Security — Admin API Key -->
 
+        <!-- Tab: Fork Features -->
+        <div
+          v-show="activeTab === 'fork'"
+          class="space-y-6"
+          data-testid="fork-feature-settings"
+        >
+          <!-- Codex Prompt Cache Optimization -->
+          <div class="card" data-testid="codex-prompt-cache-settings">
+            <div
+              class="flex flex-col items-stretch gap-4 px-6 py-5 sm:flex-row sm:items-center sm:justify-between sm:gap-6"
+            >
+              <div class="min-w-0">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                  {{
+                    t(
+                      "admin.settings.gatewayForwarding.codexPromptCacheOptimization",
+                    )
+                  }}
+                </h2>
+                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  {{
+                    t(
+                      "admin.settings.gatewayForwarding.codexPromptCacheOptimizationHint",
+                    )
+                  }}
+                </p>
+              </div>
+              <Toggle
+                v-model="form.openai_codex_prompt_cache_optimization_enabled"
+                class="self-end sm:self-auto"
+                data-testid="codex-prompt-cache-optimization-toggle"
+              />
+            </div>
+          </div>
+
+          <!-- OpenAI Priority Saturation Scheduler -->
+          <div class="card" data-testid="openai-priority-saturation-settings">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.settings.openaiPrioritySaturation.title") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.openaiPrioritySaturation.description") }}
+              </p>
+            </div>
+            <div class="space-y-3 p-6">
+              <div
+                class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6"
+              >
+                <div class="min-w-0">
+                  <label
+                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{ t("admin.settings.openaiPrioritySaturation.enable") }}
+                  </label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{
+                      t("admin.settings.openaiPrioritySaturation.enableHint")
+                    }}
+                  </p>
+                </div>
+                <Toggle
+                  v-model="form.openai_priority_saturation_enabled"
+                  class="self-end sm:self-auto"
+                  data-testid="openai-priority-saturation-toggle"
+                />
+              </div>
+              <div
+                class="space-y-4 border-t border-gray-100 pt-4 dark:border-dark-700"
+              >
+                <div
+                  class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6"
+                >
+                  <div class="min-w-0">
+                    <label
+                      class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                      for="openai-priority-saturation-affinity-reserve-percent"
+                    >
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.reservePercentLabel",
+                        )
+                      }}
+                    </label>
+                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.reservePercentHint",
+                        )
+                      }}
+                    </p>
+                  </div>
+                  <div class="relative w-full shrink-0 sm:w-32">
+                    <input
+                      id="openai-priority-saturation-affinity-reserve-percent"
+                      v-model.number="form.openai_priority_saturation_affinity_reserve_percent"
+                      class="input pr-8"
+                      data-testid="openai-priority-saturation-affinity-reserve-percent"
+                      min="0"
+                      max="99"
+                      required
+                      step="1"
+                      type="number"
+                    />
+                    <span
+                      class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400"
+                      >%</span
+                    >
+                  </div>
+                </div>
+                <dl
+                  class="grid grid-cols-1 gap-x-6 gap-y-3 text-xs sm:grid-cols-2"
+                >
+                  <div>
+                    <dt class="font-medium text-gray-700 dark:text-gray-300">
+                      {{
+                        t("admin.settings.openaiPrioritySaturation.orderLabel")
+                      }}
+                    </dt>
+                    <dd class="mt-0.5 text-gray-500 dark:text-gray-400">
+                      {{
+                        t("admin.settings.openaiPrioritySaturation.orderValue")
+                      }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="font-medium text-gray-700 dark:text-gray-300">
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.generalLabel",
+                        )
+                      }}
+                    </dt>
+                    <dd class="mt-0.5 text-gray-500 dark:text-gray-400">
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.generalValue",
+                        )
+                      }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="font-medium text-gray-700 dark:text-gray-300">
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.affinityLabel",
+                        )
+                      }}
+                    </dt>
+                    <dd class="mt-0.5 text-gray-500 dark:text-gray-400">
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.affinityValue",
+                        )
+                      }}
+                    </dd>
+                  </div>
+                </dl>
+                <p
+                  class="border-l-2 border-amber-400 pl-3 text-xs text-amber-700 dark:text-amber-300"
+                >
+                  {{
+                    t(
+                      "admin.settings.openaiPrioritySaturation.capacityWarning",
+                    )
+                  }}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- /Tab: Fork Features -->
+
         <!-- Tab: Gateway -->
         <div
           v-show="activeTab === 'gateway'"
           class="space-y-6"
           data-testid="gateway-primary-settings"
         >
-          <!-- Fork-specific gateway features -->
-          <div class="card" data-testid="fork-feature-settings">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.gatewayForwarding.forkFeaturesTitle") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{
-                  t("admin.settings.gatewayForwarding.forkFeaturesDescription")
-                }}
-              </p>
-            </div>
-            <div class="p-6">
-              <div class="flex items-center justify-between gap-4">
-                <div class="min-w-0">
-                  <label
-                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >
-                    {{
-                      t(
-                        "admin.settings.gatewayForwarding.codexPromptCacheOptimization",
-                      )
-                    }}
-                  </label>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{
-                      t(
-                        "admin.settings.gatewayForwarding.codexPromptCacheOptimizationHint",
-                      )
-                    }}
-                  </p>
-                </div>
-                <Toggle
-                  v-model="form.openai_codex_prompt_cache_optimization_enabled"
-                  class="flex-shrink-0"
-                  data-testid="codex-prompt-cache-optimization-toggle"
-                />
-              </div>
-            </div>
-          </div>
-
           <!-- Overload Cooldown (529) Settings -->
           <div class="card">
             <div
@@ -4511,99 +4643,6 @@
             </div>
           </div>
 
-          <!-- OpenAI Priority Saturation Scheduler -->
-          <div class="card" data-testid="openai-priority-saturation-settings">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.openaiPrioritySaturation.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.openaiPrioritySaturation.description") }}
-              </p>
-            </div>
-            <div class="space-y-3 p-6">
-              <div class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
-                <div class="min-w-0">
-                  <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {{ t("admin.settings.openaiPrioritySaturation.enable") }}
-                  </label>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.openaiPrioritySaturation.enableHint") }}
-                  </p>
-                </div>
-                <Toggle
-                  class="self-end sm:self-auto"
-                  v-model="form.openai_priority_saturation_enabled"
-                  data-testid="openai-priority-saturation-toggle"
-                />
-              </div>
-              <div
-                class="space-y-4 border-t border-gray-100 pt-4 dark:border-dark-700"
-              >
-                <div class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
-                  <div class="min-w-0">
-                    <label
-                      class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                      for="openai-priority-saturation-affinity-reserve-percent"
-                    >
-                      {{ t("admin.settings.openaiPrioritySaturation.reservePercentLabel") }}
-                    </label>
-                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                      {{ t("admin.settings.openaiPrioritySaturation.reservePercentHint") }}
-                    </p>
-                  </div>
-                  <div class="relative w-full shrink-0 sm:w-32">
-                    <input
-                      id="openai-priority-saturation-affinity-reserve-percent"
-                      v-model.number="form.openai_priority_saturation_affinity_reserve_percent"
-                      class="input pr-8"
-                      data-testid="openai-priority-saturation-affinity-reserve-percent"
-                      min="0"
-                      max="99"
-                      required
-                      step="1"
-                      type="number"
-                    />
-                    <span
-                      class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400"
-                    >%</span>
-                  </div>
-                </div>
-                <dl class="grid grid-cols-1 gap-x-6 gap-y-3 text-xs sm:grid-cols-2">
-                  <div>
-                    <dt class="font-medium text-gray-700 dark:text-gray-300">
-                      {{ t("admin.settings.openaiPrioritySaturation.orderLabel") }}
-                    </dt>
-                    <dd class="mt-0.5 text-gray-500 dark:text-gray-400">
-                      {{ t("admin.settings.openaiPrioritySaturation.orderValue") }}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt class="font-medium text-gray-700 dark:text-gray-300">
-                      {{ t("admin.settings.openaiPrioritySaturation.generalLabel") }}
-                    </dt>
-                    <dd class="mt-0.5 text-gray-500 dark:text-gray-400">
-                      {{ t("admin.settings.openaiPrioritySaturation.generalValue") }}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt class="font-medium text-gray-700 dark:text-gray-300">
-                      {{ t("admin.settings.openaiPrioritySaturation.affinityLabel") }}
-                    </dt>
-                    <dd class="mt-0.5 text-gray-500 dark:text-gray-400">
-                      {{ t("admin.settings.openaiPrioritySaturation.affinityValue") }}
-                    </dd>
-                  </div>
-                </dl>
-                <p class="border-l-2 border-amber-400 pl-3 text-xs text-amber-700 dark:text-amber-300">
-                  {{ t("admin.settings.openaiPrioritySaturation.capacityWarning") }}
-                </p>
-              </div>
-            </div>
-          </div>
-
           <!-- Gateway Scheduling Settings -->
           <div class="card">
             <div
@@ -8178,6 +8217,7 @@ const paymentMethodsHref = computed(() =>
 );
 
 type SettingsTab =
+  | "fork"
   | "general"
   | "agreement"
   | "features"
@@ -8187,8 +8227,9 @@ type SettingsTab =
   | "payment"
   | "email"
   | "backup";
-const activeTab = ref<SettingsTab>("general");
+const activeTab = ref<SettingsTab>("fork");
 const settingsTabs = [
+  { key: "fork" as SettingsTab, icon: "sparkles" as const },
   { key: "general" as SettingsTab, icon: "home" as const },
   { key: "agreement" as SettingsTab, icon: "document" as const },
   { key: "features" as SettingsTab, icon: "bolt" as const },

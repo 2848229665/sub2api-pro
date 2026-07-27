@@ -76,7 +76,7 @@ openai_priority_saturation_enabled
 
 两个开关不互斥，保存一个开关时不会自动关闭另一个。只要 Priority Saturation 开启，它就具有最高优先级；关闭后才恢复已经保存的 Advanced 或 Legacy 配置。
 
-管理端在“系统设置”页面提供独立的“OpenAI 优先级饱和调度”卡片，不再要求管理员到每个账号中重复设置该策略。
+管理端在“系统设置”首位的“Pro 增强”Tab 中提供独立的“OpenAI 优先级饱和调度”卡片，不再要求管理员到每个账号中重复设置该策略。该 Tab 统一收纳当前 Fork 独有的用户级开关，避免与上游通用网关设置混在一起。
 
 ### 3.3 默认启用与迁移范围
 
@@ -160,7 +160,7 @@ G = C - R
 - 普通 HTTP、compact、OAuth passthrough、普通 WebSocket 和 WebSocket passthrough
   使用相同身份协议；WS 后续帧继承首帧身份；
 - 提供默认开启的 `gateway.openai_codex_prompt_cache_optimization_enabled` 开关，
-  并在管理端网关设置最前面的“Fork 专属功能”中支持即时控制；
+  并在管理端“系统设置 > Pro 增强”Tab 中支持即时控制；
 - 开启时，官方 Codex 原生 Responses 使用独立文件中的局部 JSON patch，保持已有
   `instructions/tools/input/text` 前缀与数组顺序；
 - 该开关只控制最小 JSON patch 翻译器，不控制上述默认身份协议；
@@ -215,6 +215,7 @@ Cyber Policy 命中时，Fork 会把命中事件与请求证据关联保存，�
 - 新记录不再执行原有 64 KiB 截断；
 - 新记录不对请求体做字段脱敏；
 - 管理端通过专用接口读取命中记录的请求体；
+- 管理端详情支持一键复制页面显示的完整请求内容；
 - 历史版本已经截断的记录仍通过 `truncated` 字段兼容展示。
 
 主要实现：

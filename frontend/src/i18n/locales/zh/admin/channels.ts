@@ -328,6 +328,8 @@ export default {
       inputDetailContent: '完整内容',
       cyberRequestContent: '完整请求数据',
       cyberRequestSaved: '已保存完整 Cyber 请求',
+      cyberRequestCopy: '复制内容',
+      cyberRequestCopied: '内容已复制',
       cyberRequestLoading: '正在读取完整请求数据…',
       cyberRequestLoadFailed: '读取完整 Cyber 请求失败',
       cyberRequestUnavailable: '该记录没有可用的完整请求数据，可能是启用 Cyber 请求审计前产生的历史记录。',

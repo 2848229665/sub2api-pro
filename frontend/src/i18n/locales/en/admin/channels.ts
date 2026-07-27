@@ -328,6 +328,8 @@ export default {
       inputDetailContent: 'Full Content',
       cyberRequestContent: 'Complete Request Data',
       cyberRequestSaved: 'Complete Cyber request saved',
+      cyberRequestCopy: 'Copy content',
+      cyberRequestCopied: 'Content copied',
       cyberRequestLoading: 'Loading complete request data…',
       cyberRequestLoadFailed: 'Failed to load the complete Cyber request',
       cyberRequestUnavailable: 'No complete request data is available. This may be a record created before Cyber request auditing was added.',

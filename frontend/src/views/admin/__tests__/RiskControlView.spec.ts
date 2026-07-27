@@ -13,6 +13,7 @@ const {
   listLogs,
   getCyberPolicyRequestAudit,
   getGroups,
+  copyToClipboard,
   showError,
   showSuccess,
 } = vi.hoisted(() => ({
@@ -22,6 +23,7 @@ const {
   listLogs: vi.fn(),
   getCyberPolicyRequestAudit: vi.fn(),
   getGroups: vi.fn(),
+  copyToClipboard: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
 }))
@@ -51,6 +53,16 @@ vi.mock('@/stores/app', () => ({
     showSuccess,
   }),
 }))
+
+vi.mock('@/composables/useClipboard', async () => {
+  const { ref } = await import('vue')
+  return {
+    useClipboard: () => ({
+      copied: ref(false),
+      copyToClipboard,
+    }),
+  }
+})
 
 vi.mock('@/utils/apiError', () => ({
   extractApiErrorMessage: (_err: unknown, fallback: string) => fallback,
@@ -196,6 +208,7 @@ describe('admin RiskControlView', () => {
     listLogs.mockReset()
     getCyberPolicyRequestAudit.mockReset()
     getGroups.mockReset()
+    copyToClipboard.mockReset()
     showError.mockReset()
     showSuccess.mockReset()
 
@@ -212,6 +225,7 @@ describe('admin RiskControlView', () => {
       truncated: false,
     })
     getGroups.mockResolvedValue([])
+    copyToClipboard.mockResolvedValue(true)
     updateConfig.mockImplementation(async (payload: UpdateContentModerationConfig) => ({
       ...baseConfig(),
       ...payload,
@@ -493,5 +507,11 @@ describe('admin RiskControlView', () => {
     expect(wrapper.get('[data-test="cyber-audit-body"]').text()).toContain('"model": "gpt-5"')
     expect(wrapper.find('[data-test="cyber-audit-truncated"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('cyber_policy: blocked')
+
+    await wrapper.get('[data-test="cyber-audit-copy"]').trigger('click')
+    expect(copyToClipboard).toHaveBeenCalledWith(
+      JSON.stringify(JSON.parse(completeCyberRequest), null, 2),
+      'admin.riskControl.cyberRequestCopied',
+    )
   })
 })
