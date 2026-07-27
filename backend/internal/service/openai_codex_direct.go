@@ -101,7 +101,7 @@ func (s *OpenAIGatewayService) forwardOpenAICodexDirectJSON(
 		return nil, nil, fmt.Errorf("service, context, and account are required")
 	}
 	if account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth {
-		return nil, nil, fmt.Errorf("Codex direct endpoints require an OpenAI OAuth account")
+		return nil, nil, fmt.Errorf("codex direct endpoints require an OpenAI OAuth account")
 	}
 
 	upstreamModel := strings.TrimSpace(channelMappedModel)

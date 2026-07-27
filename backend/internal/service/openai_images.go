@@ -198,7 +198,7 @@ func (s *OpenAIGatewayService) ParseOpenAIImagesRequest(c *gin.Context, body []b
 	}
 	req.CodexDirect = isOpenAICodexDirectImagesRequest(c)
 	if req.CodexDirect && isMultipartImagesContentTypeValue(contentType) {
-		return nil, fmt.Errorf("Codex direct images require a JSON request body")
+		return nil, fmt.Errorf("codex direct images require a JSON request body")
 	}
 	if len(body) > 0 {
 		sum := sha256.Sum256(body)

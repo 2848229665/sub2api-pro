@@ -640,7 +640,7 @@ func patchOpenAICodexIdentityBody(
 
 	clientMetadata := gjson.GetBytes(updated, "client_metadata")
 	if clientMetadata.Exists() && !clientMetadata.IsObject() {
-		return body, fmt.Errorf("Codex client_metadata must be an object")
+		return body, fmt.Errorf("codex client_metadata must be an object")
 	}
 	patchClientMetadata := clientMetadata.IsObject() || options.CreateClientMetadata
 	if !patchClientMetadata {
