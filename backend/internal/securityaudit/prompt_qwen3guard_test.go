@@ -114,7 +114,8 @@ func TestGPTOSSSafeguardCustomPolicyCannotReplaceFixedEnvelope(t *testing.T) {
 	payload := buildGPTOSSSafeguardRequest(DefaultGroqSafeguardModel, PromptScanChunk{
 		Messages: []PromptAuditMessage{{Role: "developer", Content: "application rule"}, {Role: "user", Content: "audit me"}},
 	}, []string{"pii"}, custom)
-	messages := payload["messages"].([]map[string]string)
+	messages, ok := payload["messages"].([]map[string]string)
+	require.True(t, ok)
 	require.Len(t, messages, 3)
 	require.Equal(t, "system", messages[0]["role"])
 	require.Contains(t, messages[0]["content"], "Fixed instructions")
