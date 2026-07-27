@@ -9,6 +9,10 @@ import type {
 
 export const DEFAULT_GUARD_MODEL = 'sileader/qwen3guard:0.6b'
 export const DEFAULT_GROQ_SAFEGUARD_MODEL = 'openai/gpt-oss-safeguard-20b'
+export const MIN_SAFEGUARD_POLICY_LENGTH = 32
+export const MAX_SAFEGUARD_POLICY_LENGTH = 16000
+export const RECOMMENDED_SAFEGUARD_POLICY_MIN_LENGTH = 1200
+export const RECOMMENDED_SAFEGUARD_POLICY_MAX_LENGTH = 4000
 
 export const PROMPT_AUDIT_PROTOCOLS: ReadonlyArray<{
   id: PromptAuditEndpointProtocol
@@ -50,12 +54,16 @@ export function cloneData<T>(value: T): T {
 }
 
 export function configToDraft(config: PromptAuditConfig): PromptAuditDraft {
+  const defaultPolicy = config.groq_safeguard_default_policy ?? ''
   return {
     ...cloneData(config),
+    groq_safeguard_policy: config.groq_safeguard_policy?.trim() || defaultPolicy,
+    groq_safeguard_default_policy: defaultPolicy,
     group_ids: [...(config.group_ids ?? [])],
     scanners: [...(config.scanners ?? [])],
     endpoints: (config.endpoints ?? []).map((endpoint) => ({
       ...endpoint,
+      model: endpoint.protocol === 'groq_safeguard' ? DEFAULT_GROQ_SAFEGUARD_MODEL : endpoint.model,
       token: '',
       clear_token: false,
     })),
@@ -101,6 +109,7 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
     enabled: draft.enabled,
     blocking_enabled: draft.enabled && draft.blocking_enabled,
     store_pass_events: draft.store_pass_events,
+    groq_safeguard_policy: draft.groq_safeguard_policy.trim(),
     strategy: 'priority',
     worker_count: Number(draft.worker_count),
     queue_capacity: Number(draft.queue_capacity),
@@ -112,7 +121,9 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
       name: endpoint.name.trim(),
       protocol: endpoint.protocol,
       base_url: endpoint.base_url.trim(),
-      model: endpoint.model.trim() || PROMPT_AUDIT_PROTOCOLS.find((item) => item.id === endpoint.protocol)?.model || DEFAULT_GUARD_MODEL,
+      model: endpoint.protocol === 'groq_safeguard'
+        ? DEFAULT_GROQ_SAFEGUARD_MODEL
+        : endpoint.model.trim() || DEFAULT_GUARD_MODEL,
       token: endpoint.token.trim() || undefined,
       clear_token: endpoint.clear_token,
       timeout_ms: Number(endpoint.timeout_ms),

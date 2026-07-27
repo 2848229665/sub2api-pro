@@ -71,7 +71,7 @@ func (g *GuardEvaluator) Evaluate(ctx context.Context, cfg ActiveConfig, snapsho
 	evalCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	inputLimit := minimumInputLimit(endpoints)
-	chunks := SplitRunes(snapshot.ScanText, inputLimit)
+	chunks := buildPromptScanChunks(snapshot, endpoints, inputLimit)
 	if len(chunks) == 0 {
 		if g.metrics != nil {
 			g.metrics.Observe(DecisionAllow, g.clock.Now().Sub(start))
@@ -84,7 +84,7 @@ func (g *GuardEvaluator) Evaluate(ctx context.Context, cfg ActiveConfig, snapsho
 		chunkStarted := g.clock.Now()
 		LogInfo(EventChunkStarted, mergeLogFields(baseFields, map[string]any{
 			"chunk_index": index + 1, "chunk_total": len(chunks),
-			"chunk_chars": len([]rune(chunk)), "input_chars": snapshot.PromptLength, "input_limit": inputLimit,
+			"chunk_chars": chunk.RuneCount(), "input_chars": snapshot.PromptLength, "input_limit": inputLimit,
 			"status": "started",
 		}))
 		result, err := g.scanChunk(evalCtx, cfg, endpoints, chunk)
@@ -92,7 +92,7 @@ func (g *GuardEvaluator) Evaluate(ctx context.Context, cfg ActiveConfig, snapsho
 			code := guardErrorCode(err)
 			LogWarn(EventChunkFailed, mergeLogFields(baseFields, map[string]any{
 				"chunk_index": index + 1, "chunk_total": len(chunks),
-				"chunk_chars": len([]rune(chunk)), "input_chars": snapshot.PromptLength, "input_limit": inputLimit,
+				"chunk_chars": chunk.RuneCount(), "input_chars": snapshot.PromptLength, "input_limit": inputLimit,
 				"latency_ms": g.clock.Now().Sub(chunkStarted).Milliseconds(), "error_code": code, "status": "failed",
 			}))
 			kind := DecisionUnavailable
@@ -113,7 +113,7 @@ func (g *GuardEvaluator) Evaluate(ctx context.Context, cfg ActiveConfig, snapsho
 		results = append(results, result)
 		LogInfo(EventChunkCompleted, mergeLogFields(baseFields, map[string]any{
 			"chunk_index": index + 1, "chunk_total": len(chunks),
-			"chunk_chars": len([]rune(chunk)), "input_chars": snapshot.PromptLength, "input_limit": inputLimit,
+			"chunk_chars": chunk.RuneCount(), "input_chars": snapshot.PromptLength, "input_limit": inputLimit,
 			"guard_endpoint_id": result.GuardEndpointID, "action": result.Action,
 			"latency_ms": g.clock.Now().Sub(chunkStarted).Milliseconds(), "status": "completed",
 		}))
@@ -187,7 +187,7 @@ func logGuardFailure(snapshot PromptSnapshot, cfg ActiveConfig, kind DecisionKin
 	}))
 }
 
-func (g *GuardEvaluator) scanChunk(ctx context.Context, cfg ActiveConfig, endpoints []ActiveEndpoint, chunk string) (*NormalizedResult, error) {
+func (g *GuardEvaluator) scanChunk(ctx context.Context, cfg ActiveConfig, endpoints []ActiveEndpoint, chunk PromptScanChunk) (*NormalizedResult, error) {
 	var lastErr error
 	for index, endpoint := range endpoints {
 		semaphore := g.nodeSemaphore(endpoint.ID)
@@ -228,14 +228,21 @@ func (g *GuardEvaluator) scanChunk(ctx context.Context, cfg ActiveConfig, endpoi
 	return nil, lastErr
 }
 
-func callPromptScanner(ctx context.Context, scanner PromptScanner, endpoint ActiveEndpoint, chunk string, scanners []string) (result *NormalizedResult, err error) {
+func callPromptScanner(ctx context.Context, scanner PromptScanner, endpoint ActiveEndpoint, chunk PromptScanChunk, scanners []string) (result *NormalizedResult, err error) {
 	defer func() {
 		if recover() != nil {
 			result = nil
 			err = &GuardError{Code: ErrorCodeUnavailable, Retryable: false}
 		}
 	}()
-	return scanner.Scan(ctx, endpoint, chunk, scanners)
+	return scanPromptScanner(ctx, scanner, endpoint, chunk, scanners)
+}
+
+func scanPromptScanner(ctx context.Context, scanner PromptScanner, endpoint ActiveEndpoint, chunk PromptScanChunk, scanners []string) (*NormalizedResult, error) {
+	if structured, ok := scanner.(StructuredPromptScanner); ok {
+		return structured.ScanStructured(ctx, endpoint, chunk, scanners)
+	}
+	return scanner.Scan(ctx, endpoint, chunk.Text, scanners)
 }
 
 func (g *GuardEvaluator) nodeSemaphore(id string) chan struct{} {

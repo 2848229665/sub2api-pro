@@ -252,7 +252,19 @@ Prompt Audit 在现有 Qwen3Guard OpenAI-compatible 节点之外，增加了 Gro
   `developer`、`assistant`、`user` 的文本；仅 tool 输出、图片块和文件块不会进入
   扫描请求或该次审计事件；
 - 审计记录包含 scanner backend、版本、endpoint、policy/config version 和证据元数据；
-- 管理端可选择 Qwen3Guard 或 Groq Safeguard，并显示相应默认值与说明；
+- 管理端主页面集中展示运行概览和审计事件，配置入口采用与内容审核一致的弹窗式设置界面；
+- 配置弹窗按“模型服务 / 审核策略 / 范围与风险 / 运行参数”分区，节点编辑、凭据状态和连接测试在模型服务页完成；
+- 管理端可选择 Qwen3Guard 或 Groq Safeguard，并显示相应默认值与说明；Groq 模型固定为
+  `openai/gpt-oss-safeguard-20b`，启用节点时必须配置 Groq API Key；
+- 管理端“审核策略”Tab 提供全局 Groq Safeguard Policy 编辑、恢复默认和最终 system
+  Prompt 预览；自定义正文只负责分类标准、风险边界和示例，空值使用内置默认策略；
+- Groq 的安全前言、启用类别定义、消息角色封装和 JSON Schema 输出契约由后端固定，
+  自定义 Policy 不能替换这些结构；预览使用后端同一渲染器，避免前后端模板漂移；
+- 内置 Groq Policy 参考 OpenAI 官方 GPT-OSS Safeguard 指南、官方示例 Policy 和 Groq
+  模型页最佳实践，采用 Instructions / Definitions / Criteria / Examples 四段结构，明确
+  正反边界、冲突优先级和人工复核路径；默认正文控制在官方建议的约 400–600 tokens；
+- Qwen3Guard 继续使用模型内置分类策略，不提供 Prompt 编辑器；
+- 切换节点的模型服务时不会复用另一服务已保存的凭据；
 - 对外请求继续经过 Prompt Audit 的出站 URL 与安全校验。
 
 主要实现：
@@ -261,6 +273,12 @@ Prompt Audit 在现有 Qwen3Guard OpenAI-compatible 节点之外，增加了 Gro
 - `backend/internal/securityaudit/prompt_qwen3guard.go`
 - `backend/internal/securityaudit/prompt_config.go`
 - `frontend/src/features/prompt-audit/`
+
+默认 Policy 设计依据：
+
+- <https://developers.openai.com/cookbook/articles/gpt-oss-safeguard-guide>
+- <https://github.com/openai/gpt-oss-safeguard/tree/main/example_policies/spam>
+- <https://console.groq.com/docs/model/openai/gpt-oss-safeguard-20b>
 
 ## 9. OpenAI WebSocket 关闭帧修复
 

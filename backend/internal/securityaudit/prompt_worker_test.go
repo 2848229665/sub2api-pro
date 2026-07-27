@@ -252,7 +252,10 @@ func TestEnqueuerStagingPayloadPublishProtocolAndFailureCleanup(t *testing.T) {
 		require.NoError(t, enqueuer.Enqueue(context.Background(), asyncRequest()))
 		require.Equal(t, []string{"create_staging", "payload_set", "publish_queued"}, trace)
 		require.Empty(t, repo.createdSnapshot.ScanText)
-		require.Equal(t, "payload canary text", payload.values[41])
+		stored, err := decodePromptAuditPayload(payload.values[41])
+		require.NoError(t, err)
+		require.Equal(t, "payload canary text", stored.ScanText)
+		require.Equal(t, []PromptAuditMessage{{Role: "user", Content: "payload canary text"}}, stored.Messages)
 		require.Equal(t, DefaultPayloadTTL, payload.setTTL)
 	})
 
@@ -318,11 +321,22 @@ func TestEnqueuerGPTOSSSafeguardExcludesToolOutputAndAttachments(t *testing.T) {
 	).Enqueue(context.Background(), req))
 
 	expected := "user text\n\nSYSTEM_CANARY\n\nDEVELOPER_CANARY\n\nASSISTANT_CANARY"
-	require.Equal(t, expected, metadataTextForTest(payload.values[51]))
+	stored, err := decodePromptAuditPayload(payload.values[51])
+	require.NoError(t, err)
+	require.Equal(t, expected, metadataTextForTest(stored.ScanText))
+	require.Equal(t, []PromptAuditMessage{
+		{Role: "system", Content: "SYSTEM_CANARY"},
+		{Role: "developer", Content: "DEVELOPER_CANARY"},
+		{Role: "assistant", Content: "ASSISTANT_CANARY"},
+		{Role: "user", Content: "user text"},
+	}, stored.Messages)
 	require.Equal(t, expected, repo.createdSnapshot.FullPrompt)
 	require.Equal(t, 4, repo.createdSnapshot.MessageCount)
 	for _, excluded := range []string{"TOOL_OUTPUT_CANARY", "IMAGE_CANARY", "FILE_CANARY", "FILE_DATA_CANARY"} {
-		require.NotContains(t, payload.values[51], excluded)
+		require.NotContains(t, stored.ScanText, excluded)
+		for _, message := range stored.Messages {
+			require.NotContains(t, message.Content, excluded)
+		}
 		require.NotContains(t, repo.createdSnapshot.FullPrompt, excluded)
 	}
 }
@@ -422,6 +436,39 @@ func TestWorkerCompletesPassWithoutEventRefreshesEveryChunkAndDeletesPayload(t *
 	require.Equal(t, []int64{51}, payload.deleted)
 	require.Equal(t, int64(1), metrics.Snapshot().Total)
 	require.Equal(t, int64(1), metrics.Snapshot().Allowed)
+}
+
+func TestWorkerRestoresStructuredMessagesForGroqSafeguard(t *testing.T) {
+	cfg := asyncConfig()
+	cfg.Endpoints[0].Protocol = EndpointProtocolGroqSafeguard
+	cfg.Endpoints[0].Model = DefaultGroqSafeguardModel
+	cfg.Endpoints[0].InputLimit = 1000
+	snapshot, err := ExtractPromptSnapshotForEndpoints(Request{
+		RequestID: "structured-worker",
+		Protocol:  "openai_chat_completions",
+		Body: []byte(`{"messages":[
+			{"role":"system","content":"source system"},
+			{"role":"assistant","content":"source assistant"},
+			{"role":"tool","content":"excluded tool"},
+			{"role":"user","content":"source user"}
+		]}`),
+	}, cfg.EnabledEndpoints())
+	require.NoError(t, err)
+	stored, err := encodePromptAuditPayload(snapshot)
+	require.NoError(t, err)
+
+	job := workerJob(1, 3)
+	job.Snapshot = snapshot.Redacted()
+	payload := &fakePayloadStore{values: map[int64]string{job.ID: stored}}
+	scanner := &structuredCaptureScanner{}
+	runner := NewRunner(&fakeConfigStore{cfg: cfg, active: true}, &fakeJobRepository{}, payload, scanner, NewAtomicMetrics())
+	require.NoError(t, runner.processJob(context.Background(), 0, cfg, job))
+	require.Len(t, scanner.chunks, 1)
+	require.Equal(t, []PromptAuditMessage{
+		{Role: "system", Content: "source system"},
+		{Role: "assistant", Content: "source assistant"},
+		{Role: "user", Content: "source user"},
+	}, scanner.chunks[0].Messages)
 }
 
 func TestWorkerRetryBackoffTerminalFailureAndFailover(t *testing.T) {

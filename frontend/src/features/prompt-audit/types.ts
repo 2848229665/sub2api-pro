@@ -25,6 +25,8 @@ export interface PromptAuditConfig {
   enabled: boolean
   blocking_enabled: boolean
   store_pass_events: boolean
+  groq_safeguard_policy: string
+  groq_safeguard_default_policy: string
   effective_mode: PromptAuditMode
   strategy: 'priority'
   worker_count: number
@@ -48,6 +50,7 @@ export interface PromptAuditUpdateRequest {
   enabled: boolean
   blocking_enabled: boolean
   store_pass_events: boolean
+  groq_safeguard_policy: string
   strategy: 'priority'
   worker_count: number
   queue_capacity: number
@@ -66,6 +69,14 @@ export interface PromptAuditUpdateRequest {
     input_limit: number
     enabled: boolean
   }>
+}
+
+export interface PromptSafeguardPolicyPreview {
+  policy: string
+  prompt: string
+  policy_character_count: number
+  prompt_character_count: number
+  using_default: boolean
 }
 
 export interface PromptProbeResult {

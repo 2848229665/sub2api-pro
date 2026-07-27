@@ -16,6 +16,8 @@ const config = (): PromptAuditConfig => ({
   enabled: true,
   blocking_enabled: false,
   store_pass_events: false,
+  groq_safeguard_policy: 'Default safeguard classification policy with enough detail for validation.',
+  groq_safeguard_default_policy: 'Default safeguard classification policy with enough detail for validation.',
   effective_mode: 'async_audit',
   strategy: 'priority',
   worker_count: 4,
@@ -72,8 +74,12 @@ describe('Prompt Audit view model', () => {
       model: DEFAULT_GROQ_SAFEGUARD_MODEL,
     })
 
-    draft.endpoints[0].model = ''
+    draft.endpoints[0].model = 'wrong-model'
     expect(buildUpdateRequest(draft).endpoints[0].model).toBe(DEFAULT_GROQ_SAFEGUARD_MODEL)
+
+    const serverConfig = config()
+    serverConfig.endpoints[0] = { ...serverConfig.endpoints[0], protocol: 'groq_safeguard', model: 'legacy-model' }
+    expect(configToDraft(serverConfig).endpoints[0].model).toBe(DEFAULT_GROQ_SAFEGUARD_MODEL)
   })
 
   it('tracks dirty state from the full normalized save payload', () => {
@@ -82,6 +88,11 @@ describe('Prompt Audit view model', () => {
     expect(draftFingerprint(changed)).toBe(draftFingerprint(original))
     changed.queue_capacity += 1
     expect(draftFingerprint(changed)).not.toBe(draftFingerprint(original))
+
+    const policyChanged = configToDraft(config())
+    policyChanged.groq_safeguard_policy = 'A different custom classification policy with enough detail to be valid.'
+    expect(buildUpdateRequest(policyChanged).groq_safeguard_policy).toContain('different custom')
+    expect(draftFingerprint(policyChanged)).not.toBe(draftFingerprint(original))
   })
 
   it('requires a valid explicit range and sends canonical ISO timestamps for filter deletion', () => {

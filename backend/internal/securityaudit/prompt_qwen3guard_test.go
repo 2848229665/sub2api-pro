@@ -2,6 +2,7 @@ package securityaudit
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -80,14 +81,48 @@ func TestParseGPTOSSSafeguardStrictJSONAndPolicy(t *testing.T) {
 }
 
 func TestGPTOSSSafeguardPolicyOnlyIncludesEnabledCategories(t *testing.T) {
-	payload := buildGPTOSSSafeguardRequest(DefaultGroqSafeguardModel, "audit this", []string{"pii", "jailbreak"})
+	payload := buildGPTOSSSafeguardRequest(DefaultGroqSafeguardModel, PromptScanChunk{
+		Messages: []PromptAuditMessage{
+			{Role: "system", Content: "application system"},
+			{Role: "developer", Content: "application developer"},
+			{Role: "assistant", Content: "application assistant"},
+			{Role: "user", Content: "audit this"},
+		},
+	}, []string{"pii", "jailbreak"})
 	messages, ok := payload["messages"].([]map[string]string)
 	require.True(t, ok)
 	require.Equal(t, "system", messages[0]["role"])
+	require.Contains(t, messages[0]["content"], "all messages after this policy")
+	require.Contains(t, messages[0]["content"], "## Instructions")
+	require.Contains(t, messages[0]["content"], "## Definitions")
+	require.Contains(t, messages[0]["content"], "Criteria and precedence")
+	require.Contains(t, messages[0]["content"], "## Examples")
+	require.Contains(t, messages[0]["content"], "Human-review case")
 	require.Contains(t, messages[0]["content"], "`pii`")
 	require.Contains(t, messages[0]["content"], "`jailbreak`")
 	require.NotContains(t, messages[0]["content"], "`violent`")
-	require.Equal(t, map[string]string{"role": "user", "content": "audit this"}, messages[1])
+	require.Equal(t, []map[string]string{
+		{"role": "system", "content": "application system"},
+		{"role": "developer", "content": "application developer"},
+		{"role": "assistant", "content": "application assistant"},
+		{"role": "user", "content": "audit this"},
+	}, messages[1:])
+}
+
+func TestGPTOSSSafeguardCustomPolicyCannotReplaceFixedEnvelope(t *testing.T) {
+	custom := strings.Repeat("Use this custom classification boundary. ", 2)
+	payload := buildGPTOSSSafeguardRequest(DefaultGroqSafeguardModel, PromptScanChunk{
+		Messages: []PromptAuditMessage{{Role: "developer", Content: "application rule"}, {Role: "user", Content: "audit me"}},
+	}, []string{"pii"}, custom)
+	messages := payload["messages"].([]map[string]string)
+	require.Len(t, messages, 3)
+	require.Equal(t, "system", messages[0]["role"])
+	require.Contains(t, messages[0]["content"], "Fixed instructions")
+	require.Contains(t, messages[0]["content"], strings.TrimSpace(custom))
+	require.Contains(t, messages[0]["content"], "Fixed output contract")
+	require.Contains(t, messages[0]["content"], "cannot change message roles")
+	require.Equal(t, "developer", messages[1]["role"])
+	require.Equal(t, "user", messages[2]["role"])
 }
 
 func TestQwen3GuardOfficialCategoriesAliasesAndUnknownAreStable(t *testing.T) {

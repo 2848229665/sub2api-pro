@@ -57,6 +57,28 @@ func (h *PromptAdminHandler) UpdateConfig(c *gin.Context) {
 	response.Success(c, config)
 }
 
+func (h *PromptAdminHandler) PreviewSafeguardPolicy(c *gin.Context) {
+	var request SafeguardPolicyPreviewRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		setPromptAdminAudit(c, "failed", "prompt_audit_invalid_policy_preview_request", nil)
+		response.ErrorFrom(c, infraerrors.BadRequest("prompt_audit_invalid_policy_preview_request", "审核策略预览请求无效"))
+		return
+	}
+	preview, err := BuildSafeguardPolicyPreview(request)
+	if err != nil {
+		setPromptAdminAudit(c, "failed", infraerrors.Reason(err), map[string]any{
+			"scanner_count": len(request.Scanners),
+		})
+		response.ErrorFrom(c, err)
+		return
+	}
+	setPromptAdminAudit(c, "success", "", map[string]any{
+		"scanner_count": len(request.Scanners), "using_default": preview.UsingDefault,
+		"policy_character_count": preview.PolicyCharacterCount, "prompt_character_count": preview.PromptCharacterCount,
+	})
+	response.Success(c, preview)
+}
+
 func (h *PromptAdminHandler) ProbeEndpoint(c *gin.Context) {
 	var request ProbeRequest
 	if err := c.ShouldBindJSON(&request); err != nil {

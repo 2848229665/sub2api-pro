@@ -1,15 +1,21 @@
 <template>
   <AppLayout>
-    <div class="mx-auto max-w-[1600px]" :class="activeTab === 'config' && draft ? 'pb-28' : 'pb-8'">
-      <header class="mb-6 flex flex-wrap items-end justify-between gap-4">
+    <div class="mx-auto max-w-[1600px] pb-8">
+      <header class="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-primary-600 dark:text-primary-400">{{ t('nav.securityAudit') }}</p>
-          <h1 class="mt-1 text-2xl font-semibold tracking-tight text-gray-950 dark:text-white">{{ t('admin.promptAudit.title') }}</h1>
+          <p class="text-xs font-semibold uppercase text-primary-600 dark:text-primary-400">{{ t('nav.securityAudit') }}</p>
+          <h1 class="mt-1 text-2xl font-semibold text-gray-950 dark:text-white">{{ t('admin.promptAudit.title') }}</h1>
           <p class="mt-2 max-w-3xl text-sm text-gray-500 dark:text-dark-300">{{ t('admin.promptAudit.description') }}</p>
         </div>
-        <div v-if="draft" class="text-right text-xs text-gray-500 dark:text-dark-400">
-          <p>{{ t('admin.promptAudit.configVersion', { version: draft.config_version }) }}</p>
-          <p v-if="draft.updated_at" class="mt-1">{{ formatDate(draft.updated_at) }}</p>
+        <div v-if="draft" class="flex flex-wrap items-center gap-3 lg:justify-end">
+          <div class="text-xs text-gray-500 dark:text-dark-400 lg:text-right">
+            <p>{{ t('admin.promptAudit.configVersion', { version: draft.config_version }) }}</p>
+            <p v-if="draft.updated_at" class="mt-1">{{ formatDate(draft.updated_at) }}</p>
+          </div>
+          <button type="button" class="btn btn-primary inline-flex items-center gap-2" data-test="open-settings" @click="openSettings()">
+            <Icon name="cog" size="sm" />
+            {{ t('admin.promptAudit.settings.open') }}
+          </button>
         </div>
       </header>
 
@@ -19,95 +25,148 @@
       </div>
 
       <template v-else>
-        <div class="mb-4" role="tablist" :aria-label="t('admin.promptAudit.title')">
-          <div class="tabs inline-flex">
-            <button
-              v-for="tab in pageTabs"
-              :key="tab.id"
-              type="button"
-              role="tab"
-              class="tab"
-              :class="{ 'tab-active': activeTab === tab.id }"
-              :aria-selected="activeTab === tab.id"
-              :data-test="`tab-${tab.id}`"
-              @click="activeTab = tab.id"
-            >
-              {{ tab.label }}
-            </button>
-          </div>
+        <RuntimeOverview :runtime="runtime" :loading="loading.runtime" :error="loadErrors.runtime" @refresh="loadRuntime" />
+
+        <div
+          v-if="draft?.enabled && !draft.store_pass_events"
+          data-test="pass-events-disabled-notice"
+          role="status"
+          class="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200"
+        >
+          <span>{{ t('admin.promptAudit.events.passEventsDisabled') }}</span>
+          <button type="button" class="btn btn-secondary btn-sm" @click="openSettings('service')">
+            {{ t('admin.promptAudit.events.openConfiguration') }}
+          </button>
         </div>
 
-        <main class="card px-4 sm:px-6 lg:px-8">
-          <div v-show="activeTab === 'config'" data-test="tab-panel-config">
-            <RuntimeOverview :runtime="runtime" :loading="loading.runtime" :error="loadErrors.runtime" @refresh="loadRuntime" />
-
-            <template v-if="draft">
-              <EndpointPool
-                :endpoints="draft.endpoints"
-                :probe-results="probeResults"
-                :probing-ids="probingIds"
-                @update:endpoints="updateEndpoints"
-                @probe="runProbe"
-              />
-              <div v-if="loadErrors.groups" role="alert" class="mt-5 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{{ loadErrors.groups }}</div>
-              <PolicyPanel :draft="draft" :groups="groups" @update:draft="replaceDraft" />
-            </template>
-          </div>
-
-          <div v-show="activeTab === 'events'" data-test="tab-panel-events">
-            <div
-              v-if="draft?.enabled && !draft.store_pass_events"
-              data-test="pass-events-disabled-notice"
-              role="status"
-              class="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200"
-            >
-              <span>{{ t('admin.promptAudit.events.passEventsDisabled') }}</span>
-              <button type="button" class="btn btn-secondary btn-sm" @click="activeTab = 'config'">
-                {{ t('admin.promptAudit.events.openConfiguration') }}
-              </button>
-            </div>
-            <EventWorkspace
-              :events="events.items"
-              :total="events.total"
-              :page="events.page"
-              :page-size="events.page_size"
-              :filters="filters"
-              :selected-ids="selectedEventIds"
-              :loading="loading.events"
-              :error="loadErrors.events"
-              @filters-change="handleFiltersChanged"
-              @search="applyEventFilters"
-              @selection="selectedEventIds = $event"
-              @page="changePage"
-              @page-size="changePageSize"
-              @view="openEvent"
-              @delete="requestSingleDelete"
-              @batch-delete="requestBatchDelete"
-              @preview-delete="requestFilterDeletePreview"
-            />
-          </div>
-        </main>
+        <EventWorkspace
+          :events="events.items"
+          :total="events.total"
+          :page="events.page"
+          :page-size="events.page_size"
+          :filters="filters"
+          :selected-ids="selectedEventIds"
+          :loading="loading.events"
+          :error="loadErrors.events"
+          @filters-change="handleFiltersChanged"
+          @search="applyEventFilters"
+          @selection="selectedEventIds = $event"
+          @page="changePage"
+          @page-size="changePageSize"
+          @view="openEvent"
+          @delete="requestSingleDelete"
+          @batch-delete="requestBatchDelete"
+          @preview-delete="requestFilterDeletePreview"
+        />
       </template>
     </div>
 
-    <div v-if="draft && activeTab === 'config'" class="fixed inset-x-0 bottom-0 z-30 border-t border-gray-200 bg-white/95 px-4 py-3 shadow-[0_-12px_35px_rgba(15,23,42,0.08)] backdrop-blur dark:border-dark-700/80 dark:bg-dark-900/95 dark:shadow-[0_-12px_35px_rgba(0,0,0,0.35)] lg:left-64">
-      <div class="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3">
-        <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
-          <SaveToggle :label="t('admin.promptAudit.saveBar.enabled')" :model-value="draft.enabled" data-test="enabled-toggle" @update:model-value="setEnabled" />
-          <SaveToggle :label="t('admin.promptAudit.saveBar.blocking')" :model-value="draft.blocking_enabled" :disabled="!draft.enabled" data-test="blocking-toggle" @update:model-value="setBlocking" />
-          <SaveToggle :label="t('admin.promptAudit.saveBar.storePass')" :model-value="draft.store_pass_events" data-test="store-pass-toggle" @update:model-value="replaceDraft({ ...draft!, store_pass_events: $event })" />
-        </div>
-        <div class="flex items-center gap-3">
-          <span class="text-sm" :class="dirty ? 'text-amber-700 dark:text-amber-300' : 'text-gray-500 dark:text-dark-400'">
-            {{ dirty ? t('admin.promptAudit.saveBar.dirty') : t('admin.promptAudit.saveBar.synced') }}
-          </span>
-          <button type="button" class="btn btn-secondary" :disabled="!dirty || loading.saving" @click="resetDraft">{{ t('common.reset') }}</button>
-          <button type="button" class="btn btn-primary" :disabled="!dirty || loading.saving" data-test="save-config" @click="saveConfig">
-            {{ loading.saving ? t('common.saving') : t('common.save') }}
+    <BaseDialog :show="settingsOpen && Boolean(draft)" :title="t('admin.promptAudit.settings.title')" width="extra-wide" @close="closeSettings">
+      <div v-if="draft" class="space-y-6" data-test="prompt-audit-settings">
+        <div class="flex gap-2 overflow-x-auto border-b border-gray-100 pb-3 dark:border-dark-700" role="tablist" :aria-label="t('admin.promptAudit.settings.title')">
+          <button
+            v-for="tab in settingsTabs"
+            :key="tab.id"
+            type="button"
+            role="tab"
+            class="inline-flex whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors"
+            :class="activeSettingsTab === tab.id ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-dark-700 dark:hover:text-white'"
+            :aria-selected="activeSettingsTab === tab.id"
+            :data-test="`settings-tab-${tab.id}`"
+            @click="activeSettingsTab = tab.id"
+          >
+            {{ tab.label }}
           </button>
         </div>
+
+        <div v-if="activeSettingsTab === 'service'" class="space-y-6" data-test="settings-panel-service">
+          <section>
+            <h3 class="text-base font-semibold text-gray-950 dark:text-white">{{ t('admin.promptAudit.settings.modeTitle') }}</h3>
+            <p class="mt-1 text-sm text-gray-500 dark:text-dark-300">{{ t('admin.promptAudit.settings.modeDescription') }}</p>
+            <div class="mt-4 grid gap-3 lg:grid-cols-3">
+              <div class="flex items-center justify-between gap-4 rounded-lg border border-gray-100 p-4 dark:border-dark-700">
+                <div>
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.settings.enabled') }}</p>
+                  <p class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.promptAudit.settings.enabledHint') }}</p>
+                </div>
+                <SaveToggle :label="t('admin.promptAudit.settings.enabled')" :model-value="draft.enabled" data-test="enabled-toggle" hide-label @update:model-value="setEnabled" />
+              </div>
+              <div class="flex items-center justify-between gap-4 rounded-lg border border-gray-100 p-4 dark:border-dark-700">
+                <div>
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.settings.blocking') }}</p>
+                  <p class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.promptAudit.settings.blockingHint') }}</p>
+                </div>
+                <SaveToggle :label="t('admin.promptAudit.settings.blocking')" :model-value="draft.blocking_enabled" :disabled="!draft.enabled" data-test="blocking-toggle" hide-label @update:model-value="setBlocking" />
+              </div>
+              <div class="flex items-center justify-between gap-4 rounded-lg border border-gray-100 p-4 dark:border-dark-700">
+                <div>
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.settings.storePass') }}</p>
+                  <p class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.promptAudit.settings.storePassHint') }}</p>
+                </div>
+                <SaveToggle :label="t('admin.promptAudit.settings.storePass')" :model-value="draft.store_pass_events" data-test="store-pass-toggle" hide-label @update:model-value="replaceDraft({ ...draft!, store_pass_events: $event })" />
+              </div>
+            </div>
+          </section>
+
+          <div v-if="draft.blocking_enabled" class="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200">
+            <Icon name="infoCircle" size="md" class="mt-0.5 shrink-0" />
+            <span>{{ t('admin.promptAudit.settings.blockingNotice') }}</span>
+          </div>
+
+          <EndpointPool
+            :endpoints="draft.endpoints"
+            :probe-results="probeResults"
+            :probing-ids="probingIds"
+            @update:endpoints="updateEndpoints"
+            @probe="runProbe"
+          />
+        </div>
+
+        <div v-else-if="activeSettingsTab === 'scope'" data-test="settings-panel-scope">
+          <div v-if="loadErrors.groups" role="alert" class="mb-5 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{{ loadErrors.groups }}</div>
+          <PolicyPanel section="scope" :draft="draft" :groups="groups" @update:draft="replaceDraft" />
+        </div>
+
+        <div v-else-if="activeSettingsTab === 'policy'" data-test="settings-panel-policy">
+          <SafeguardPolicyPanel
+            :policy="draft.groq_safeguard_policy"
+            :default-policy="draft.groq_safeguard_default_policy"
+            :scanners="draft.scanners"
+            :has-groq="hasGroqEndpoint"
+            :has-qwen="hasQwenEndpoint"
+            :preview="safeguardPolicyPreview"
+            :previewing="loading.policyPreview"
+            :preview-error="safeguardPolicyPreviewError"
+            @update:policy="updateSafeguardPolicy"
+            @preview="previewSafeguardPolicy"
+          />
+        </div>
+
+        <div v-else data-test="settings-panel-runtime">
+          <PolicyPanel section="runtime" :draft="draft" :groups="groups" @update:draft="replaceDraft" />
+        </div>
       </div>
-    </div>
+
+      <template #footer>
+        <div v-if="draft" class="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div class="min-w-0 text-sm">
+            <p v-if="configValidationMessage" class="text-red-600 dark:text-red-300" data-test="config-validation">{{ configValidationMessage }}</p>
+            <p v-else :class="dirty ? 'text-amber-700 dark:text-amber-300' : 'text-gray-500 dark:text-dark-400'">
+              {{ dirty ? t('admin.promptAudit.saveBar.dirty') : t('admin.promptAudit.saveBar.synced') }}
+            </p>
+          </div>
+          <div class="flex flex-wrap justify-end gap-2">
+            <button type="button" class="btn btn-secondary" :disabled="!dirty || loading.saving" @click="resetDraft">{{ t('common.reset') }}</button>
+            <button type="button" class="btn btn-secondary" @click="closeSettings">{{ t('common.cancel') }}</button>
+            <button type="button" class="btn btn-primary inline-flex items-center gap-2" :disabled="!dirty || loading.saving || Boolean(configValidationMessage)" data-test="save-config" @click="saveConfig">
+              <Icon v-if="loading.saving" name="refresh" size="sm" class="animate-spin" />
+              <Icon v-else name="check" size="sm" />
+              {{ loading.saving ? t('common.saving') : t('common.save') }}
+            </button>
+          </div>
+        </div>
+      </template>
+    </BaseDialog>
 
     <ConfirmDialog
       :show="showBlockingConfirmation"
@@ -146,12 +205,15 @@
 import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
 import RuntimeOverview from './components/RuntimeOverview.vue'
 import EndpointPool from './components/EndpointPool.vue'
 import PolicyPanel from './components/PolicyPanel.vue'
+import SafeguardPolicyPanel from './components/SafeguardPolicyPanel.vue'
 import EventWorkspace from './components/EventWorkspace.vue'
 import EventDetailDialog from './components/EventDetailDialog.vue'
 import FilterDeleteDialog from './components/FilterDeleteDialog.vue'
@@ -167,16 +229,28 @@ import type {
   PromptEventPage,
   PromptLoadErrors,
   PromptProbeResult,
+  PromptSafeguardPolicyPreview,
 } from './types'
-import { buildUpdateRequest, cloneData, configToDraft, draftFingerprint, emptyEventFilters } from './viewModel'
+import {
+  buildUpdateRequest,
+  cloneData,
+  configToDraft,
+  draftFingerprint,
+  emptyEventFilters,
+  MAX_SAFEGUARD_POLICY_LENGTH,
+  MIN_SAFEGUARD_POLICY_LENGTH,
+} from './viewModel'
 
 const { t, locale } = useI18n()
 const appStore = useAppStore()
-type PromptAuditPageTab = 'config' | 'events'
-const activeTab = ref<PromptAuditPageTab>('events')
-const pageTabs = computed(() => [
-  { id: 'events' as const, label: t('admin.promptAudit.tabs.events') },
-  { id: 'config' as const, label: t('admin.promptAudit.tabs.config') },
+type PromptAuditSettingsTab = 'service' | 'scope' | 'policy' | 'runtime'
+const settingsOpen = ref(false)
+const activeSettingsTab = ref<PromptAuditSettingsTab>('service')
+const settingsTabs = computed(() => [
+  { id: 'service' as const, label: t('admin.promptAudit.settings.tabs.service') },
+  { id: 'policy' as const, label: t('admin.promptAudit.settings.tabs.policy') },
+  { id: 'scope' as const, label: t('admin.promptAudit.settings.tabs.scope') },
+  { id: 'runtime' as const, label: t('admin.promptAudit.settings.tabs.runtime') },
 ])
 const serverConfig = ref<PromptAuditDraft | null>(null)
 const draft = ref<PromptAuditDraft | null>(null)
@@ -190,18 +264,68 @@ const activeEvent = ref<PromptAuditEvent | null>(null)
 const showEventDetail = ref(false)
 const probeResults = reactive<Record<string, PromptProbeResult>>({})
 const probingIds = ref<string[]>([])
+const safeguardPolicyPreview = ref<PromptSafeguardPolicyPreview | null>(null)
+const safeguardPolicyPreviewError = ref('')
 const showFilterDelete = ref(false)
 const deletePreview = ref<PromptDeletePreview | null>(null)
 const deletePreviewFilters = ref<PromptEventFilters | null>(null)
 const showBlockingConfirmation = ref(false)
 const deleteRequest = reactive<{ mode: '' | 'single' | 'batch'; ids: number[] }>({ mode: '', ids: [] })
-const loading = reactive({ config: false, runtime: false, groups: false, events: false, saving: false, detail: false, deleting: false, previewing: false })
+const loading = reactive({ config: false, runtime: false, groups: false, events: false, saving: false, detail: false, deleting: false, previewing: false, policyPreview: false })
 const loadErrors = reactive<PromptLoadErrors>({ config: '', runtime: '', groups: '', events: '' })
 const dirty = computed(() => draftFingerprint(draft.value) !== draftFingerprint(serverConfig.value))
+const hasGroqEndpoint = computed(() => draft.value?.endpoints.some((endpoint) => endpoint.protocol === 'groq_safeguard') ?? false)
+const hasQwenEndpoint = computed(() => draft.value?.endpoints.some((endpoint) => endpoint.protocol === 'openai_compatible') ?? false)
+const configValidationMessage = computed(() => {
+  const value = draft.value
+  if (!value) return ''
+  if (value.worker_count < 1 || value.worker_count > 32) return t('admin.promptAudit.settings.validation.workerCount')
+  if (value.queue_capacity < 1 || value.queue_capacity > 100000) return t('admin.promptAudit.settings.validation.queueCapacity')
+  const policyLength = Array.from(value.groq_safeguard_policy.trim()).length
+  if (policyLength > 0 && (policyLength < MIN_SAFEGUARD_POLICY_LENGTH || policyLength > MAX_SAFEGUARD_POLICY_LENGTH)) {
+    return t('admin.promptAudit.settings.validation.safeguardPolicy', { min: MIN_SAFEGUARD_POLICY_LENGTH, max: MAX_SAFEGUARD_POLICY_LENGTH })
+  }
+  if (value.scanners.length === 0) return t('admin.promptAudit.settings.validation.scanners')
+  if (!value.all_groups && value.group_ids.length === 0) return t('admin.promptAudit.settings.validation.groups')
+
+  const endpointIDs = new Set<string>()
+  for (const endpoint of value.endpoints) {
+    const id = endpoint.id.trim()
+    const name = endpoint.name.trim() || id || t('admin.promptAudit.pool.unnamedNode')
+    if (!id || !endpoint.name.trim() || !endpoint.base_url.trim()) {
+      return t('admin.promptAudit.settings.validation.endpointFields', { name })
+    }
+    if (endpointIDs.has(id)) return t('admin.promptAudit.settings.validation.endpointDuplicate', { id })
+    endpointIDs.add(id)
+    if (endpoint.timeout_ms < 100 || endpoint.timeout_ms > 30000) {
+      return t('admin.promptAudit.settings.validation.endpointTimeout', { name })
+    }
+    if (endpoint.input_limit < 128 || endpoint.input_limit > 100000) {
+      return t('admin.promptAudit.settings.validation.endpointInputLimit', { name })
+    }
+    if (
+      value.enabled &&
+      endpoint.enabled &&
+      endpoint.protocol === 'groq_safeguard' &&
+      !hasEndpointCredential(endpoint)
+    ) {
+      return t('admin.promptAudit.settings.validation.groqCredential', { name })
+    }
+  }
+  if (value.enabled && !value.endpoints.some((endpoint) => endpoint.enabled)) {
+    return t('admin.promptAudit.settings.validation.endpointRequired')
+  }
+  return ''
+})
 
 const SaveToggle = defineComponent({
   inheritAttrs: false,
-  props: { label: { type: String, required: true }, modelValue: { type: Boolean, required: true }, disabled: { type: Boolean, default: false } },
+  props: {
+    label: { type: String, required: true },
+    modelValue: { type: Boolean, required: true },
+    disabled: { type: Boolean, default: false },
+    hideLabel: { type: Boolean, default: false },
+  },
   emits: ['update:modelValue'],
   setup(props, { emit, attrs }) {
     return () => h('label', { class: ['flex items-center gap-2.5 text-sm', props.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'] }, [
@@ -229,10 +353,14 @@ const SaveToggle = defineComponent({
           ],
         }),
       ]),
-      h('span', { class: 'select-none text-gray-700 dark:text-dark-200' }, props.label),
+      props.hideLabel ? null : h('span', { class: 'select-none text-gray-700 dark:text-dark-200' }, props.label),
     ])
   },
 })
+
+function hasEndpointCredential(endpoint: PromptAuditEndpointDraft): boolean {
+  return Boolean(endpoint.token.trim() || (endpoint.has_token && !endpoint.clear_token))
+}
 
 function errorMessage(error: unknown, fallbackKey: string): string {
   const code = extractApiErrorCode(error)
@@ -251,6 +379,7 @@ async function loadConfig() {
     const config = await promptAuditAPI.getConfig()
     serverConfig.value = configToDraft(config)
     draft.value = configToDraft(config)
+    clearSafeguardPolicyPreview()
   } catch (error) {
     loadErrors.config = errorMessage(error, 'admin.promptAudit.errors.loadConfig')
   } finally {
@@ -288,7 +417,17 @@ async function loadInitial() {
   await Promise.allSettled([loadConfig(), loadRuntime(), loadGroups(), loadEvents()])
 }
 
-function replaceDraft(value: PromptAuditDraft) { draft.value = cloneData(value) }
+function replaceDraft(value: PromptAuditDraft) {
+  const previous = draft.value
+  if (
+    !previous ||
+    previous.groq_safeguard_policy !== value.groq_safeguard_policy ||
+    JSON.stringify(previous.scanners) !== JSON.stringify(value.scanners)
+  ) {
+    clearSafeguardPolicyPreview()
+  }
+  draft.value = cloneData(value)
+}
 function updateEndpoints(value: PromptAuditEndpointDraft[]) {
   if (!draft.value) return
   replaceDraft({ ...draft.value, endpoints: value })
@@ -306,18 +445,31 @@ function confirmBlocking() {
   showBlockingConfirmation.value = false
   if (draft.value) replaceDraft({ ...draft.value, blocking_enabled: true })
 }
+function openSettings(tab: PromptAuditSettingsTab = 'service') {
+  activeSettingsTab.value = tab
+  settingsOpen.value = true
+}
+function closeSettings() {
+  settingsOpen.value = false
+  clearSafeguardPolicyPreview()
+}
 function resetDraft() {
-  if (serverConfig.value) draft.value = cloneData(serverConfig.value)
+  if (serverConfig.value) {
+    draft.value = cloneData(serverConfig.value)
+    clearSafeguardPolicyPreview()
+  }
 }
 async function saveConfig() {
-  if (!draft.value || !dirty.value) return
+  if (!draft.value || !dirty.value || configValidationMessage.value) return
   loading.saving = true
   try {
     const saved = await promptAuditAPI.updateConfig(buildUpdateRequest(draft.value))
     serverConfig.value = configToDraft(saved)
     draft.value = configToDraft(saved)
+    clearSafeguardPolicyPreview()
+    settingsOpen.value = false
     appStore.showSuccess(t('admin.promptAudit.messages.saved'))
-    await loadRuntime()
+    await Promise.allSettled([loadRuntime(), loadEvents()])
   } catch (error) {
     const code = extractApiErrorCode(error)
     appStore.showError(errorMessage(error, code === 'prompt_audit_config_conflict' ? 'admin.promptAudit.errors.prompt_audit_config_conflict' : 'admin.promptAudit.errors.saveConfig'))
@@ -337,6 +489,32 @@ async function runProbe(endpoint: PromptAuditEndpointDraft) {
     appStore.showError(errorMessage(error, 'admin.promptAudit.errors.probe'))
   } finally {
     probingIds.value = probingIds.value.filter((id) => id !== endpoint.id)
+  }
+}
+
+function clearSafeguardPolicyPreview() {
+  safeguardPolicyPreview.value = null
+  safeguardPolicyPreviewError.value = ''
+}
+
+function updateSafeguardPolicy(value: string) {
+  if (!draft.value) return
+  replaceDraft({ ...draft.value, groq_safeguard_policy: value })
+}
+
+async function previewSafeguardPolicy() {
+  if (!draft.value || loading.policyPreview) return
+  clearSafeguardPolicyPreview()
+  loading.policyPreview = true
+  try {
+    safeguardPolicyPreview.value = await promptAuditAPI.previewSafeguardPolicy(
+      draft.value.groq_safeguard_policy,
+      draft.value.scanners,
+    )
+  } catch (error) {
+    safeguardPolicyPreviewError.value = errorMessage(error, 'admin.promptAudit.errors.previewPolicy')
+  } finally {
+    loading.policyPreview = false
   }
 }
 

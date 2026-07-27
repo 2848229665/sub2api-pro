@@ -94,6 +94,7 @@ func promptAdminRouter(service PromptAdminService) *gin.Engine {
 	group := router.Group("/admin/prompt-audit")
 	group.GET("/config", handler.GetConfig)
 	group.PUT("/config", handler.UpdateConfig)
+	group.POST("/policy/preview", handler.PreviewSafeguardPolicy)
 	group.POST("/endpoints/probe", handler.ProbeEndpoint)
 	group.GET("/runtime", handler.GetRuntime)
 	group.GET("/events", handler.ListEvents)
@@ -196,6 +197,25 @@ func TestPromptAdminProbeSupportsTemporaryOrSavedTokenWithoutEcho(t *testing.T) 
 			require.Contains(t, response.Body.String(), `"token_applied":true`)
 		})
 	}
+}
+
+func TestPromptAdminSafeguardPolicyPreviewUsesBackendRenderer(t *testing.T) {
+	customPolicy := strings.Repeat("Classify this custom boundary precisely. ", 2)
+	response := promptAdminRequest(t, promptAdminRouter(&fakePromptAdminService{}), http.MethodPost, "/admin/prompt-audit/policy/preview", SafeguardPolicyPreviewRequest{
+		Policy: customPolicy, Scanners: []string{"pii", "jailbreak"},
+	})
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Contains(t, response.Body.String(), "Administrator classification policy")
+	require.Contains(t, response.Body.String(), "Classify this custom boundary precisely")
+	require.Contains(t, response.Body.String(), "Fixed output contract")
+	require.Contains(t, response.Body.String(), `"using_default":false`)
+	require.NotContains(t, response.Body.String(), "`violent`")
+
+	invalid := promptAdminRequest(t, promptAdminRouter(&fakePromptAdminService{}), http.MethodPost, "/admin/prompt-audit/policy/preview", SafeguardPolicyPreviewRequest{
+		Policy: "too short", Scanners: []string{"pii"},
+	})
+	require.Equal(t, http.StatusBadRequest, invalid.Code)
+	require.Contains(t, invalid.Body.String(), "prompt_audit_invalid_safeguard_policy")
 }
 
 func TestPromptAdminRejectsInvalidEventIDsTimesAndPagination(t *testing.T) {

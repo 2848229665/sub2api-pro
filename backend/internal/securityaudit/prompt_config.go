@@ -14,17 +14,19 @@ import (
 )
 
 const (
-	DefaultWorkerCount   = 4
-	MaxWorkerCount       = 32
-	DefaultQueueCapacity = 32768
-	MaxQueueCapacity     = 100000
-	DefaultTimeoutMS     = 3000
-	MinTimeoutMS         = 100
-	MaxTimeoutMS         = 30000
-	DefaultInputLimit    = 4000
-	MinInputLimit        = 128
-	MaxInputLimit        = 100000
-	DefaultPayloadTTL    = 30 * time.Minute
+	DefaultWorkerCount       = 4
+	MaxWorkerCount           = 32
+	DefaultQueueCapacity     = 32768
+	MaxQueueCapacity         = 100000
+	DefaultTimeoutMS         = 3000
+	MinTimeoutMS             = 100
+	MaxTimeoutMS             = 30000
+	DefaultInputLimit        = 4000
+	MinInputLimit            = 128
+	MaxInputLimit            = 100000
+	MinSafeguardPolicyLength = 32
+	MaxSafeguardPolicyLength = 16000
+	DefaultPayloadTTL        = 30 * time.Minute
 )
 
 type SecretEncryptor interface {
@@ -64,50 +66,53 @@ type StorageEndpoint struct {
 }
 
 type storageConfig struct {
-	Enabled         bool              `json:"enabled"`
-	BlockingEnabled bool              `json:"blocking_enabled"`
-	StorePassEvents bool              `json:"store_pass_events"`
-	Strategy        string            `json:"strategy"`
-	WorkerCount     int               `json:"worker_count"`
-	QueueCapacity   int               `json:"queue_capacity"`
-	Scanners        []string          `json:"scanners"`
-	AllGroups       bool              `json:"all_groups"`
-	GroupIDs        []int64           `json:"group_ids"`
-	Endpoints       []StorageEndpoint `json:"endpoints"`
-	ConfigVersion   int64             `json:"config_version"`
-	UpdatedAt       time.Time         `json:"updated_at"`
-	UpdatedBy       int64             `json:"updated_by"`
-	ChangeSummary   string            `json:"change_summary"`
+	Enabled             bool              `json:"enabled"`
+	BlockingEnabled     bool              `json:"blocking_enabled"`
+	StorePassEvents     bool              `json:"store_pass_events"`
+	GroqSafeguardPolicy string            `json:"groq_safeguard_policy,omitempty"`
+	Strategy            string            `json:"strategy"`
+	WorkerCount         int               `json:"worker_count"`
+	QueueCapacity       int               `json:"queue_capacity"`
+	Scanners            []string          `json:"scanners"`
+	AllGroups           bool              `json:"all_groups"`
+	GroupIDs            []int64           `json:"group_ids"`
+	Endpoints           []StorageEndpoint `json:"endpoints"`
+	ConfigVersion       int64             `json:"config_version"`
+	UpdatedAt           time.Time         `json:"updated_at"`
+	UpdatedBy           int64             `json:"updated_by"`
+	ChangeSummary       string            `json:"change_summary"`
 }
 
 type ActiveEndpoint struct {
-	ID         string
-	Name       string
-	Protocol   string
-	BaseURL    string
-	Model      string
-	Token      string
-	TimeoutMS  int
-	InputLimit int
-	Enabled    bool
+	ID              string
+	Name            string
+	Protocol        string
+	BaseURL         string
+	Model           string
+	Token           string
+	TimeoutMS       int
+	InputLimit      int
+	Enabled         bool
+	SafeguardPolicy string
 }
 
 type ActiveConfig struct {
-	RiskControlEnabled bool
-	Enabled            bool
-	BlockingEnabled    bool
-	StorePassEvents    bool
-	Strategy           string
-	WorkerCount        int
-	QueueCapacity      int
-	Scanners           []string
-	AllGroups          bool
-	GroupIDs           []int64
-	Endpoints          []ActiveEndpoint
-	ConfigVersion      int64
-	UpdatedAt          time.Time
-	UpdatedBy          int64
-	ChangeSummary      string
+	RiskControlEnabled  bool
+	Enabled             bool
+	BlockingEnabled     bool
+	StorePassEvents     bool
+	GroqSafeguardPolicy string
+	Strategy            string
+	WorkerCount         int
+	QueueCapacity       int
+	Scanners            []string
+	AllGroups           bool
+	GroupIDs            []int64
+	Endpoints           []ActiveEndpoint
+	ConfigVersion       int64
+	UpdatedAt           time.Time
+	UpdatedBy           int64
+	ChangeSummary       string
 }
 
 type PublicEndpoint struct {
@@ -124,21 +129,23 @@ type PublicEndpoint struct {
 }
 
 type PublicConfig struct {
-	Enabled         bool             `json:"enabled"`
-	BlockingEnabled bool             `json:"blocking_enabled"`
-	StorePassEvents bool             `json:"store_pass_events"`
-	EffectiveMode   Mode             `json:"effective_mode"`
-	Strategy        string           `json:"strategy"`
-	WorkerCount     int              `json:"worker_count"`
-	QueueCapacity   int              `json:"queue_capacity"`
-	Scanners        []string         `json:"scanners"`
-	AllGroups       bool             `json:"all_groups"`
-	GroupIDs        []int64          `json:"group_ids"`
-	Endpoints       []PublicEndpoint `json:"endpoints"`
-	ConfigVersion   int64            `json:"config_version"`
-	UpdatedAt       time.Time        `json:"updated_at"`
-	UpdatedBy       int64            `json:"updated_by"`
-	ChangeSummary   string           `json:"change_summary"`
+	Enabled                    bool             `json:"enabled"`
+	BlockingEnabled            bool             `json:"blocking_enabled"`
+	StorePassEvents            bool             `json:"store_pass_events"`
+	GroqSafeguardPolicy        string           `json:"groq_safeguard_policy"`
+	GroqSafeguardDefaultPolicy string           `json:"groq_safeguard_default_policy"`
+	EffectiveMode              Mode             `json:"effective_mode"`
+	Strategy                   string           `json:"strategy"`
+	WorkerCount                int              `json:"worker_count"`
+	QueueCapacity              int              `json:"queue_capacity"`
+	Scanners                   []string         `json:"scanners"`
+	AllGroups                  bool             `json:"all_groups"`
+	GroupIDs                   []int64          `json:"group_ids"`
+	Endpoints                  []PublicEndpoint `json:"endpoints"`
+	ConfigVersion              int64            `json:"config_version"`
+	UpdatedAt                  time.Time        `json:"updated_at"`
+	UpdatedBy                  int64            `json:"updated_by"`
+	ChangeSummary              string           `json:"change_summary"`
 }
 
 type UpdateEndpoint struct {
@@ -159,6 +166,7 @@ type UpdateConfigRequest struct {
 	Enabled               bool             `json:"enabled"`
 	BlockingEnabled       bool             `json:"blocking_enabled"`
 	StorePassEvents       bool             `json:"store_pass_events"`
+	GroqSafeguardPolicy   string           `json:"groq_safeguard_policy"`
 	Strategy              string           `json:"strategy"`
 	WorkerCount           int              `json:"worker_count"`
 	QueueCapacity         int              `json:"queue_capacity"`
@@ -215,6 +223,7 @@ func normalizeStorageConfig(cfg *storageConfig) {
 	if cfg.QueueCapacity == 0 {
 		cfg.QueueCapacity = DefaultQueueCapacity
 	}
+	cfg.GroqSafeguardPolicy = canonicalStoredSafeguardPolicy(cfg.GroqSafeguardPolicy)
 	if len(cfg.Scanners) == 0 {
 		cfg.Scanners = append([]string(nil), AllScannerIDs...)
 	}
@@ -256,6 +265,9 @@ func validateStorageConfig(cfg storageConfig) error {
 	}
 	if cfg.QueueCapacity < 1 || cfg.QueueCapacity > MaxQueueCapacity {
 		return infraerrors.BadRequest("prompt_audit_invalid_queue_capacity", "队列容量超出允许范围")
+	}
+	if err := validateSafeguardPolicy(cfg.GroqSafeguardPolicy); err != nil {
+		return err
 	}
 	if !cfg.AllGroups && len(cfg.GroupIDs) == 0 {
 		return infraerrors.BadRequest("prompt_audit_groups_required", "指定分组模式至少需要选择一个分组")
@@ -306,6 +318,9 @@ func validateUpdateConfigRequest(req UpdateConfigRequest) error {
 	}
 	if req.QueueCapacity < 1 || req.QueueCapacity > MaxQueueCapacity {
 		return infraerrors.BadRequest("prompt_audit_invalid_queue_capacity", "队列容量超出允许范围")
+	}
+	if err := validateSafeguardPolicy(req.GroqSafeguardPolicy); err != nil {
+		return err
 	}
 	if len(req.Scanners) == 0 {
 		return infraerrors.BadRequest("prompt_audit_scanners_required", "至少需要启用一个风险分类")
@@ -393,7 +408,9 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool) PublicConfig 
 	active := ActiveConfig{RiskControlEnabled: riskControlEnabled, Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled}
 	return PublicConfig{
 		Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled, StorePassEvents: cfg.StorePassEvents,
-		EffectiveMode: active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
+		GroqSafeguardPolicy:        effectiveSafeguardPolicy(cfg.GroqSafeguardPolicy),
+		GroqSafeguardDefaultPolicy: DefaultGroqSafeguardPolicy,
+		EffectiveMode:              active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: scanners, AllGroups: cfg.AllGroups,
 		GroupIDs: groupIDs, Endpoints: endpoints, ConfigVersion: cfg.ConfigVersion,
 		UpdatedAt: cfg.UpdatedAt, UpdatedBy: cfg.UpdatedBy, ChangeSummary: cfg.ChangeSummary,
@@ -401,9 +418,11 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool) PublicConfig 
 }
 
 func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor SecretEncryptor) (ActiveConfig, error) {
+	policy := effectiveSafeguardPolicy(cfg.GroqSafeguardPolicy)
 	active := ActiveConfig{
 		RiskControlEnabled: riskControlEnabled, Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled,
-		StorePassEvents: cfg.StorePassEvents, Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
+		StorePassEvents: cfg.StorePassEvents, GroqSafeguardPolicy: policy,
+		Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: append([]string(nil), cfg.Scanners...), AllGroups: cfg.AllGroups,
 		GroupIDs: append([]int64(nil), cfg.GroupIDs...), ConfigVersion: cfg.ConfigVersion,
 		UpdatedAt: cfg.UpdatedAt, UpdatedBy: cfg.UpdatedBy, ChangeSummary: cfg.ChangeSummary,
@@ -424,6 +443,7 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 		active.Endpoints = append(active.Endpoints, ActiveEndpoint{
 			ID: ep.ID, Name: ep.Name, Protocol: ep.Protocol, BaseURL: ep.BaseURL, Model: ep.Model,
 			Token: token, TimeoutMS: ep.TimeoutMS, InputLimit: ep.InputLimit, Enabled: ep.Enabled,
+			SafeguardPolicy: policy,
 		})
 	}
 	return active, nil
@@ -431,18 +451,29 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 
 func changeSummary(cfg storageConfig) string {
 	summary := struct {
-		Enabled         bool   `json:"enabled"`
-		BlockingEnabled bool   `json:"blocking_enabled"`
-		StorePassEvents bool   `json:"store_pass_events"`
-		EndpointCount   int    `json:"endpoint_count"`
-		ScannerCount    int    `json:"scanner_count"`
-		AllGroups       bool   `json:"all_groups"`
-		GroupCount      int    `json:"group_count"`
-		GroupHash       string `json:"group_hash"`
-	}{cfg.Enabled, cfg.BlockingEnabled, cfg.StorePassEvents, len(cfg.Endpoints), len(cfg.Scanners), cfg.AllGroups, len(cfg.GroupIDs), ""}
+		Enabled                 bool   `json:"enabled"`
+		BlockingEnabled         bool   `json:"blocking_enabled"`
+		StorePassEvents         bool   `json:"store_pass_events"`
+		EndpointCount           int    `json:"endpoint_count"`
+		ScannerCount            int    `json:"scanner_count"`
+		AllGroups               bool   `json:"all_groups"`
+		GroupCount              int    `json:"group_count"`
+		GroupHash               string `json:"group_hash"`
+		GroqSafeguardPolicyHash string `json:"groq_safeguard_policy_hash"`
+	}{
+		Enabled:         cfg.Enabled,
+		BlockingEnabled: cfg.BlockingEnabled,
+		StorePassEvents: cfg.StorePassEvents,
+		EndpointCount:   len(cfg.Endpoints),
+		ScannerCount:    len(cfg.Scanners),
+		AllGroups:       cfg.AllGroups,
+		GroupCount:      len(cfg.GroupIDs),
+	}
 	rawGroups, _ := json.Marshal(cfg.GroupIDs)
 	digest := sha256.Sum256(rawGroups)
 	summary.GroupHash = hex.EncodeToString(digest[:])
+	policyDigest := sha256.Sum256([]byte(effectiveSafeguardPolicy(cfg.GroqSafeguardPolicy)))
+	summary.GroqSafeguardPolicyHash = hex.EncodeToString(policyDigest[:])
 	raw, _ := json.Marshal(summary)
 	return string(raw)
 }
