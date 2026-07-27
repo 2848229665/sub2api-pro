@@ -35,6 +35,26 @@ func (r staticSettingRepository) GetAll(context.Context) (map[string]string, err
 }
 func (r staticSettingRepository) Delete(context.Context, string) error { return nil }
 
+type structuredCaptureScanner struct {
+	chunks []PromptScanChunk
+}
+
+func (s *structuredCaptureScanner) Scan(_ context.Context, _ ActiveEndpoint, text string, _ []string) (*NormalizedResult, error) {
+	return s.capture(PromptScanChunk{Text: text})
+}
+
+func (s *structuredCaptureScanner) ScanStructured(_ context.Context, _ ActiveEndpoint, chunk PromptScanChunk, _ []string) (*NormalizedResult, error) {
+	return s.capture(chunk)
+}
+
+func (s *structuredCaptureScanner) capture(chunk PromptScanChunk) (*NormalizedResult, error) {
+	s.chunks = append(s.chunks, chunk)
+	return &NormalizedResult{
+		Decision: EventPass, RiskLevel: RiskLow, Action: ActionAllow,
+		ScannerScores: map[string]float64{}, ScannerEvidence: map[string]string{},
+	}, nil
+}
+
 func TestPromptServiceHasExplicitIdempotentLifecycle(t *testing.T) {
 	config := NewConfigManager(nil, staticSettingRepository{values: map[string]string{
 		SettingKeyPromptAuditConfig: "",
@@ -81,14 +101,7 @@ func TestPromptServiceGPTOSSSafeguardExcludesToolOutputAndAttachments(t *testing
 			Model: DefaultGroqSafeguardModel, TimeoutMS: 1000, InputLimit: 1000,
 		}},
 	}
-	seen := make([]string, 0, 1)
-	scanner := PromptScannerFunc(func(_ context.Context, _ ActiveEndpoint, chunk string, _ []string) (*NormalizedResult, error) {
-		seen = append(seen, chunk)
-		return &NormalizedResult{
-			Decision: EventPass, RiskLevel: RiskLow, Action: ActionAllow,
-			ScannerScores: map[string]float64{}, ScannerEvidence: map[string]string{},
-		}, nil
-	})
+	scanner := &structuredCaptureScanner{}
 	service := &PromptService{
 		config:    &fakeConfigStore{cfg: cfg, active: true},
 		evaluator: newGuardEvaluator(scanner, nil, NewAtomicMetrics(), 2, 2),
@@ -114,11 +127,15 @@ func TestPromptServiceGPTOSSSafeguardExcludesToolOutputAndAttachments(t *testing
 
 	require.NoError(t, err)
 	require.Equal(t, DecisionAllow, decision.Kind)
-	require.Equal(t, []string{
-		"user text",
-		"INSTRUCTIONS_CANARY\n\nSYSTEM_CANARY\n\nDEVELOPER_CANARY\n\nASSISTANT_CANARY",
-	}, seen)
-	joined := strings.Join(seen, "\n")
+	require.Len(t, scanner.chunks, 1)
+	require.Equal(t, []PromptAuditMessage{
+		{Role: "developer", Content: "INSTRUCTIONS_CANARY"},
+		{Role: "system", Content: "SYSTEM_CANARY"},
+		{Role: "developer", Content: "DEVELOPER_CANARY"},
+		{Role: "assistant", Content: "ASSISTANT_CANARY"},
+		{Role: "user", Content: "user text"},
+	}, scanner.chunks[0].Messages)
+	joined := flattenPromptAuditMessages(scanner.chunks[0].Messages)
 	for _, excluded := range []string{"TOOL_OUTPUT_CANARY", "IMAGE_CANARY", "FILE_CANARY", "FILE_DATA_CANARY"} {
 		require.NotContains(t, joined, excluded)
 	}

@@ -3,6 +3,7 @@ import { defineComponent } from 'vue'
 import { mount } from '@vue/test-utils'
 import EndpointPool from '../components/EndpointPool.vue'
 import PolicyPanel from '../components/PolicyPanel.vue'
+import SafeguardPolicyPanel from '../components/SafeguardPolicyPanel.vue'
 import EventWorkspace from '../components/EventWorkspace.vue'
 import EventDetailDialog from '../components/EventDetailDialog.vue'
 import FilterDeleteDialog from '../components/FilterDeleteDialog.vue'
@@ -32,16 +33,14 @@ describe('Prompt Audit components', () => {
       global: { stubs: { BaseDialog: DialogStub } },
     })
     expect(wrapper.text()).toContain('admin.promptAudit.pool.configured')
-    const edit = wrapper.findAll('button').find((button) => button.text().includes('common.edit'))
-    expect(edit).toBeTruthy()
-    await edit!.trigger('click')
+    await wrapper.get('[aria-label="common.edit"]').trigger('click')
     const token = wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.apiKey"]')
     expect(token.element.value).toBe('')
     expect(token.attributes('placeholder')).toContain('admin.promptAudit.pool.keepSecret')
 
     await wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.clearSecret"]').setValue(true)
     await token.setValue('replacement-canary')
-    await wrapper.get('[data-test="save-endpoint"]').trigger('click')
+    await wrapper.get('[data-test="endpoint-editor"]').trigger('submit')
     const updated = wrapper.emitted('update:endpoints')?.at(-1)?.[0] as PromptAuditEndpointDraft[]
     expect(updated[0]).toMatchObject({ token: 'replacement-canary', clear_token: false })
 
@@ -55,40 +54,131 @@ describe('Prompt Audit components', () => {
       props: { endpoints: [endpoint()], probeResults: {}, probingIds: [] },
       global: { stubs: { BaseDialog: DialogStub } },
     })
-    const edit = wrapper.findAll('button').find((button) => button.text().includes('common.edit'))
-    await edit!.trigger('click')
-    await wrapper.get<HTMLSelectElement>('[data-test="endpoint-protocol"]').setValue('groq_safeguard')
+    await wrapper.get('[aria-label="common.edit"]').trigger('click')
+    await wrapper.get('[data-test="endpoint-protocol-groq_safeguard"]').trigger('click')
     expect(wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.baseUrl"]').element.value).toBe('https://api.groq.com/openai')
     expect(wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.model"]').element.value).toBe('openai/gpt-oss-safeguard-20b')
+    expect(wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.model"]').attributes()).toHaveProperty('readonly')
     expect(wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.timeout"]').element.value).toBe('10000')
+    expect(wrapper.find('[data-test="groq-safeguard-notice"]').exists()).toBe(true)
+    expect(wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.apiKey"]').attributes('placeholder')).toBe('gsk_...')
+    expect(wrapper.get('[data-test="endpoint-editor-error"]').text()).toBe('admin.promptAudit.pool.validation.groqCredential')
 
-    await wrapper.get('[data-test="save-endpoint"]').trigger('click')
+    await wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.apiKey"]').setValue('new-groq-key')
+
+    await wrapper.get('[data-test="endpoint-editor"]').trigger('submit')
     const updated = wrapper.emitted('update:endpoints')?.at(-1)?.[0] as PromptAuditEndpointDraft[]
     expect(updated[0]).toMatchObject({
       protocol: 'groq_safeguard',
       base_url: 'https://api.groq.com/openai',
       model: 'openai/gpt-oss-safeguard-20b',
       timeout_ms: 10000,
+      token: 'new-groq-key',
+      clear_token: false,
     })
+  })
+
+  it('requires a credential for enabled Groq nodes and allows probing once supplied', async () => {
+    const missingCredential = { ...endpoint(), protocol: 'groq_safeguard' as const, model: 'openai/gpt-oss-safeguard-20b', has_token: false, token_status: 'missing' }
+    const wrapper = mount(EndpointPool, {
+      props: { endpoints: [missingCredential], probeResults: {}, probingIds: [] },
+      global: { stubs: { BaseDialog: DialogStub } },
+    })
+    expect(wrapper.text()).toContain('admin.promptAudit.pool.credentialRequired')
+    expect(wrapper.findAll('button').find((button) => button.text().includes('admin.promptAudit.pool.probe'))?.attributes()).toHaveProperty('disabled')
+
+    await wrapper.get('[aria-label="common.edit"]').trigger('click')
+    expect(wrapper.get('[data-test="endpoint-editor-error"]').text()).toBe('admin.promptAudit.pool.validation.groqCredential')
+    expect(wrapper.get('[data-test="save-endpoint"]').attributes()).toHaveProperty('disabled')
+    await wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.apiKey"]').setValue('temporary-groq-key')
+    expect(wrapper.find('[data-test="endpoint-editor-error"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="probe-endpoint-editor"]').attributes()).not.toHaveProperty('disabled')
+  })
+
+  it('keeps credentials optional for enabled Qwen-compatible nodes', async () => {
+    const missingCredential = { ...endpoint(), has_token: false, token_status: 'missing' }
+    const wrapper = mount(EndpointPool, {
+      props: { endpoints: [missingCredential], probeResults: {}, probingIds: [] },
+      global: { stubs: { BaseDialog: DialogStub } },
+    })
+
+    expect(wrapper.text()).toContain('admin.promptAudit.pool.credentialOptional')
+    await wrapper.get('[aria-label="common.edit"]').trigger('click')
+    expect(wrapper.find('[data-test="endpoint-editor-error"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="save-endpoint"]').attributes()).not.toHaveProperty('disabled')
+    expect(wrapper.get('[data-test="probe-endpoint-editor"]').attributes()).not.toHaveProperty('disabled')
   })
 
   it('supports group search, stale configured groups, nine scanners, and bounded worker inputs', async () => {
     const draft: PromptAuditDraft = {
       enabled: true, blocking_enabled: false, store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
+      groq_safeguard_policy: 'Default safeguard classification policy with enough detail for validation.',
+      groq_safeguard_default_policy: 'Default safeguard classification policy with enough detail for validation.',
       worker_count: 4, queue_capacity: 100, scanners: SCANNER_CATALOG.map((item) => item.id), all_groups: false, group_ids: [1, 99],
       endpoints: [endpoint()], config_version: 1, updated_at: '', updated_by: 0, change_summary: '',
     }
-    const wrapper = mount(PolicyPanel, {
-      props: { draft, groups: [{ id: 1, name: 'Alpha', platform: 'openai', status: 'active' }, { id: 2, name: 'Beta', platform: 'claude', status: 'inactive' }] },
+    const groups = [{ id: 1, name: 'Alpha', platform: 'openai', status: 'active' }, { id: 2, name: 'Beta', platform: 'claude', status: 'inactive' }]
+    const scope = mount(PolicyPanel, {
+      props: { section: 'scope', draft, groups },
     })
-    expect(wrapper.text()).toContain('99')
-    expect(wrapper.findAll('input[type="checkbox"]').filter((input) => SCANNER_CATALOG.some((scanner) => input.attributes('aria-label') === `admin.promptAudit.scanners.${scanner.id}`))).toHaveLength(9)
-    await wrapper.get('[aria-label="admin.promptAudit.policy.searchGroups"]').setValue('Beta')
-    expect(wrapper.text()).toContain('Beta')
-    expect(wrapper.text()).not.toContain('Alpha')
-    await wrapper.get('[aria-label="admin.promptAudit.policy.workerCount"]').setValue('6')
-    const emitted = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
+    expect(scope.text()).toContain('99')
+    expect(scope.findAll('input[type="checkbox"]').filter((input) => SCANNER_CATALOG.some((scanner) => input.attributes('aria-label') === `admin.promptAudit.scanners.${scanner.id}`))).toHaveLength(9)
+    await scope.get('[aria-label="admin.promptAudit.policy.searchGroups"]').setValue('Beta')
+    expect(scope.text()).toContain('Beta')
+    expect(scope.text()).not.toContain('Alpha')
+
+    const runtime = mount(PolicyPanel, { props: { section: 'runtime', draft, groups } })
+    await runtime.get('[aria-label="admin.promptAudit.policy.workerCount"]').setValue('6')
+    const emitted = runtime.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
     expect(emitted.worker_count).toBe(6)
+  })
+
+  it('edits, restores, and previews the shared Groq Safeguard classification policy', async () => {
+    const defaultPolicy = 'Default safeguard classification policy with enough detail for validation.'
+    const customPolicy = 'Custom safeguard classification policy with enough detail for validation.'
+    const wrapper = mount(SafeguardPolicyPanel, {
+      props: {
+        policy: customPolicy,
+        defaultPolicy,
+        scanners: ['pii', 'jailbreak'],
+        hasGroq: true,
+        hasQwen: true,
+        preview: null,
+        previewing: false,
+        previewError: '',
+      },
+    })
+
+    expect(wrapper.find('[data-test="safeguard-policy-editor"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="qwen-builtin-policy-note"]').exists()).toBe(true)
+    await wrapper.get<HTMLTextAreaElement>('[data-test="safeguard-policy-editor"]').setValue('Another valid custom safeguard classification policy body.')
+    expect(wrapper.emitted('update:policy')?.at(-1)?.[0]).toContain('Another valid custom')
+    await wrapper.get('[data-test="restore-safeguard-policy"]').trigger('click')
+    expect(wrapper.emitted('update:policy')?.at(-1)?.[0]).toBe(defaultPolicy)
+    await wrapper.get('[data-test="preview-safeguard-policy"]').trigger('click')
+    expect(wrapper.emitted('preview')).toHaveLength(1)
+
+    await wrapper.setProps({
+      preview: {
+        policy: customPolicy,
+        prompt: 'backend-rendered final system prompt',
+        policy_character_count: customPolicy.length,
+        prompt_character_count: 36,
+        using_default: false,
+      },
+    })
+    expect(wrapper.get('[data-test="safeguard-policy-preview"]').text()).toContain('backend-rendered final system prompt')
+  })
+
+  it('shows Qwen3Guard model policy without exposing a prompt editor', () => {
+    const wrapper = mount(SafeguardPolicyPanel, {
+      props: {
+        policy: '', defaultPolicy: '', scanners: ['pii'], hasGroq: false, hasQwen: true,
+        preview: null, previewing: false, previewError: '',
+      },
+    })
+    expect(wrapper.find('[data-test="qwen-builtin-policy-only"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="safeguard-policy-editor"]').exists()).toBe(false)
   })
 
   it('keeps identity fields separate, supports selection, and opens filter deletion from the toolbar', async () => {

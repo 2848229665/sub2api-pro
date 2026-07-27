@@ -223,6 +223,10 @@ type OpenAICompatibleScanner struct {
 func NewOpenAICompatibleScanner() *OpenAICompatibleScanner { return &OpenAICompatibleScanner{} }
 
 func (s *OpenAICompatibleScanner) Scan(ctx context.Context, endpoint ActiveEndpoint, chunk string, enabledScanners []string) (*NormalizedResult, error) {
+	return s.ScanStructured(ctx, endpoint, PromptScanChunk{Text: chunk}, enabledScanners)
+}
+
+func (s *OpenAICompatibleScanner) ScanStructured(ctx context.Context, endpoint ActiveEndpoint, chunk PromptScanChunk, enabledScanners []string) (*NormalizedResult, error) {
 	client, err := s.clientFor(endpoint)
 	if err != nil {
 		return nil, &GuardError{Code: ErrorCodeUnavailable, Cause: err}
@@ -236,13 +240,13 @@ func (s *OpenAICompatibleScanner) Scan(ctx context.Context, endpoint ActiveEndpo
 	case "", EndpointProtocolQwen3Guard:
 		payload = map[string]any{
 			"model":       endpoint.Model,
-			"messages":    []map[string]string{{"role": "user", "content": chunk}},
+			"messages":    []map[string]string{{"role": "user", "content": chunk.Text}},
 			"temperature": 0,
 			"max_tokens":  64,
 			"seed":        42,
 		}
 	case EndpointProtocolGroqSafeguard:
-		payload = buildGPTOSSSafeguardRequest(endpoint.Model, chunk, enabledScanners)
+		payload = buildGPTOSSSafeguardRequest(endpoint.Model, chunk, enabledScanners, endpoint.SafeguardPolicy)
 	default:
 		return nil, &GuardError{Code: ErrorCodeUnavailable, Cause: errors.New("prompt guard protocol unsupported")}
 	}

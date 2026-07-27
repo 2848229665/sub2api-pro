@@ -71,6 +71,13 @@ func TestOpenAICompatibleScannerRequestContract(t *testing.T) {
 
 func TestGroqSafeguardScannerRequestContract(t *testing.T) {
 	const auditedText = "untrusted prompt canary"
+	const customPolicy = "Custom administrator classification boundary with enough detail for the outbound contract."
+	auditedMessages := []PromptAuditMessage{
+		{Role: "system", Content: "source system"},
+		{Role: "developer", Content: "source developer"},
+		{Role: "assistant", Content: "source assistant"},
+		{Role: "user", Content: auditedText},
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/v1/chat/completions", r.URL.Path)
 		require.Equal(t, "Bearer groq-token", r.Header.Get("Authorization"))
@@ -78,7 +85,7 @@ func TestGroqSafeguardScannerRequestContract(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
 		require.Equal(t, DefaultGroqSafeguardModel, payload["model"])
 		require.Equal(t, float64(0), payload["temperature"])
-		require.Equal(t, float64(512), payload["max_completion_tokens"])
+		require.Equal(t, float64(1024), payload["max_completion_tokens"])
 		require.Equal(t, false, payload["stream"])
 		require.Equal(t, false, payload["include_reasoning"])
 		require.NotContains(t, payload, "max_tokens")
@@ -86,16 +93,23 @@ func TestGroqSafeguardScannerRequestContract(t *testing.T) {
 
 		messages, ok := payload["messages"].([]any)
 		require.True(t, ok)
-		require.Len(t, messages, 2)
+		require.Len(t, messages, 5)
 		system, ok := messages[0].(map[string]any)
 		require.True(t, ok)
-		user, ok := messages[1].(map[string]any)
-		require.True(t, ok)
 		require.Equal(t, "system", system["role"])
+		require.Contains(t, system["content"], "all messages after this policy")
+		require.Contains(t, system["content"], customPolicy)
+		require.Contains(t, system["content"], "Fixed output contract")
 		require.Contains(t, system["content"], "`pii`")
 		require.Contains(t, system["content"], "`jailbreak`")
 		require.NotContains(t, system["content"], "`violent`")
-		require.Equal(t, map[string]any{"role": "user", "content": auditedText}, user)
+		for index, want := range auditedMessages {
+			message, messageOK := messages[index+1].(map[string]any)
+			require.True(t, messageOK)
+			require.Equal(t, want.Role, message["role"])
+			require.Equal(t, want.Content, message["content"])
+			require.NotContains(t, message["content"], "["+want.Role+"]")
+		}
 
 		responseFormat, ok := payload["response_format"].(map[string]any)
 		require.True(t, ok)
@@ -115,13 +129,14 @@ func TestGroqSafeguardScannerRequestContract(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result, err := NewOpenAICompatibleScanner().Scan(
+	result, err := NewOpenAICompatibleScanner().ScanStructured(
 		context.Background(),
 		ActiveEndpoint{
 			ID: "groq-one", Protocol: EndpointProtocolGroqSafeguard, BaseURL: server.URL,
 			Model: DefaultGroqSafeguardModel, Token: "groq-token", TimeoutMS: 1000,
+			SafeguardPolicy: customPolicy,
 		},
-		auditedText,
+		PromptScanChunk{Text: auditedText, Messages: auditedMessages},
 		[]string{"pii", "jailbreak"},
 	)
 	require.NoError(t, err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -23,10 +24,13 @@ func TestDefaultConfigIsOff(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ModeOff, active.EffectiveMode())
 	require.Equal(t, AllScannerIDs, storage.Scanners)
+	require.Empty(t, storage.GroqSafeguardPolicy)
+	require.Equal(t, DefaultGroqSafeguardPolicy, active.GroqSafeguardPolicy)
 	publicJSON, err := json.Marshal(PublicFromStorage(storage, true))
 	require.NoError(t, err)
 	require.Contains(t, string(publicJSON), `"group_ids":[]`)
 	require.Contains(t, string(publicJSON), `"endpoints":[]`)
+	require.Contains(t, string(publicJSON), `"groq_safeguard_default_policy"`)
 }
 
 func TestConfigRejectsBlockingWithoutAudit(t *testing.T) {
@@ -128,6 +132,38 @@ func TestBuildNextStoragePreserveReplaceAndClearToken(t *testing.T) {
 	cleared, err := manager.buildNextStorage(current, clearedReq, 9)
 	require.NoError(t, err)
 	require.Empty(t, cleared.Endpoints[0].TokenCiphertext)
+}
+
+func TestGroqSafeguardPolicyDefaultsCustomizesAndFlowsToActiveEndpoints(t *testing.T) {
+	manager := &ConfigManager{encryptor: prefixEncryptor{}}
+	current := DefaultStorageConfig()
+	custom := strings.Repeat("Treat this administrator boundary as unsafe. ", 2)
+	req := UpdateConfigRequest{
+		ExpectedConfigVersion: 1, Strategy: "priority", WorkerCount: 1, QueueCapacity: 10,
+		Scanners: []string{"pii"}, AllGroups: true, GroqSafeguardPolicy: "\r\n  " + custom + "  \r\n",
+	}
+	next, err := manager.buildNextStorage(current, req, 9)
+	require.NoError(t, err)
+	require.Equal(t, strings.TrimSpace(custom), next.GroqSafeguardPolicy)
+
+	active, err := ActiveFromStorage(next, true, prefixEncryptor{})
+	require.NoError(t, err)
+	require.Equal(t, strings.TrimSpace(custom), active.GroqSafeguardPolicy)
+
+	next.Endpoints = []StorageEndpoint{{
+		ID: "groq", Name: "Groq", Protocol: EndpointProtocolGroqSafeguard,
+		BaseURL: "https://api.groq.com/openai", Model: DefaultGroqSafeguardModel,
+		TimeoutMS: 1000, InputLimit: 1000, Enabled: true,
+	}}
+	active, err = ActiveFromStorage(next, true, prefixEncryptor{})
+	require.NoError(t, err)
+	require.Equal(t, strings.TrimSpace(custom), active.Endpoints[0].SafeguardPolicy)
+
+	restored := req
+	restored.GroqSafeguardPolicy = DefaultGroqSafeguardPolicy
+	next, err = manager.buildNextStorage(next, restored, 9)
+	require.NoError(t, err)
+	require.Empty(t, next.GroqSafeguardPolicy, "the built-in default is not duplicated in storage")
 }
 
 func TestEffectiveModeTruthTable(t *testing.T) {
@@ -330,6 +366,10 @@ func TestUpdateConfigStrictBoundsAndKnownValues(t *testing.T) {
 		{name: "worker high", mutate: func(req *UpdateConfigRequest) { req.WorkerCount = MaxWorkerCount + 1 }, reason: "prompt_audit_invalid_worker_count"},
 		{name: "capacity low", mutate: func(req *UpdateConfigRequest) { req.QueueCapacity = 0 }, reason: "prompt_audit_invalid_queue_capacity"},
 		{name: "capacity high", mutate: func(req *UpdateConfigRequest) { req.QueueCapacity = MaxQueueCapacity + 1 }, reason: "prompt_audit_invalid_queue_capacity"},
+		{name: "policy too short", mutate: func(req *UpdateConfigRequest) { req.GroqSafeguardPolicy = "short" }, reason: "prompt_audit_invalid_safeguard_policy"},
+		{name: "policy too long", mutate: func(req *UpdateConfigRequest) {
+			req.GroqSafeguardPolicy = strings.Repeat("x", MaxSafeguardPolicyLength+1)
+		}, reason: "prompt_audit_invalid_safeguard_policy"},
 		{name: "unknown scanner", mutate: func(req *UpdateConfigRequest) { req.Scanners = []string{"made_up"} }, reason: "prompt_audit_invalid_scanner"},
 		{name: "group required", mutate: func(req *UpdateConfigRequest) { req.AllGroups = false; req.GroupIDs = nil }, reason: "prompt_audit_groups_required"},
 		{name: "group positive", mutate: func(req *UpdateConfigRequest) { req.AllGroups = false; req.GroupIDs = []int64{0} }, reason: "prompt_audit_invalid_group"},

@@ -114,12 +114,30 @@ type PromptSnapshot struct {
 	MessageCount       int    `json:"message_count"`
 	Stage              string `json:"stage"`
 
-	ScanText string `json:"-"`
+	ScanText      string               `json:"-"`
+	AuditMessages []PromptAuditMessage `json:"-"`
 }
 
 func (s PromptSnapshot) Redacted() PromptSnapshot {
 	s.ScanText = ""
+	s.AuditMessages = nil
 	return s
+}
+
+// PromptAuditMessage is the text-only, role-preserving representation sent to
+// structured audit backends. Attachments and tool output never enter this type.
+type PromptAuditMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type PromptScanChunk struct {
+	Text     string
+	Messages []PromptAuditMessage
+}
+
+func (c PromptScanChunk) RuneCount() int {
+	return len([]rune(c.Text))
 }
 
 type NormalizedResult struct {
@@ -278,4 +296,10 @@ type Metrics interface {
 
 type PromptScanner interface {
 	Scan(ctx context.Context, endpoint ActiveEndpoint, chunk string, enabledScanners []string) (*NormalizedResult, error)
+}
+
+// StructuredPromptScanner is optional so existing scanner implementations keep
+// their text-only contract. Groq Safeguard implements it to retain source roles.
+type StructuredPromptScanner interface {
+	ScanStructured(ctx context.Context, endpoint ActiveEndpoint, chunk PromptScanChunk, enabledScanners []string) (*NormalizedResult, error)
 }

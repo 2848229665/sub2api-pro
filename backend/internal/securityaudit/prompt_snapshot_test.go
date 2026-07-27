@@ -52,6 +52,7 @@ func TestSnapshotRedactsCanariesAndPreservesHashOfScanText(t *testing.T) {
 	digest := sha256.Sum256([]byte(metadataTextForTest(snapshot.ScanText)))
 	require.Equal(t, hex.EncodeToString(digest[:]), snapshot.PromptHash)
 	require.Empty(t, snapshot.Redacted().ScanText)
+	require.Empty(t, snapshot.Redacted().AuditMessages)
 }
 
 func TestSnapshotFullPromptKeepsUnredactedText(t *testing.T) {
@@ -100,6 +101,24 @@ func TestSplitRunesKeepsPrioritySegmentIndependent(t *testing.T) {
 	require.Equal(t, history, strings.Join(chunks[1:], ""))
 	for _, chunk := range chunks {
 		require.NotContains(t, chunk, promptAuditPrioritySeparator)
+	}
+}
+
+func TestSplitPromptAuditMessagesKeepsRolesAndMessageBoundaries(t *testing.T) {
+	messages := []PromptAuditMessage{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "abcdef"},
+		{Role: "assistant", Content: "ok"},
+	}
+	chunks := splitPromptAuditMessages(messages, 4)
+	require.Equal(t, []PromptScanChunk{
+		{Text: "sys", Messages: []PromptAuditMessage{{Role: "system", Content: "sys"}}},
+		{Text: "abcd", Messages: []PromptAuditMessage{{Role: "user", Content: "abcd"}}},
+		{Text: "ef", Messages: []PromptAuditMessage{{Role: "user", Content: "ef"}}},
+		{Text: "ok", Messages: []PromptAuditMessage{{Role: "assistant", Content: "ok"}}},
+	}, chunks)
+	for _, chunk := range chunks {
+		require.LessOrEqual(t, chunk.RuneCount(), 4)
 	}
 }
 
@@ -236,6 +255,37 @@ func TestGPTOSSSafeguardSnapshotExcludesOnlyToolOutputAndAttachments(t *testing.
 				require.NotContains(t, snapshot.FullPrompt, excluded)
 			}
 		})
+	}
+}
+
+func TestGPTOSSSafeguardSnapshotPreservesOriginalRolesAndMessageOrder(t *testing.T) {
+	snapshot, err := ExtractPromptSnapshotForEndpoints(Request{
+		Protocol: "openai_chat_completions",
+		Body: []byte(`{"messages":[
+			{"role":"system","content":"source system"},
+			{"role":"developer","content":"source developer"},
+			{"role":"user","content":[
+				{"type":"text","text":"first text block"},
+				{"type":"image_url","image_url":{"url":"data:image/png;base64,IMAGE_CANARY"}},
+				{"type":"text","text":"second text block"}
+			]},
+			{"role":"assistant","content":"source assistant"},
+			{"role":"tool","content":"TOOL_OUTPUT_CANARY"}
+		]}`),
+	}, []ActiveEndpoint{{
+		ID: "groq", Enabled: true, Protocol: EndpointProtocolGroqSafeguard,
+		Model: DefaultGroqSafeguardModel,
+	}})
+	require.NoError(t, err)
+	require.Equal(t, []PromptAuditMessage{
+		{Role: "system", Content: "source system"},
+		{Role: "developer", Content: "source developer"},
+		{Role: "user", Content: "first text block\n\nsecond text block"},
+		{Role: "assistant", Content: "source assistant"},
+	}, snapshot.AuditMessages)
+	for _, message := range snapshot.AuditMessages {
+		require.NotContains(t, message.Content, "IMAGE_CANARY")
+		require.NotContains(t, message.Content, "TOOL_OUTPUT_CANARY")
 	}
 }
 

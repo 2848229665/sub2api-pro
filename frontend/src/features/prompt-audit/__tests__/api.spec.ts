@@ -31,6 +31,15 @@ describe('Prompt Audit API', () => {
     expect(JSON.stringify(result)).not.toContain('api-canary-secret')
   })
 
+  it('previews the exact backend-rendered Safeguard system prompt', async () => {
+    client.post.mockResolvedValue({ data: { prompt: 'rendered prompt', using_default: false } })
+    const result = await promptAuditAPI.previewSafeguardPolicy('custom policy body', ['pii', 'jailbreak'])
+    expect(client.post).toHaveBeenCalledWith('/admin/prompt-audit/policy/preview', {
+      policy: 'custom policy body', scanners: ['pii', 'jailbreak'],
+    })
+    expect(result.prompt).toBe('rendered prompt')
+  })
+
   it('passes a server preview token through the confirmed filter-delete contract', async () => {
     client.post.mockResolvedValue({ data: { deleted_events: 2, deleted_jobs: 2 } })
     const filters = emptyEventFilters()

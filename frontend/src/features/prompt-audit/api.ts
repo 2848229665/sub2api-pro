@@ -11,6 +11,7 @@ import type {
   PromptEventPage,
   PromptProbeResult,
   PromptAuditEndpointDraft,
+  PromptSafeguardPolicyPreview,
 } from './types'
 import { eventFilterPayload, eventQueryParams } from './viewModel'
 
@@ -23,6 +24,17 @@ export async function getConfig(): Promise<PromptAuditConfig> {
 
 export async function updateConfig(payload: PromptAuditUpdateRequest): Promise<PromptAuditConfig> {
   const { data } = await apiClient.put<PromptAuditConfig>(`${basePath}/config`, payload)
+  return data
+}
+
+export async function previewSafeguardPolicy(
+  policy: string,
+  scanners: string[],
+): Promise<PromptSafeguardPolicyPreview> {
+  const { data } = await apiClient.post<PromptSafeguardPolicyPreview>(
+    `${basePath}/policy/preview`,
+    { policy, scanners },
+  )
   return data
 }
 
@@ -106,6 +118,7 @@ export async function listGroups(): Promise<PromptAuditGroup[]> {
 export const promptAuditAPI = {
   getConfig,
   updateConfig,
+  previewSafeguardPolicy,
   probeEndpoint,
   getRuntime,
   listEvents,
