@@ -1097,9 +1097,25 @@
                   {{ inputDetailRow.endpoint || '-' }} · {{ inputDetailRow.provider || '-' }} / {{ inputDetailRow.model || '-' }}
                 </p>
               </div>
-              <span v-if="inputDetailRow.group_name" class="inline-flex rounded-md bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 dark:bg-sky-900/20 dark:text-sky-300">
-                {{ inputDetailRow.group_name }}
-              </span>
+              <div class="flex items-center gap-2">
+                <span v-if="inputDetailRow.group_name" class="inline-flex rounded-md bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 dark:bg-sky-900/20 dark:text-sky-300">
+                  {{ inputDetailRow.group_name }}
+                </span>
+                <button
+                  v-if="inputDetailRow.action === 'cyber_policy' && cyberRequestAudit"
+                  type="button"
+                  class="btn btn-secondary btn-sm inline-flex items-center gap-1.5"
+                  data-test="cyber-audit-copy"
+                  @click="copyCyberRequestBody"
+                >
+                  <Icon :name="cyberRequestCopied ? 'check' : 'copy'" size="sm" />
+                  {{
+                    cyberRequestCopied
+                      ? t('admin.riskControl.cyberRequestCopied')
+                      : t('admin.riskControl.cyberRequestCopy')
+                  }}
+                </button>
+              </div>
             </div>
             <template v-if="inputDetailRow.action === 'cyber_policy'">
               <div v-if="cyberAuditLoading" data-test="cyber-audit-loading" class="mt-4 flex min-h-28 items-center justify-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -1169,6 +1185,7 @@ import type {
 } from '@/api/admin/riskControl'
 import type { AdminGroup, SelectOption } from '@/types'
 import { useAppStore } from '@/stores/app'
+import { useClipboard } from '@/composables/useClipboard'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime as formatDateTimeValue } from '@/utils/format'
 
@@ -1221,6 +1238,7 @@ const riskThresholdCategories = Object.keys(riskThresholdDefaults)
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { copied: cyberRequestCopied, copyToClipboard } = useClipboard()
 const defaultBlockMessage = () => t('admin.riskControl.defaultBlockMessage')
 
 const loading = ref(true)
@@ -1624,6 +1642,14 @@ const cyberRequestBodyText = computed(() => {
     return body
   }
 })
+
+async function copyCyberRequestBody(): Promise<void> {
+  if (!cyberRequestAudit.value?.request_body) return
+  await copyToClipboard(
+    cyberRequestBodyText.value,
+    t('admin.riskControl.cyberRequestCopied'),
+  )
+}
 
 const queueUsagePercent = computed(() => `${Math.min(100, Math.max(0, status.value?.queue_usage_percent ?? 0)).toFixed(1)}%`)
 

@@ -231,8 +231,6 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.openaiExperimentalScheduler.upstreamCostWeight": "计费倍率",
     "admin.settings.openaiExperimentalScheduler.previousResponseWeight": "previous_response 粘性",
     "admin.settings.openaiExperimentalScheduler.sessionStickyWeight": "session_hash 粘性",
-    "admin.settings.gatewayForwarding.forkFeaturesTitle": "Fork 专属功能",
-    "admin.settings.gatewayForwarding.forkFeaturesDescription": "控制 sub2api-pro Fork 提供的网关增强功能",
     "admin.settings.gatewayForwarding.codexPromptCacheOptimization": "Codex Prompt Cache 优化器",
     "admin.settings.gatewayForwarding.codexPromptCacheOptimizationHint": "默认开启。对官方 Codex 原生 Responses 请求使用局部 JSON patch。",
     "admin.settings.upstreamBillingProbe.title": "上游倍率自动探测",
@@ -589,6 +587,16 @@ async function openGatewayTab(wrapper: ReturnType<typeof mountView>) {
 
   expect(gatewayTabButton).toBeDefined();
   await gatewayTabButton?.trigger("click");
+  await flushPromises();
+}
+
+async function openForkTab(wrapper: ReturnType<typeof mountView>) {
+  const forkTabButton = wrapper
+    .findAll("button")
+    .find((node) => node.text().includes("admin.settings.tabs.fork"));
+
+  expect(forkTabButton).toBeDefined();
+  await forkTabButton?.trigger("click");
   await flushPromises();
 }
 
@@ -1207,32 +1215,56 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(showSuccess).toHaveBeenCalledWith("上游倍率自动探测设置已保存");
   });
 
-  it("places the fork prompt-cache switch first and persists its value", async () => {
+  it("groups every fork-only switch in the first settings tab", async () => {
     const wrapper = mountView();
 
     await flushPromises();
-    await openGatewayTab(wrapper);
+    await openForkTab(wrapper);
 
-    const gatewaySection = wrapper.get(
-      '[data-testid="gateway-primary-settings"]',
-    );
-    const firstCard = gatewaySection.findAll(".card")[0];
-    expect(firstCard.attributes("data-testid")).toBe("fork-feature-settings");
+    const tabButtons = wrapper.findAll('[role="tab"]');
+    expect(tabButtons[0]?.text()).toContain("admin.settings.tabs.fork");
 
-    const forkCard = wrapper.get('[data-testid="fork-feature-settings"]');
-    expect(forkCard.isVisible()).toBe(true);
-    const toggle = forkCard.get(
+    const forkSection = wrapper.get('[data-testid="fork-feature-settings"]');
+    expect(forkSection.isVisible()).toBe(true);
+    expect(
+      forkSection
+        .findAll(".card")
+        .map((card) => card.attributes("data-testid")),
+    ).toEqual([
+      "codex-prompt-cache-settings",
+      "openai-priority-saturation-settings",
+    ]);
+
+    const codexToggle = forkSection.get(
       '[data-testid="codex-prompt-cache-optimization-toggle"]',
     );
-    expect((toggle.element as HTMLInputElement).checked).toBe(true);
+    const priorityToggle = forkSection.get(
+      '[data-testid="openai-priority-saturation-toggle"]',
+    );
+    expect((codexToggle.element as HTMLInputElement).checked).toBe(true);
+    expect((priorityToggle.element as HTMLInputElement).checked).toBe(false);
+    expect(
+      wrapper
+        .get('[data-testid="gateway-primary-settings"]')
+        .find('[data-testid="codex-prompt-cache-optimization-toggle"]')
+        .exists(),
+    ).toBe(false);
+    expect(
+      wrapper
+        .get('[data-testid="gateway-primary-settings"]')
+        .find('[data-testid="openai-priority-saturation-toggle"]')
+        .exists(),
+    ).toBe(false);
 
-    await toggle.setValue(false);
+    await codexToggle.setValue(false);
+    await priorityToggle.setValue(true);
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
     expect(updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
         openai_codex_prompt_cache_optimization_enabled: false,
+        openai_priority_saturation_enabled: true,
       }),
     );
   });

@@ -3,6 +3,7 @@ export default {
       title: '系统设置',
       description: '管理注册、邮箱验证、默认值和 SMTP 设置',
       tabs: {
+        fork: 'Pro 增强',
         general: '通用设置',
         agreement: '登录条款',
         features: '功能开关',
@@ -357,8 +358,6 @@ export default {
         saveFailed: '保存 Ollama Cloud 用量刷新设置失败'
       },
       gatewayForwarding: {
-        forkFeaturesTitle: 'Fork 专属功能',
-        forkFeaturesDescription: '控制 sub2api-pro Fork 提供的网关增强功能',
         codexPromptCacheOptimization: 'Codex Prompt Cache 优化器',
         codexPromptCacheOptimizationHint: '默认开启。对官方 Codex 原生 Responses 请求使用局部 JSON patch，尽量保持 instructions、tools、input 与 text 的稳定前缀；关闭后使用上游兼容翻译路径。',
         title: '请求转发行为',

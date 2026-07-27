@@ -3,6 +3,7 @@ export default {
       title: 'System Settings',
       description: 'Manage registration, email verification, default values, and SMTP settings',
       tabs: {
+        fork: 'Pro Features',
         general: 'General',
         agreement: 'Agreement',
         features: 'Feature Switches',
@@ -364,8 +365,6 @@ export default {
         saveFailed: 'Failed to save Ollama Cloud usage refresh settings'
       },
       gatewayForwarding: {
-        forkFeaturesTitle: 'Fork Features',
-        forkFeaturesDescription: 'Controls gateway enhancements provided by the sub2api-pro fork.',
         codexPromptCacheOptimization: 'Codex Prompt Cache Optimizer',
         codexPromptCacheOptimizationHint: 'Enabled by default. Uses minimal JSON patches for official Codex native Responses requests to preserve stable instructions, tools, input, and text prefixes. Disable it to use the upstream compatibility translator.',
         title: 'Request Forwarding',
