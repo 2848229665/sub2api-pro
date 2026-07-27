@@ -567,6 +567,7 @@ export interface SystemSettings {
   enable_anthropic_cache_ttl_1h_injection: boolean;
   rewrite_message_cache_control: boolean;
   enable_client_dateline_normalization: boolean;
+  openai_codex_prompt_cache_optimization_enabled: boolean;
   antigravity_user_agent_version: string;
   openai_codex_user_agent: string;
   // codex_cli_only 加固
@@ -853,6 +854,7 @@ export interface UpdateSettingsRequest {
   enable_anthropic_cache_ttl_1h_injection?: boolean;
   rewrite_message_cache_control?: boolean;
   enable_client_dateline_normalization?: boolean;
+  openai_codex_prompt_cache_optimization_enabled?: boolean;
   antigravity_user_agent_version?: string;
   openai_codex_user_agent?: string;
   // codex_cli_only 加固

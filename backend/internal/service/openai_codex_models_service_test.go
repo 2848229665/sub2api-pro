@@ -167,12 +167,13 @@ func TestFetchCodexModelsManifestPassthrough(t *testing.T) {
 		gotClientVersion = r.URL.Query().Get("client_version")
 		w.Header().Set("ETag", `W/"abc123"`)
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Codex-Primary-Used-Percent", "12")
 		_, _ = w.Write([]byte(manifestBody))
 	}))
 	defer server.Close()
 
 	original := chatgptCodexModelsURL
-	chatgptCodexModelsURL = server.URL
+	chatgptCodexModelsURL = server.URL + "/backend-api/codex/models"
 	defer func() { chatgptCodexModelsURL = original }()
 
 	s := &OpenAIGatewayService{}
@@ -186,6 +187,12 @@ func TestFetchCodexModelsManifestPassthrough(t *testing.T) {
 	}
 	if manifest.ETag != `W/"abc123"` {
 		t.Errorf("etag not passed through: got %q", manifest.ETag)
+	}
+	if manifest.UpstreamEndpoint != "/backend-api/codex/models" {
+		t.Errorf("upstream endpoint: got %q", manifest.UpstreamEndpoint)
+	}
+	if got := manifest.ResponseHeaders.Get("X-Codex-Primary-Used-Percent"); got != "12" {
+		t.Errorf("response headers not preserved: got %q", got)
 	}
 	if gotAuth != "Bearer test-access-token" {
 		t.Errorf("authorization header: got %q", gotAuth)
@@ -468,6 +475,36 @@ func TestFetchCodexModelsManifestAPIKeyCustomUpstream(t *testing.T) {
 	if manifest.ETag != `W/"api-key-manifest"` {
 		t.Errorf("etag not passed through: got %q", manifest.ETag)
 	}
+	if manifest.UpstreamEndpoint != "/v1/models" {
+		t.Errorf("upstream endpoint: got %q", manifest.UpstreamEndpoint)
+	}
+}
+
+func TestFetchCodexModelsManifestAPIKeyHeaderOverridesAreFinal(t *testing.T) {
+	var gotRequest *http.Request
+	upstream := &codexModelsHTTPUpstreamStub{do: func(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+		gotRequest = req
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"models":[]}`)),
+		}, nil
+	}}
+	account := newCodexModelsAPIKeyTestAccount("https://upstream.example/v1")
+	account.Credentials[credKeyHeaderOverrideEnabled] = true
+	account.Credentials[credKeyHeaderOverrides] = map[string]any{
+		"originator": "custom-originator",
+		"user-agent": "custom-agent/1.0",
+		"x-tenant":   "tenant-a",
+	}
+
+	s := newCodexModelsAPIKeyTestService(upstream)
+	_, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+	require.NoError(t, err)
+	require.NotNil(t, gotRequest)
+	require.Equal(t, "custom-originator", getHeaderRaw(gotRequest.Header, "originator"))
+	require.Equal(t, "custom-agent/1.0", gotRequest.Header.Get("User-Agent"))
+	require.Equal(t, "tenant-a", getHeaderRaw(gotRequest.Header, "x-tenant"))
 }
 
 func TestFetchCodexModelsManifestAPIKeyConvertsStandardOpenAIModelList(t *testing.T) {
@@ -771,8 +808,11 @@ func TestFetchCodexModelsManifestAPIKeyFreshCacheHandlesETagLocally(t *testing.T
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Header:     http.Header{"Etag": []string{`W/"cached"`}},
-			Body:       io.NopCloser(strings.NewReader(`{"models":[]}`)),
+			Header: http.Header{
+				"Etag":                         []string{`W/"cached"`},
+				"X-Codex-Primary-Used-Percent": []string{"18"},
+			},
+			Body: io.NopCloser(strings.NewReader(`{"models":[]}`)),
 		}, nil
 	}}
 
@@ -787,6 +827,12 @@ func TestFetchCodexModelsManifestAPIKeyFreshCacheHandlesETagLocally(t *testing.T
 	}
 	if !manifest.NotModified {
 		t.Fatal("matching cached ETag must return NotModified")
+	}
+	if manifest.UpstreamEndpoint != "/v1/models" {
+		t.Errorf("cached upstream endpoint: got %q", manifest.UpstreamEndpoint)
+	}
+	if got := manifest.ResponseHeaders.Get("X-Codex-Primary-Used-Percent"); got != "18" {
+		t.Errorf("cached response headers not preserved: got %q", got)
 	}
 	if got := calls.Load(); got != 1 {
 		t.Errorf("upstream calls: got %d, want 1", got)

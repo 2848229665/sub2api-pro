@@ -94,6 +94,26 @@ func TestGatewayRoutesOpenAIAlphaSearchPathsAreRegistered(t *testing.T) {
 	}
 }
 
+func TestGatewayRoutesCodexRealtimeProtocolsAreRegistered(t *testing.T) {
+	router := newGatewayRoutesTestRouter()
+	registered := make(map[string]bool)
+	for _, route := range router.Routes() {
+		registered[route.Method+" "+route.Path] = true
+	}
+
+	for _, route := range []string{
+		"POST /v1/live",
+		"GET /v1/live/:call_id",
+		"POST /v1/realtime/calls",
+		"GET /v1/realtime",
+		"POST /backend-api/codex/realtime/calls",
+		"GET /backend-api/codex",
+		"GET /backend-api/codex/:call_id",
+	} {
+		require.True(t, registered[route], "%s should be registered", route)
+	}
+}
+
 func TestGatewayRoutesAlphaSearchRejectsNonOpenAIGroup(t *testing.T) {
 	router := newGatewayRoutesTestRouter(service.PlatformGrok)
 	req := httptest.NewRequest(http.MethodPost, "/v1/alpha/search", strings.NewReader(`{"model":"gpt-5.6-sol"}`))

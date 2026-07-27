@@ -68,6 +68,62 @@ func TestPromptServiceStartReportsDependencyFailureWithoutPanic(t *testing.T) {
 	require.NoError(t, service.Shutdown(ctx))
 }
 
+func TestPromptServiceGPTOSSSafeguardExcludesToolOutputAndAttachments(t *testing.T) {
+	cfg := ActiveConfig{
+		RiskControlEnabled: true,
+		Enabled:            true,
+		BlockingEnabled:    true,
+		AllGroups:          true,
+		ConfigVersion:      8,
+		Scanners:           []string{"jailbreak"},
+		Endpoints: []ActiveEndpoint{{
+			ID: "groq-safeguard", Enabled: true, Protocol: EndpointProtocolGroqSafeguard,
+			Model: DefaultGroqSafeguardModel, TimeoutMS: 1000, InputLimit: 1000,
+		}},
+	}
+	seen := make([]string, 0, 1)
+	scanner := PromptScannerFunc(func(_ context.Context, _ ActiveEndpoint, chunk string, _ []string) (*NormalizedResult, error) {
+		seen = append(seen, chunk)
+		return &NormalizedResult{
+			Decision: EventPass, RiskLevel: RiskLow, Action: ActionAllow,
+			ScannerScores: map[string]float64{}, ScannerEvidence: map[string]string{},
+		}, nil
+	})
+	service := &PromptService{
+		config:    &fakeConfigStore{cfg: cfg, active: true},
+		evaluator: newGuardEvaluator(scanner, nil, NewAtomicMetrics(), 2, 2),
+	}
+
+	decision, err := service.Evaluate(context.Background(), Request{
+		Protocol: "openai_responses",
+		Body: []byte(`{
+			"instructions":"INSTRUCTIONS_CANARY",
+			"input":[
+				{"type":"message","role":"system","content":[{"type":"input_text","text":"SYSTEM_CANARY"}]},
+				{"type":"message","role":"developer","content":[{"type":"input_text","text":"DEVELOPER_CANARY"}]},
+				{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ASSISTANT_CANARY"}]},
+				{"type":"function_call_output","call_id":"call_1","output":"TOOL_OUTPUT_CANARY"},
+				{"type":"message","role":"user","content":[
+					{"type":"input_text","text":"user text"},
+					{"type":"input_image","image_url":"data:image/png;base64,IMAGE_CANARY"},
+					{"type":"input_file","filename":"FILE_CANARY.txt","file_data":"FILE_DATA_CANARY"}
+				]}
+			]
+		}`),
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, DecisionAllow, decision.Kind)
+	require.Equal(t, []string{
+		"user text",
+		"INSTRUCTIONS_CANARY\n\nSYSTEM_CANARY\n\nDEVELOPER_CANARY\n\nASSISTANT_CANARY",
+	}, seen)
+	joined := strings.Join(seen, "\n")
+	for _, excluded := range []string{"TOOL_OUTPUT_CANARY", "IMAGE_CANARY", "FILE_CANARY", "FILE_DATA_CANARY"} {
+		require.NotContains(t, joined, excluded)
+	}
+}
+
 func TestPromptServiceRejectsInvalidDeleteConfirmationClaims(t *testing.T) {
 	now := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
 	start, end := now.Add(-time.Hour), now.Add(time.Hour)

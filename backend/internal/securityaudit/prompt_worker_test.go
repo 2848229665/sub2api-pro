@@ -289,6 +289,44 @@ func TestEnqueuerStagingPayloadPublishProtocolAndFailureCleanup(t *testing.T) {
 	})
 }
 
+func TestEnqueuerGPTOSSSafeguardExcludesToolOutputAndAttachments(t *testing.T) {
+	cfg := asyncConfig()
+	cfg.Endpoints[0].Protocol = EndpointProtocolGroqSafeguard
+	cfg.Endpoints[0].Model = DefaultGroqSafeguardModel
+	repo := &fakeJobRepository{createJob: &Job{ID: 51}}
+	payload := &fakePayloadStore{values: map[int64]string{}}
+	req := Request{
+		RequestID: "request-with-safeguard-exclusions",
+		Protocol:  "openai_chat_completions",
+		Body: []byte(`{"messages":[
+			{"role":"system","content":"SYSTEM_CANARY"},
+			{"role":"developer","content":"DEVELOPER_CANARY"},
+			{"role":"assistant","content":"ASSISTANT_CANARY"},
+			{"role":"tool","content":"TOOL_OUTPUT_CANARY"},
+			{"role":"user","content":[
+				{"type":"text","text":"user text"},
+				{"type":"image_url","image_url":{"url":"data:image/png;base64,IMAGE_CANARY"}},
+				{"type":"file","file":{"filename":"FILE_CANARY.txt","file_data":"FILE_DATA_CANARY"}}
+			]}
+		]}`),
+	}
+
+	require.NoError(t, NewEnqueuer(
+		&fakeConfigStore{cfg: cfg, active: true},
+		repo,
+		payload,
+	).Enqueue(context.Background(), req))
+
+	expected := "user text\n\nSYSTEM_CANARY\n\nDEVELOPER_CANARY\n\nASSISTANT_CANARY"
+	require.Equal(t, expected, metadataTextForTest(payload.values[51]))
+	require.Equal(t, expected, repo.createdSnapshot.FullPrompt)
+	require.Equal(t, 4, repo.createdSnapshot.MessageCount)
+	for _, excluded := range []string{"TOOL_OUTPUT_CANARY", "IMAGE_CANARY", "FILE_CANARY", "FILE_DATA_CANARY"} {
+		require.NotContains(t, payload.values[51], excluded)
+		require.NotContains(t, repo.createdSnapshot.FullPrompt, excluded)
+	}
+}
+
 func TestEnqueuerSkipsOffOutOfScopeAndNoText(t *testing.T) {
 	tests := []struct {
 		name string

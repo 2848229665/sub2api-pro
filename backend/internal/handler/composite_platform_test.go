@@ -77,6 +77,51 @@ func TestCompositeTargetPlatformResolvedAllowsConcreteGroupWithoutResolution(t *
 	require.True(t, compositeTargetPlatformResolved(c, apiKey, "llama-4-maverick"))
 }
 
+func TestFixedEndpointTargetPlatformAllowedResolvesModelLessCompositeRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("GET", "/backend-api/codex/models", nil)
+	apiKey := &service.APIKey{Group: &service.Group{Platform: service.PlatformComposite}}
+
+	require.True(t, fixedEndpointTargetPlatformAllowed(c, apiKey, "", service.PlatformOpenAI))
+	platform, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context())
+	require.True(t, ok)
+	require.Equal(t, service.PlatformOpenAI, platform)
+	require.Equal(t, service.PlatformOpenAI, service.QuotaPlatform(c.Request.Context(), apiKey))
+}
+
+func TestFixedEndpointTargetPlatformAllowedHonorsExistingCompositeDecision(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	apiKey := &service.APIKey{Group: &service.Group{Platform: service.PlatformComposite}}
+
+	allowed, _ := gin.CreateTestContext(httptest.NewRecorder())
+	allowed.Request = httptest.NewRequest("POST", "/v1/live", nil)
+	allowed.Request = allowed.Request.WithContext(
+		service.WithResolvedTargetPlatform(allowed.Request.Context(), service.PlatformOpenAI),
+	)
+	require.True(t, fixedEndpointTargetPlatformAllowed(allowed, apiKey, "", service.PlatformOpenAI))
+
+	rejected, _ := gin.CreateTestContext(httptest.NewRecorder())
+	rejected.Request = httptest.NewRequest("POST", "/v1/live", nil)
+	rejected.Request = rejected.Request.WithContext(
+		service.WithResolvedTargetPlatform(rejected.Request.Context(), service.PlatformGrok),
+	)
+	require.False(t, fixedEndpointTargetPlatformAllowed(rejected, apiKey, "", service.PlatformOpenAI))
+}
+
+func TestFixedEndpointTargetPlatformAllowedRejectsOtherConcreteGroups(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/backend-api/codex/memories/trace_summarize", nil)
+
+	require.False(t, fixedEndpointTargetPlatformAllowed(c, &service.APIKey{
+		Group: &service.Group{Platform: service.PlatformAnthropic},
+	}, "", service.PlatformOpenAI))
+	require.True(t, fixedEndpointTargetPlatformAllowed(c, &service.APIKey{
+		Group: &service.Group{Platform: service.PlatformOpenAI},
+	}, "", service.PlatformOpenAI))
+}
+
 func TestClientRequestedModelUsesCompositePublicModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

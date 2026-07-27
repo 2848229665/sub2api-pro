@@ -38,9 +38,11 @@ const (
 // CodexModelsManifest carries the raw upstream manifest payload plus caching
 // metadata so handlers can pass both through to the client untouched.
 type CodexModelsManifest struct {
-	Body        []byte
-	ETag        string
-	NotModified bool
+	Body             []byte
+	ETag             string
+	NotModified      bool
+	UpstreamEndpoint string
+	ResponseHeaders  http.Header
 }
 
 type codexModelsManifestUpstreamError struct {
@@ -291,7 +293,6 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	headers := make(http.Header)
 	if useAPIKeyUpstream {
 		headers.Set("Authorization", "Bearer "+authToken)
-		credAccount.ApplyHeaderOverrides(headers)
 	} else {
 		authHeaders, authErr := s.buildOpenAIAuthenticationHeaders(ctx, credAccount, authToken)
 		if authErr != nil {
@@ -308,6 +309,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	headers.Set("Originator", "codex_cli_rs")
 	headers.Set("Version", clientVersion)
 	headers.Set("User-Agent", codexCLIUserAgent)
+	account.ApplyHeaderOverrides(headers)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -477,7 +479,12 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotModified {
-		return &CodexModelsManifest{ETag: resp.Header.Get("ETag"), NotModified: true}, nil
+		return &CodexModelsManifest{
+			ETag:             resp.Header.Get("ETag"),
+			NotModified:      true,
+			UpstreamEndpoint: req.URL.Path,
+			ResponseHeaders:  resp.Header.Clone(),
+		}, nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
@@ -518,7 +525,12 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 			retryable: true,
 		}
 	}
-	return &CodexModelsManifest{Body: body, ETag: resp.Header.Get("ETag")}, nil
+	return &CodexModelsManifest{
+		Body:             body,
+		ETag:             resp.Header.Get("ETag"),
+		UpstreamEndpoint: req.URL.Path,
+		ResponseHeaders:  resp.Header.Clone(),
+	}, nil
 }
 
 // convertOpenAIModelListToCodexManifest rewrites a standard OpenAI
@@ -612,7 +624,12 @@ func codexModelsManifestForClient(manifest *CodexModelsManifest, ifNoneMatch str
 		return nil
 	}
 	if codexModelsManifestETagMatches(ifNoneMatch, manifest.ETag) {
-		return &CodexModelsManifest{ETag: manifest.ETag, NotModified: true}
+		return &CodexModelsManifest{
+			ETag:             manifest.ETag,
+			NotModified:      true,
+			UpstreamEndpoint: manifest.UpstreamEndpoint,
+			ResponseHeaders:  manifest.ResponseHeaders.Clone(),
+		}
 	}
 	return manifest
 }

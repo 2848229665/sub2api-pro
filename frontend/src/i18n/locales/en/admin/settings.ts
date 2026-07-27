@@ -364,6 +364,10 @@ export default {
         saveFailed: 'Failed to save Ollama Cloud usage refresh settings'
       },
       gatewayForwarding: {
+        forkFeaturesTitle: 'Fork Features',
+        forkFeaturesDescription: 'Controls gateway enhancements provided by the sub2api-pro fork.',
+        codexPromptCacheOptimization: 'Codex Prompt Cache Optimizer',
+        codexPromptCacheOptimizationHint: 'Enabled by default. Uses minimal JSON patches for official Codex native Responses requests to preserve stable instructions, tools, input, and text prefixes. Disable it to use the upstream compatibility translator.',
         title: 'Request Forwarding',
         description: 'Control how requests are forwarded to upstream OAuth accounts',
         fingerprintUnification: 'Fingerprint Unification',

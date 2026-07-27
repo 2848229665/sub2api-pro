@@ -231,6 +231,10 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.openaiExperimentalScheduler.upstreamCostWeight": "计费倍率",
     "admin.settings.openaiExperimentalScheduler.previousResponseWeight": "previous_response 粘性",
     "admin.settings.openaiExperimentalScheduler.sessionStickyWeight": "session_hash 粘性",
+    "admin.settings.gatewayForwarding.forkFeaturesTitle": "Fork 专属功能",
+    "admin.settings.gatewayForwarding.forkFeaturesDescription": "控制 sub2api-pro Fork 提供的网关增强功能",
+    "admin.settings.gatewayForwarding.codexPromptCacheOptimization": "Codex Prompt Cache 优化器",
+    "admin.settings.gatewayForwarding.codexPromptCacheOptimizationHint": "默认开启。对官方 Codex 原生 Responses 请求使用局部 JSON patch。",
     "admin.settings.upstreamBillingProbe.title": "上游倍率自动探测",
     "admin.settings.upstreamBillingProbe.description": "定期获取 OpenAI API Key 所连接上游 Sub2API 站点声明的计费倍率。",
     "admin.settings.upstreamBillingProbe.enabled": "启用全局自动探测",
@@ -464,6 +468,7 @@ const baseSettingsResponse = {
   enable_anthropic_cache_ttl_1h_injection: false,
   rewrite_message_cache_control: false,
   enable_client_dateline_normalization: true,
+  openai_codex_prompt_cache_optimization_enabled: true,
   antigravity_user_agent_version: "",
   openai_codex_user_agent: "",
   payment_enabled: true,
@@ -1200,6 +1205,36 @@ describe("admin SettingsView payment visible method controls", () => {
       interval_minutes: 60,
     });
     expect(showSuccess).toHaveBeenCalledWith("上游倍率自动探测设置已保存");
+  });
+
+  it("places the fork prompt-cache switch first and persists its value", async () => {
+    const wrapper = mountView();
+
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    const gatewaySection = wrapper.get(
+      '[data-testid="gateway-primary-settings"]',
+    );
+    const firstCard = gatewaySection.findAll(".card")[0];
+    expect(firstCard.attributes("data-testid")).toBe("fork-feature-settings");
+
+    const forkCard = wrapper.get('[data-testid="fork-feature-settings"]');
+    expect(forkCard.isVisible()).toBe(true);
+    const toggle = forkCard.get(
+      '[data-testid="codex-prompt-cache-optimization-toggle"]',
+    );
+    expect((toggle.element as HTMLInputElement).checked).toBe(true);
+
+    await toggle.setValue(false);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        openai_codex_prompt_cache_optimization_enabled: false,
+      }),
+    );
   });
 
   it("loads fail-safe-off Ollama Cloud usage refresh settings and saves an explicit opt-in", async () => {

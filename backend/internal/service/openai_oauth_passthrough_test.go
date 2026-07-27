@@ -18,6 +18,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
+	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -219,11 +220,66 @@ func TestOpenAIGatewayService_OAuthMessagesBridgeDoesNotInjectDefaultInstruction
 	require.Nil(t, result)
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, "", gjson.GetBytes(upstream.lastBody, "instructions").String())
-	require.False(t, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").Exists())
+	wantSession := isolateOpenAISessionID(0, "anthropic-metadata-session-1")
+	require.Equal(t, wantSession, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
 	require.NotEmpty(t, upstream.lastReq.Header.Get("Session_Id"))
+	require.Equal(t, wantSession, upstream.lastReq.Header.Get("Session_Id"))
+	require.Equal(t, upstream.lastReq.Header.Get("Session_Id"), upstream.lastReq.Header.Get(openAIOfficialSessionIDHeader))
 	require.Empty(t, upstream.lastReq.Header.Get("Conversation_Id"))
 	require.Empty(t, upstream.lastReq.Header.Get("OpenAI-Beta"))
 	require.Empty(t, upstream.lastReq.Header.Get("originator"))
+}
+
+func TestOpenAIGatewayService_OAuthMessagesBridgeAlignsBodyAndSessionIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"model":"gpt-5.5","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("api_key", &APIKey{ID: 456})
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid_messages_identity"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"stop"}}`)),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          124,
+		Name:        "oauth-messages",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token":       "oauth-token",
+			"chatgpt_account_id": "chatgpt-acc",
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.ForwardAsAnthropic(
+		context.Background(),
+		c,
+		account,
+		body,
+		"messages-session",
+		"",
+	)
+
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.NotNil(t, upstream.lastReq)
+	wantSession := isolateOpenAISessionID(456, "messages-session")
+	require.Equal(t, wantSession, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
+	require.Equal(t, wantSession, upstream.lastReq.Header.Get(openAIOfficialSessionIDHeader))
+	require.Equal(t, wantSession, upstream.lastReq.Header.Get("session_id"))
+	require.NotEqual(t, generateSessionUUID(wantSession), upstream.lastReq.Header.Get(openAIOfficialSessionIDHeader))
 }
 
 type openAIPassthroughFailoverRepo struct {
@@ -933,7 +989,12 @@ func TestOpenAIGatewayService_OAuthPassthrough_ResponseHeadersAllowXCodex(t *tes
 	headers.Set("x-codex-secondary-used-percent", "34")
 	headers.Set("x-codex-primary-window-minutes", "300")
 	headers.Set("x-codex-secondary-window-minutes", "10080")
-	headers.Set("x-codex-primary-reset-after-seconds", "1")
+	headers.Set("x-codex-primary-reset-at", "1777283883")
+	headers.Set("x-codex-credits-has-credits", "true")
+	headers.Set("x-codex-other-limit-name", "gpt-5.6-sol")
+	headers.Set("x-models-etag", `"models-v2"`)
+	headers.Set("openai-model", "gpt-5.6-sol")
+	headers.Set("x-reasoning-included", "true")
 
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
@@ -972,6 +1033,31 @@ func TestOpenAIGatewayService_OAuthPassthrough_ResponseHeadersAllowXCodex(t *tes
 
 	require.Equal(t, "12", rec.Header().Get("x-codex-primary-used-percent"))
 	require.Equal(t, "34", rec.Header().Get("x-codex-secondary-used-percent"))
+	require.Equal(t, "1777283883", rec.Header().Get("x-codex-primary-reset-at"))
+	require.Equal(t, "true", rec.Header().Get("x-codex-credits-has-credits"))
+	require.Equal(t, "gpt-5.6-sol", rec.Header().Get("x-codex-other-limit-name"))
+	require.Equal(t, `"models-v2"`, rec.Header().Get("x-models-etag"))
+	require.Equal(t, "gpt-5.6-sol", rec.Header().Get("openai-model"))
+	require.Equal(t, "true", rec.Header().Get("x-reasoning-included"))
+}
+
+func TestWriteOpenAIPassthroughResponseHeadersHonorsForceRemove(t *testing.T) {
+	src := http.Header{
+		"Content-Type":                   []string{"application/json"},
+		"X-Codex-Other-Primary-Reset-At": []string{"1777283883"},
+		"X-Models-Etag":                  []string{`"models-v2"`},
+	}
+	dst := make(http.Header)
+	filter := responseheaders.CompileHeaderFilter(config.ResponseHeaderConfig{
+		Enabled:     true,
+		ForceRemove: []string{"x-codex-other-primary-reset-at", "x-models-etag"},
+	})
+
+	writeOpenAIPassthroughResponseHeaders(dst, src, filter)
+
+	require.Equal(t, "application/json", dst.Get("Content-Type"))
+	require.Empty(t, dst.Get("X-Codex-Other-Primary-Reset-At"))
+	require.Empty(t, dst.Get("X-Models-Etag"))
 }
 
 func TestOpenAIGatewayService_OAuthPassthrough_UpstreamErrorIncludesPassthroughFlag(t *testing.T) {

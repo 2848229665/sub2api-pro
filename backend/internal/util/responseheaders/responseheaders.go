@@ -13,25 +13,33 @@ import (
 //   - transfer-encoding: 由 HTTP 库根据需要自动添加/移除
 //   - connection: 由 HTTP 库管理连接复用
 var defaultAllowed = map[string]struct{}{
-	"content-type":                   {},
-	"content-encoding":               {},
-	"content-language":               {},
-	"cache-control":                  {},
-	"etag":                           {},
-	"last-modified":                  {},
-	"expires":                        {},
-	"vary":                           {},
-	"date":                           {},
-	"x-request-id":                   {},
-	"x-ratelimit-limit-requests":     {},
-	"x-ratelimit-limit-tokens":       {},
-	"x-ratelimit-remaining-requests": {},
-	"x-ratelimit-remaining-tokens":   {},
-	"x-ratelimit-reset-requests":     {},
-	"x-ratelimit-reset-tokens":       {},
-	"retry-after":                    {},
-	"location":                       {},
-	"www-authenticate":               {},
+	"content-type":                          {},
+	"content-encoding":                      {},
+	"content-language":                      {},
+	"cache-control":                         {},
+	"etag":                                  {},
+	"last-modified":                         {},
+	"expires":                               {},
+	"vary":                                  {},
+	"date":                                  {},
+	"x-request-id":                          {},
+	"x-codex-turn-state":                    {},
+	"x-models-etag":                         {},
+	"openai-model":                          {},
+	"x-openai-model":                        {},
+	"x-openai-authorization-error":          {},
+	"x-reasoning-included":                  {},
+	"x-codex-safety-buffering-enabled":      {},
+	"x-codex-safety-buffering-faster-model": {},
+	"x-ratelimit-limit-requests":            {},
+	"x-ratelimit-limit-tokens":              {},
+	"x-ratelimit-remaining-requests":        {},
+	"x-ratelimit-remaining-tokens":          {},
+	"x-ratelimit-reset-requests":            {},
+	"x-ratelimit-reset-tokens":              {},
+	"retry-after":                           {},
+	"location":                              {},
+	"www-authenticate":                      {},
 }
 
 // hopByHopHeaders 是跳过的 hop-by-hop 头部，这些头部由 HTTP 库自动处理
@@ -93,7 +101,11 @@ func FilterHeaders(src http.Header, filter *CompiledHeaderFilter) http.Header {
 		if _, blocked := filter.forceRemove[lower]; blocked {
 			continue
 		}
-		if _, ok := filter.allowed[lower]; !ok {
+		_, explicitlyAllowed := filter.allowed[lower]
+		// Codex adds metered limit families over time (for example,
+		// x-codex-<limit>-primary-reset-at). Keep the upstream-owned namespace
+		// forward compatible instead of maintaining a stale fixed list.
+		if !explicitlyAllowed && !strings.HasPrefix(lower, "x-codex-") {
 			continue
 		}
 		// 跳过 hop-by-hop 头部，这些由 HTTP 库自动处理

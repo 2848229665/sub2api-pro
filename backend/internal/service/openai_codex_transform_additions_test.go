@@ -31,7 +31,7 @@ func TestEnsureCodexReasoningInclude(t *testing.T) {
 	require.Equal(t, []any{"foo", "reasoning.encrypted_content"}, body3["include"])
 }
 
-// applyCodexClientMetadata：用账号真实 device_id 注入 installation 标识，幂等、不覆盖既有项、不伪造。
+// applyCodexClientMetadata：用账号真实 device_id 归一 installation 标识，幂等、不破坏其他项、不伪造。
 func TestApplyCodexClientMetadata(t *testing.T) {
 	// 仅 OpenAI OAuth 账号才有 device_id（GetOpenAIDeviceID 的门控）。
 	acc := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"openai_device_id": "dev-xyz"}}
@@ -56,6 +56,16 @@ func TestApplyCodexClientMetadata(t *testing.T) {
 	cm3, _ := body3["client_metadata"].(map[string]any)
 	require.Equal(t, "t", cm3["x-codex-turn-metadata"])
 	require.Equal(t, "dev-xyz", cm3["x-codex-installation-id"])
+
+	// 客户端 installation 身份不能覆盖所选 OAuth 账号的真实 device_id。
+	body4 := map[string]any{"client_metadata": map[string]any{
+		"x-codex-installation-id": "client-device",
+		"x-codex-turn-metadata":   "keep",
+	}}
+	require.True(t, applyCodexClientMetadata(body4, acc))
+	cm4, _ := body4["client_metadata"].(map[string]any)
+	require.Equal(t, "dev-xyz", cm4["x-codex-installation-id"])
+	require.Equal(t, "keep", cm4["x-codex-turn-metadata"])
 }
 
 // defaultCodexSynthInstructions：按模型选用真实 Codex base prompt。

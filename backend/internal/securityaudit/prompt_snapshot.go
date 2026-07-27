@@ -24,16 +24,28 @@ var (
 const promptAuditPrioritySeparator = "\x00SUB2API_PROMPT_AUDIT_PRIORITY_END\x00"
 
 type promptSegment struct {
-	text string
-	user bool
+	text              string
+	user              bool
+	safeguardExcluded bool
 }
 
 func ExtractPromptSnapshot(req Request) (PromptSnapshot, error) {
+	return extractPromptSnapshot(req, false)
+}
+
+func ExtractPromptSnapshotForEndpoints(req Request, endpoints []ActiveEndpoint) (PromptSnapshot, error) {
+	return extractPromptSnapshot(req, promptAuditPoolExcludesToolAndAttachments(endpoints))
+}
+
+func extractPromptSnapshot(req Request, excludeToolAndAttachments bool) (PromptSnapshot, error) {
 	var document any
 	if err := json.Unmarshal(req.Body, &document); err != nil {
 		return PromptSnapshot{}, errors.New("prompt audit request JSON is invalid")
 	}
 	extracted := extractProtocolSegments(req.Protocol, document)
+	if excludeToolAndAttachments {
+		extracted = safeguardAuditableSegments(extracted)
+	}
 	segments := normalizeSegmentsLatestUserFirst(extracted)
 	if len(segments) == 0 {
 		return PromptSnapshot{}, ErrNoPromptText
@@ -54,6 +66,31 @@ func ExtractPromptSnapshot(req Request) (PromptSnapshot, error) {
 		PromptLength: utf8.RuneCountInString(metadataText), MessageCount: len(segments), Stage: stage,
 		ScanText: scanText,
 	}, nil
+}
+
+// Prompt Audit persists one transient scan payload for the whole priority pool.
+// When GPT-OSS Safeguard is enabled anywhere in that pool, exclude tool output
+// and attachment blocks for every failover target so they can never reach the
+// Safeguard endpoint. Text from user, system, developer, and assistant messages
+// remains auditable.
+func promptAuditPoolExcludesToolAndAttachments(endpoints []ActiveEndpoint) bool {
+	for _, endpoint := range endpoints {
+		if endpoint.Enabled &&
+			strings.EqualFold(strings.TrimSpace(endpoint.Model), DefaultGroqSafeguardModel) {
+			return true
+		}
+	}
+	return false
+}
+
+func safeguardAuditableSegments(segments []promptSegment) []promptSegment {
+	result := make([]promptSegment, 0, len(segments))
+	for _, segment := range segments {
+		if !segment.safeguardExcluded {
+			result = append(result, segment)
+		}
+	}
+	return result
 }
 
 // DefaultPromptPreviewMaxRunes caps how much sanitized prompt text may be
@@ -138,7 +175,11 @@ func extractMessages(value any, wantedRoles ...string) []promptSegment {
 		}
 		texts := contentTexts(message["content"])
 		for _, text := range texts {
-			result = append(result, promptSegment{text: text, user: role == "user"})
+			result = append(result, promptSegment{
+				text:              text,
+				user:              role == "user",
+				safeguardExcluded: isToolRole(role),
+			})
 		}
 	}
 	return result
@@ -187,12 +228,23 @@ func extractResponses(value any) []promptSegment {
 				if role != "" && !isClientInstructionRole(role) {
 					continue
 				}
+				typeName := strings.ToLower(stringValue(entry["type"]))
+				userText := (role == "" || role == "user") && isResponseUserTextType(typeName)
+				safeguardExcluded := isToolRole(role) || isResponseToolOutputType(typeName)
 				if content, exists := entry["content"]; exists {
 					for _, text := range contentTexts(content) {
-						result = append(result, promptSegment{text: text, user: role == "" || role == "user"})
+						result = append(result, promptSegment{
+							text:              text,
+							user:              userText,
+							safeguardExcluded: safeguardExcluded,
+						})
 					}
 				} else if text := stringValue(entry["text"]); text != "" {
-					result = append(result, promptSegment{text: text, user: role == "" || role == "user"})
+					result = append(result, promptSegment{
+						text:              text,
+						user:              userText,
+						safeguardExcluded: safeguardExcluded,
+					})
 				}
 			}
 		}
@@ -202,10 +254,38 @@ func extractResponses(value any) []promptSegment {
 		if role != "" && !isClientInstructionRole(role) {
 			return nil
 		}
-		return promptSegmentsForRole(contentTexts(typed["content"]), role)
+		typeName := strings.ToLower(stringValue(typed["type"]))
+		texts := contentTexts(typed["content"])
+		result := make([]promptSegment, 0, len(texts))
+		for _, text := range texts {
+			result = append(result, promptSegment{
+				text:              text,
+				user:              (role == "" || role == "user") && isResponseUserTextType(typeName),
+				safeguardExcluded: isToolRole(role) || isResponseToolOutputType(typeName),
+			})
+		}
+		return result
 	default:
 		return nil
 	}
+}
+
+func isResponseUserTextType(typeName string) bool {
+	switch strings.ToLower(strings.TrimSpace(typeName)) {
+	case "", "message", "text", "input_text":
+		return true
+	default:
+		return false
+	}
+}
+
+func isResponseToolOutputType(typeName string) bool {
+	typeName = strings.ToLower(strings.TrimSpace(typeName))
+	return typeName == "tool_result" || strings.HasSuffix(typeName, "_call_output")
+}
+
+func isToolRole(role string) bool {
+	return strings.EqualFold(strings.TrimSpace(role), "tool")
 }
 
 func isClientInstructionRole(role string) bool {
@@ -241,12 +321,28 @@ func extractGemini(value any) []promptSegment {
 		for _, part := range parts {
 			if object, ok := part.(map[string]any); ok {
 				if text := stringValue(object["text"]); text != "" {
-					result = append(result, promptSegment{text: text, user: role == "" || role == "user"})
+					result = append(result, promptSegment{
+						text:              text,
+						user:              role == "" || role == "user",
+						safeguardExcluded: isToolRole(role) || isGeminiSafeguardExcludedPart(object),
+					})
 				}
 			}
 		}
 	}
 	return result
+}
+
+func isGeminiSafeguardExcludedPart(part map[string]any) bool {
+	for _, key := range []string{
+		"inlineData", "inline_data", "fileData", "file_data",
+		"functionResponse", "function_response",
+	} {
+		if _, exists := part[key]; exists {
+			return true
+		}
+	}
+	return false
 }
 
 func extractGeminiRoot(root map[string]any) []promptSegment {
@@ -286,7 +382,10 @@ func extractGeminiSystemInstruction(value any) []promptSegment {
 			for _, part := range parts {
 				if object, ok := part.(map[string]any); ok {
 					if text := stringValue(object["text"]); text != "" {
-						result = append(result, promptSegment{text: text})
+						result = append(result, promptSegment{
+							text:              text,
+							safeguardExcluded: isGeminiSafeguardExcludedPart(object),
+						})
 					}
 				}
 			}
@@ -403,7 +502,7 @@ func contentTexts(value any) []string {
 				continue
 			}
 			typeName := strings.ToLower(stringValue(object["type"]))
-			if typeName != "" && typeName != "text" && typeName != "input_text" {
+			if !isTextContentType(typeName) {
 				continue
 			}
 			if text := stringValue(object["text"]); text != "" {
@@ -412,11 +511,23 @@ func contentTexts(value any) []string {
 		}
 		return result
 	case map[string]any:
+		if !isTextContentType(stringValue(typed["type"])) {
+			return nil
+		}
 		if text := stringValue(typed["text"]); text != "" {
 			return []string{text}
 		}
 	}
 	return nil
+}
+
+func isTextContentType(typeName string) bool {
+	switch strings.ToLower(strings.TrimSpace(typeName)) {
+	case "", "text", "input_text", "output_text":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeSegmentsLatestUserFirst(values []promptSegment) []string {
@@ -458,7 +569,11 @@ func buildPrioritizedScanText(segments []string) (scanText string, metadataText 
 func promptSegmentsForRole(texts []string, role string) []promptSegment {
 	result := make([]promptSegment, 0, len(texts))
 	for _, text := range texts {
-		result = append(result, promptSegment{text: text, user: role == "" || role == "user"})
+		result = append(result, promptSegment{
+			text:              text,
+			user:              role == "" || role == "user",
+			safeguardExcluded: isToolRole(role),
+		})
 	}
 	return result
 }

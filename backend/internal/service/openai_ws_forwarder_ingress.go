@@ -375,6 +375,17 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			)
 		}
 		normalized = policyApplied
+		if account.Type == AccountTypeOAuth {
+			identityBody, _, identityErr := prepareOpenAICodexUpstreamIdentity(c, account, normalized, false)
+			if identityErr != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(
+					coderws.StatusPolicyViolation,
+					"invalid Codex identity metadata",
+					identityErr,
+				)
+			}
+			normalized = identityBody
+		}
 		ingressSessionOriginalModel = originalModel
 
 		return openAIWSClientPayload{

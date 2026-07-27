@@ -53,9 +53,6 @@ func RegisterGatewayRoutes(
 			return false
 		}
 	}
-	isOpenAIGatewayPlatform := func(c *gin.Context) bool {
-		return getGroupPlatform(c) == service.PlatformOpenAI
-	}
 	countTokensHandler := func(c *gin.Context) {
 		switch getGroupPlatform(c) {
 		case service.PlatformOpenAI:
@@ -67,7 +64,9 @@ func RegisterGatewayRoutes(
 		}
 	}
 	modelsHandler := func(c *gin.Context) {
-		if isOpenAIGatewayPlatform(c) && c.Query("client_version") != "" {
+		groupPlatform := getGroupPlatform(c)
+		if c.Query("client_version") != "" &&
+			(groupPlatform == service.PlatformOpenAI || groupPlatform == service.PlatformComposite) {
 			h.OpenAIGateway.CodexModels(c)
 			return
 		}
@@ -182,6 +181,8 @@ func RegisterGatewayRoutes(
 		gateway.GET("/usage", h.Gateway.Usage)
 		gateway.POST("/live", h.OpenAIGateway.Live)
 		gateway.GET("/live/:call_id", h.OpenAIGateway.LiveSideband)
+		gateway.POST("/realtime/calls", h.OpenAIGateway.Live)
+		gateway.GET("/realtime", h.OpenAIGateway.LiveSideband)
 		// OpenAI Responses API: auto-route based on group platform
 		gateway.POST("/responses", func(c *gin.Context) {
 			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
@@ -198,6 +199,7 @@ func RegisterGatewayRoutes(
 			h.Gateway.Responses(c)
 		})
 		gateway.POST("/alpha/search", textBodyLimit, h.OpenAIGateway.AlphaSearch)
+		gateway.POST("/memories/trace_summarize", h.OpenAIGateway.CodexMemories)
 		gateway.GET("/responses", func(c *gin.Context) {
 			h.OpenAIGateway.ResponsesWebSocket(c)
 		})
@@ -280,10 +282,14 @@ func RegisterGatewayRoutes(
 	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic)
 	{
 		codexDirect.POST("/realtime/calls", h.OpenAIGateway.Live)
+		codexDirect.GET("", h.OpenAIGateway.LiveSideband)
 		codexDirect.GET("/:call_id", h.OpenAIGateway.LiveSideband)
 		codexDirect.POST("/responses", responsesHandler)
 		codexDirect.POST("/responses/*subpath", responsesHandler)
 		codexDirect.POST("/alpha/search", textBodyLimit, h.OpenAIGateway.AlphaSearch)
+		codexDirect.POST("/images/generations", imagesHandler)
+		codexDirect.POST("/images/edits", imagesHandler)
+		codexDirect.POST("/memories/trace_summarize", h.OpenAIGateway.CodexMemories)
 		codexDirect.GET("/responses", func(c *gin.Context) {
 			h.OpenAIGateway.ResponsesWebSocket(c)
 		})
@@ -312,6 +318,7 @@ func RegisterGatewayRoutes(
 	})
 	r.POST("/images/generations", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, imagesHandler)
 	r.POST("/images/edits", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, imagesHandler)
+	r.POST("/memories/trace_summarize", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, h.OpenAIGateway.CodexMemories)
 	r.POST("/images/generations/async", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, h.AsyncImage.Submit)
 	r.POST("/images/edits/async", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, h.AsyncImage.Submit)
 	r.GET("/images/tasks/:task_id", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, h.AsyncImage.Get)

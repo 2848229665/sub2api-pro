@@ -31,6 +31,8 @@ func ExtractContentModerationInput(protocol string, body []byte) ContentModerati
 	case ContentModerationProtocolOpenAIImages:
 		addModerationText(&parts, gjson.GetBytes(body, "prompt").String())
 		collectContentValue(gjson.GetBytes(body, "images"), &parts, &images)
+	case ContentModerationProtocolOpenAICodexMemory:
+		collectCodexMemoryTraceInput(gjson.GetBytes(body, "traces"), &parts, &images)
 	default:
 		collectLastResponsesInput(gjson.GetBytes(body, "input"), &parts, &images)
 		collectLastRoleMessage(gjson.GetBytes(body, "messages"), "user", &parts, &images)
@@ -42,6 +44,30 @@ func ExtractContentModerationInput(protocol string, body []byte) ContentModerati
 	}
 	out.Normalize()
 	return out
+}
+
+func collectCodexMemoryTraceInput(traces gjson.Result, parts *[]string, images *[]string) {
+	if !traces.IsArray() {
+		return
+	}
+	traces.ForEach(func(_, trace gjson.Result) bool {
+		items := trace.Get("items")
+		if !items.IsArray() {
+			return true
+		}
+		items.ForEach(func(_, item gjson.Result) bool {
+			role := strings.ToLower(strings.TrimSpace(item.Get("role").String()))
+			if role != "" && role != "user" {
+				return true
+			}
+			collectContentValue(item.Get("content"), parts, images)
+			if item.Get("type").String() == "input_text" || item.Get("text").Exists() {
+				collectContentValue(item, parts, images)
+			}
+			return true
+		})
+		return true
+	})
 }
 
 func collectLastRoleMessage(messages gjson.Result, role string, parts *[]string, images *[]string) {

@@ -170,13 +170,14 @@ func TestNormalizeOpenAIResponsesCompactRequest_NoTriggerUntouched(t *testing.T)
 
 func TestNormalizeOpenAIResponsesCompactRequest_PathBasedNoDoubleSuffix(t *testing.T) {
 	h := &OpenAIGatewayHandler{}
-	body := []byte(`{"model":"gpt-5.5","stream":true,"store":true,"input":[{"type":"message","role":"user","content":"hello"}]}`)
+	body := []byte(`{"model":"gpt-5.5","stream":true,"store":true,"prompt_cache_key":"compact-session","input":[{"type":"message","role":"user","content":"hello"}]}`)
 	c := newCompactBodySignalTestContext(t, "/v1/responses/compact", body)
 	c.Request.Header.Set("x-codex-beta-features", "remote_compaction_v2")
 
 	normalized, ok := h.normalizeOpenAIResponsesCompactRequest(c, zap.NewNop(), body)
 	require.True(t, ok)
 	require.Equal(t, "/v1/responses/compact", c.Request.URL.Path)
+	require.Equal(t, "compact-session", gjson.GetBytes(normalized, "prompt_cache_key").String())
 	require.False(t, gjson.GetBytes(normalized, "stream").Exists())
 	require.False(t, gjson.GetBytes(normalized, "store").Exists())
 }

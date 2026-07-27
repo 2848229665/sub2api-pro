@@ -184,19 +184,28 @@ func startPassthroughLifecycleServer(
 		req := r.Clone(controlCtx)
 		req.Header = req.Header.Clone()
 		ginCtx.Request = req
+		ginCtx.Set("api_key", &APIKey{ID: 707})
 		serverErr <- svc.ProxyResponsesWebSocketFromClient(controlCtx, ginCtx, conn, account, "sk-test", firstMessage, nil)
 	}))
 	return server, serverErr
 }
 
 func dialPassthroughLifecycleClient(t *testing.T, server *httptest.Server) *coderws.Conn {
+	return dialPassthroughLifecycleClientWithPayload(
+		t,
+		server,
+		`{"type":"response.create","model":"gpt-5.1","stream":false}`,
+	)
+}
+
+func dialPassthroughLifecycleClientWithPayload(t *testing.T, server *httptest.Server, payload string) *coderws.Conn {
 	t.Helper()
 	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
 	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
 	cancelDial()
 	require.NoError(t, err)
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
-	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false}`))
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(payload))
 	cancelWrite()
 	require.NoError(t, err)
 	return clientConn
@@ -494,6 +503,69 @@ func TestPassthroughLifecycle_TerminalSwitchesToInterTurnIdleTimeout(t *testing.
 		require.Equal(t, "websocket idle timeout", closeErr.Reason())
 	case <-time.After(3 * time.Second):
 		t.Fatal("passthrough terminal turn did not use inter-turn idle timeout")
+	}
+}
+
+func TestPassthroughLifecycle_CodexIdentityPersistsAcrossResponseCreateFrames(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	controlCtx, cancelControl := context.WithCancelCause(context.Background())
+	defer cancelControl(context.Canceled)
+	cfg := passthroughLifecycleConfig()
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	cfg.Gateway.OpenAIWS.IngressInterTurnIdleTimeoutSeconds = 2
+	upstream := newStagedPassthroughConn()
+	account := &Account{
+		ID:          902,
+		Name:        "codex-passthrough-identity",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "sk-test"},
+		Extra: map[string]any{
+			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+		},
+	}
+	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, newPassthroughLifecycleService(cfg, upstream), account)
+	defer server.Close()
+	clientConn := dialPassthroughLifecycleClientWithPayload(
+		t,
+		server,
+		`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"passthrough-session","client_metadata":{"session_id":"passthrough-session","thread_id":"passthrough-thread","x-codex-window-id":"passthrough-thread:0"}}`,
+	)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	first := requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
+	wantSession := isolateOpenAISessionID(707, "passthrough-session")
+	wantThread := isolateOpenAISessionID(707, "passthrough-thread")
+	require.Equal(t, wantSession, gjson.GetBytes(first, "prompt_cache_key").String())
+	require.Equal(t, wantSession, gjson.GetBytes(first, "client_metadata.session_id").String())
+	require.Equal(t, wantThread, gjson.GetBytes(first, "client_metadata.thread_id").String())
+
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_identity_first","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	completed, err := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
+	require.NoError(t, err)
+	require.Equal(t, "resp_identity_first", gjson.GetBytes(completed, "response.id").String())
+
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","previous_response_id":"resp_identity_first"}`))
+	cancelWrite()
+	require.NoError(t, err)
+	second := requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
+	require.Equal(t, wantSession, gjson.GetBytes(second, "prompt_cache_key").String())
+	require.False(t, gjson.GetBytes(second, "client_metadata").Exists())
+
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_identity_second","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	completed, err = readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
+	require.NoError(t, err)
+	require.Equal(t, "resp_identity_second", gjson.GetBytes(completed, "response.id").String())
+	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+
+	select {
+	case <-serverErr:
+	case <-time.After(3 * time.Second):
+		t.Fatal("passthrough identity test did not exit")
 	}
 }
 

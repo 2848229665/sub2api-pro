@@ -209,7 +209,6 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		if codexResult.PromptCacheKey != "" {
 			promptCacheKey = codexResult.PromptCacheKey
 		}
-		delete(reqBody, "prompt_cache_key")
 		if shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
 			compatTurnState = s.getOpenAICompatSessionTurnState(ctx, c, account, promptCacheKey)
 		}
@@ -222,12 +221,12 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		}
 	}
 
-	// For API key accounts (including OpenAI-compatible upstream gateways),
-	// ensure promptCacheKey is also propagated via the request body so that
-	// upstreams using the Responses API can derive a stable session identifier
-	// from prompt_cache_key. This makes our Anthropic /v1/messages compatibility
-	// path behave more like a native Responses client.
-	if account.Type == AccountTypeAPIKey {
+	// Keep the stable cache key in the Responses body for both API-key and
+	// ChatGPT OAuth accounts. Official Codex sends prompt_cache_key together
+	// with its session header, and the key participates in upstream cache
+	// routing; a header-only bridge loses that signal.
+	if account.Platform != PlatformGrok &&
+		(account.Type == AccountTypeAPIKey || account.Type == AccountTypeOAuth) {
 		if trimmedKey := strings.TrimSpace(promptCacheKey); trimmedKey != "" {
 			var reqBody map[string]any
 			if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
@@ -257,6 +256,12 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return nil, policyErr
 	}
 	responsesBody = updatedBody
+	if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
+		responsesBody, _, err = prepareOpenAICodexUpstreamIdentity(c, account, responsesBody, false)
+		if err != nil {
+			return nil, fmt.Errorf("prepare messages bridge Codex identity: %w", err)
+		}
+	}
 	grokCacheIdentity := ""
 	if account.Platform == PlatformGrok {
 		grokIntentBody := responsesBody
@@ -300,11 +305,12 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
-	// Override session_id with a deterministic UUID derived from the isolated
-	// session key, ensuring different API keys produce different upstream sessions.
-	if account.Platform != PlatformGrok && promptCacheKey != "" {
+	// API-key upstreams retain the legacy deterministic UUID header. ChatGPT
+	// OAuth already received the unified Codex identity above, so deriving it
+	// again here would make session-id diverge from body.prompt_cache_key.
+	if account.Platform != PlatformGrok && account.Type == AccountTypeAPIKey && promptCacheKey != "" {
 		isolatedSessionID := generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey))
-		upstreamReq.Header.Set("session_id", isolatedSessionID)
+		setOpenAIUpstreamSessionHeaders(upstreamReq.Header, isolatedSessionID)
 		if upstreamReq.Header.Get("conversation_id") != "" {
 			upstreamReq.Header.Set("conversation_id", isolatedSessionID)
 		}

@@ -538,6 +538,25 @@ func TestLoadOpenAICompactModelFromEnv(t *testing.T) {
 	require.Equal(t, "gpt-5.3-codex", cfg.Gateway.OpenAICompactModel)
 }
 
+func TestLoadOpenAICodexPromptCacheOptimization(t *testing.T) {
+	t.Run("enabled by default", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+
+		cfg, err := Load()
+		require.NoError(t, err)
+		require.True(t, cfg.Gateway.OpenAICodexPromptCacheOptimizationEnabled)
+	})
+
+	t.Run("disabled from environment", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+		t.Setenv("GATEWAY_OPENAI_CODEX_PROMPT_CACHE_OPTIMIZATION_ENABLED", "false")
+
+		cfg, err := Load()
+		require.NoError(t, err)
+		require.False(t, cfg.Gateway.OpenAICodexPromptCacheOptimizationEnabled)
+	})
+}
+
 func TestLoadDefaultOpenAIHTTP2Enabled(t *testing.T) {
 	resetViperWithJWTSecret(t)
 

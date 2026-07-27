@@ -21,6 +21,11 @@ const (
 	EndpointAlphaSearch       = "/v1/alpha/search"
 	EndpointResponses         = "/v1/responses"
 	EndpointResponsesCompact  = "/v1/responses/compact"
+	EndpointRealtimeCalls     = "/v1/realtime/calls"
+	EndpointRealtime          = "/v1/realtime"
+	EndpointLive              = "/v1/live"
+	EndpointModels            = "/v1/models"
+	EndpointCodexMemories     = "/v1/memories/trace_summarize"
 	EndpointImagesGenerations = "/v1/images/generations"
 	EndpointImagesEdits       = "/v1/images/edits"
 	EndpointImageTasks        = "/v1/images/tasks"
@@ -88,6 +93,16 @@ func NormalizeInboundEndpoint(path string) string {
 		return EndpointChatCompletions
 	case strings.Contains(path, EndpointMessages):
 		return EndpointMessages
+	case strings.Contains(path, EndpointRealtimeCalls) || isBareOrSubpathOf(strings.TrimRight(path, "/"), "/backend-api/codex/realtime/calls"):
+		return EndpointRealtimeCalls
+	case isBareOrSubpathOf(strings.TrimRight(path, "/"), EndpointRealtime):
+		return EndpointRealtime
+	case isBareOrSubpathOf(strings.TrimRight(path, "/"), EndpointLive):
+		return EndpointLive
+	case isBareOrSubpathOf(strings.TrimRight(path, "/"), EndpointModels) || isBareOrSubpathOf(strings.TrimRight(path, "/"), "/models") || isBareOrSubpathOf(strings.TrimRight(path, "/"), "/backend-api/codex/models"):
+		return EndpointModels
+	case strings.Contains(path, EndpointCodexMemories) || isBareOrSubpathOf(strings.TrimRight(path, "/"), "/memories/trace_summarize") || isBareOrSubpathOf(strings.TrimRight(path, "/"), "/backend-api/codex/memories/trace_summarize"):
+		return EndpointCodexMemories
 	case strings.Contains(path, EndpointImagesGenerations) || strings.Contains(path, "/images/generations"):
 		return EndpointImagesGenerations
 	case strings.Contains(path, EndpointImagesEdits) || strings.Contains(path, "/images/edits"):
@@ -185,7 +200,7 @@ func DeriveUpstreamEndpoint(inbound, rawRequestPath, platform string) string {
 
 	switch platform {
 	case service.PlatformOpenAI, service.PlatformGrok:
-		if inbound == EndpointEmbeddings || inbound == EndpointAlphaSearch || inbound == EndpointImagesGenerations || inbound == EndpointImagesEdits || inbound == EndpointVideosGenerations || inbound == EndpointVideosEdits || inbound == EndpointVideosExtensions || inbound == EndpointVideos {
+		if isNativeOpenAIEndpoint(inbound) {
 			return inbound
 		}
 		// OpenAI forwards everything to the Responses API.
@@ -221,6 +236,27 @@ func DeriveUpstreamEndpoint(inbound, rawRequestPath, platform string) string {
 
 	// Unknown platform — fall back to inbound.
 	return inbound
+}
+
+func isNativeOpenAIEndpoint(endpoint string) bool {
+	switch endpoint {
+	case EndpointEmbeddings,
+		EndpointAlphaSearch,
+		EndpointRealtimeCalls,
+		EndpointRealtime,
+		EndpointLive,
+		EndpointModels,
+		EndpointCodexMemories,
+		EndpointImagesGenerations,
+		EndpointImagesEdits,
+		EndpointVideosGenerations,
+		EndpointVideosEdits,
+		EndpointVideosExtensions,
+		EndpointVideos:
+		return true
+	default:
+		return false
+	}
 }
 
 // responsesSubpathSuffix extracts the part after "/responses" in a raw

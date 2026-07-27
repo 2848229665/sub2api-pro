@@ -1,7 +1,7 @@
 export default {
   promptAudit: {
     title: 'Prompt Audit',
-    description: 'Review user input asynchronously or block it synchronously through Qwen3Guard or Groq GPT-OSS Safeguard nodes. Full prompts are stored with events for admin review.',
+    description: 'Review prompts asynchronously or block them synchronously through Qwen3Guard or Groq GPT-OSS Safeguard nodes. GPT-OSS Safeguard receives text from system, developer, assistant, and user messages while ignoring tool output, images, and files. Full prompts are stored with events for admin review.',
     configVersion: 'Config version v{version}',
     tabs: { config: 'Configuration', events: 'Events' },
     actions: { refresh: 'Refresh runtime', retry: 'Retry', Allow: 'Allow', Warn: 'Warn', Block: 'Block' },

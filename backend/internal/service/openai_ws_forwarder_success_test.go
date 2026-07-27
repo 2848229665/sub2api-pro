@@ -421,6 +421,41 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersPreservesCodexIdentity(t *test
 	require.Empty(t, headers.Get("X-Test"))
 }
 
+func TestOpenAIGatewayService_BuildOpenAIWSHeadersUsesOfficialSessionID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	c.Request.Header.Set(openAIOfficialSessionIDHeader, "official-ws-session")
+	c.Request.Header.Set("session_id", "legacy-ws-session")
+	c.Set("api_key", &APIKey{ID: 79})
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
+	}
+	headers, resolution, err := svc.buildOpenAIWSHeaders(
+		context.Background(),
+		c,
+		account,
+		"token",
+		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
+		true,
+		"",
+		"",
+		"body-cache-key",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "official-ws-session", resolution.SessionID)
+	require.Equal(t, "header_session_id_official", resolution.SessionSource)
+	want := isolateOpenAISessionID(79, "official-ws-session")
+	require.Equal(t, want, headers.Get(openAIOfficialSessionIDHeader))
+	require.Equal(t, want, headers.Get("session_id"))
+}
+
 func TestLogOpenAIWSBindResponseAccountWarn(t *testing.T) {
 	require.NotPanics(t, func() {
 		logOpenAIWSBindResponseAccountWarn(1, 2, "resp_ok", nil)

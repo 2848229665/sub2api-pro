@@ -251,6 +251,16 @@ gateway:
   #
   # 注意：开启后会影响所有客户端的行为（不仅限于 VS Code / Codex CLI），请谨慎开启。
   force_codex_cli: false
+  # Enable the fork's prompt-cache optimized translator for official Codex
+  # native /v1/responses requests sent through ChatGPT OAuth accounts.
+  # 启用本 Fork 针对官方 Codex 原生 /v1/responses 的 Prompt Cache 优化翻译器。
+  #
+  # Default true uses a minimal JSON patch path and keeps stable
+  # instructions/tools/input/text prefixes. The admin gateway setting overrides
+  # this default after it has been saved.
+  # 默认 true：使用局部 JSON patch，保留稳定的 instructions/tools/input/text
+  # 前缀；管理端网关设置保存后优先于此默认值。
+  openai_codex_prompt_cache_optimization_enabled: true
   # Enable Codex image-generation bridge injection for /openai/v1/responses.
   # 是否为 Codex /responses 请求自动注入 image_generation 工具与桥接指令。
   #

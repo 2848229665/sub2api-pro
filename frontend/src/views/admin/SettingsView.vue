@@ -202,7 +202,54 @@
         <!-- /Tab: Security — Admin API Key -->
 
         <!-- Tab: Gateway -->
-        <div v-show="activeTab === 'gateway'" class="space-y-6">
+        <div
+          v-show="activeTab === 'gateway'"
+          class="space-y-6"
+          data-testid="gateway-primary-settings"
+        >
+          <!-- Fork-specific gateway features -->
+          <div class="card" data-testid="fork-feature-settings">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.settings.gatewayForwarding.forkFeaturesTitle") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{
+                  t("admin.settings.gatewayForwarding.forkFeaturesDescription")
+                }}
+              </p>
+            </div>
+            <div class="p-6">
+              <div class="flex items-center justify-between gap-4">
+                <div class="min-w-0">
+                  <label
+                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.codexPromptCacheOptimization",
+                      )
+                    }}
+                  </label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.codexPromptCacheOptimizationHint",
+                      )
+                    }}
+                  </p>
+                </div>
+                <Toggle
+                  v-model="form.openai_codex_prompt_cache_optimization_enabled"
+                  class="flex-shrink-0"
+                  data-testid="codex-prompt-cache-optimization-toggle"
+                />
+              </div>
+            </div>
+          </div>
+
           <!-- Overload Cooldown (529) Settings -->
           <div class="card">
             <div
@@ -9006,6 +9053,7 @@ const form = reactive<SettingsForm>({
   enable_anthropic_cache_ttl_1h_injection: false,
   rewrite_message_cache_control: false,
   enable_client_dateline_normalization: true,
+  openai_codex_prompt_cache_optimization_enabled: true,
   antigravity_user_agent_version: "",
   openai_codex_user_agent: "",
   // codex_cli_only 加固
@@ -10490,6 +10538,8 @@ async function saveSettings() {
       rewrite_message_cache_control: form.rewrite_message_cache_control,
       enable_client_dateline_normalization:
         form.enable_client_dateline_normalization,
+      openai_codex_prompt_cache_optimization_enabled:
+        form.openai_codex_prompt_cache_optimization_enabled,
       antigravity_user_agent_version:
         form.antigravity_user_agent_version?.trim() || "",
       openai_codex_user_agent:

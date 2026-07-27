@@ -27,7 +27,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 		h.errorResponse(c, http.StatusUnauthorized, "invalid_request_error", "API key group is required")
 		return
 	}
-	if apiKey.Group.Platform != service.PlatformOpenAI {
+	if !fixedEndpointTargetPlatformAllowed(c, apiKey, "", service.PlatformOpenAI) {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Codex models manifest is only available for OpenAI groups")
 		return
 	}
@@ -109,6 +109,10 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 		}
 		if c.Request.Context().Err() != nil {
 			return
+		}
+		service.SetActualOpenAIUpstreamEndpoint(c, manifest.UpstreamEndpoint)
+		if !account.IsShadow() {
+			h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(c.Request.Context(), account.ID, manifest.ResponseHeaders)
 		}
 
 		if manifest.ETag != "" {

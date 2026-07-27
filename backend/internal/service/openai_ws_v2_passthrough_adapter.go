@@ -714,6 +714,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			firstClientMessage = capped
 		}
 	}
+	if account.Type == AccountTypeOAuth {
+		identityBody, _, identityErr := prepareOpenAICodexUpstreamIdentity(c, account, firstClientMessage, false)
+		if identityErr != nil {
+			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid Codex identity metadata", identityErr)
+		}
+		firstClientMessage = identityBody
+	}
 	requestModel := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String())
 	requestPreviousResponseID := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "previous_response_id").String())
 	logOpenAIWSV2Passthrough(
@@ -981,6 +988,17 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					if capped, changed := ApplyOpenAIReasoningEffortPolicy(payload, hooks.MaxReasoningEffort, hooks.ReasoningEffortMappings); changed {
 						payload = capped
 					}
+				}
+				if account.Type == AccountTypeOAuth {
+					identityBody, _, identityErr := prepareOpenAICodexUpstreamIdentity(c, account, payload, false)
+					if identityErr != nil {
+						return payload, nil, NewOpenAIWSClientCloseError(
+							coderws.StatusPolicyViolation,
+							"invalid Codex identity metadata",
+							identityErr,
+						)
+					}
+					payload = identityBody
 				}
 			}
 			turnNo := int(completedTurns.Load()) + 1

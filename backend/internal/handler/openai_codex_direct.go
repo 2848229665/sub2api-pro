@@ -18,8 +18,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// AlphaSearch proxies the standalone search endpoint used by Codex Responses Lite.
-func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
+// CodexMemories proxies Codex's unary memory summarization endpoint.
+func (h *OpenAIGatewayHandler) CodexMemories(c *gin.Context) {
 	streamStarted := false
 	defer h.recoverResponsesPanic(c, &streamStarted)
 	setOpenAIClientTransportHTTP(c)
@@ -30,10 +30,6 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		h.errorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
 		return
 	}
-	if apiKey.Group.Platform != service.PlatformOpenAI && apiKey.Group.Platform != service.PlatformComposite {
-		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Codex alpha search is only available for OpenAI groups")
-		return
-	}
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
 		h.errorResponse(c, http.StatusInternalServerError, "api_error", "User context not found")
@@ -41,7 +37,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 	}
 	reqLog := requestLogger(
 		c,
-		"handler.openai_gateway.alpha_search",
+		"handler.openai_gateway.codex_memories",
 		zap.Int64("user_id", subject.UserID),
 		zap.Int64("api_key_id", apiKey.ID),
 		zap.Any("group_id", apiKey.GroupID),
@@ -63,32 +59,50 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
-	if !gjson.ValidBytes(body) {
+	if !gjson.ValidBytes(body) || !gjson.ParseBytes(body).IsObject() {
 		logRequestBodyParseFailure(reqLog, body, nil)
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
-
 	modelResult := gjson.GetBytes(body, "model")
-	if !modelResult.Exists() || modelResult.Type != gjson.String || strings.TrimSpace(modelResult.String()) == "" {
+	if modelResult.Type != gjson.String || strings.TrimSpace(modelResult.String()) == "" {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
 	}
 	requestedModel := strings.TrimSpace(modelResult.String())
 	if !fixedEndpointTargetPlatformAllowed(c, apiKey, requestedModel, service.PlatformOpenAI) {
-		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Codex alpha search is only available for OpenAI groups")
+		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Codex memories are only available for OpenAI groups")
 		return
 	}
-	reqLog = reqLog.With(zap.String("model", requestedModel))
-	setOpsRequestContext(c, requestedModel, false)
+
+	clientRequestModel := clientRequestedModel(c, requestedModel)
+	routingModel := requestedModel
+	if resolvedModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context()); ok {
+		routingModel = resolvedModel
+	}
+	reqLog = reqLog.With(
+		zap.String("model", clientRequestModel),
+		zap.String("routing_model", routingModel),
+	)
+	setOpsRequestContext(c, clientRequestModel, false)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeSync))
-	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, "openai_alpha_search", requestedModel, body); decision != nil && !decision.AllowNextStage {
+	if decision := h.checkSecurityAudit(
+		c,
+		reqLog,
+		apiKey,
+		subject,
+		service.ContentModerationProtocolOpenAICodexMemory,
+		requestedModel,
+		body,
+	); decision != nil && !decision.AllowNextStage {
 		h.openAISecurityAuditError(c, decision)
 		return
 	}
 
-	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, requestedModel)
-	forwardBody := openAIModelMappedBody(body, channelMapping.Mapped, channelMapping.MappedModel, h.gatewayService.ReplaceModelInBody)
+	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, routingModel)
+	if h.errorPassthroughService != nil {
+		service.BindErrorPassthroughService(c, h.errorPassthroughService)
+	}
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 
@@ -99,8 +113,14 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 	if userRelease != nil {
 		defer userRelease()
 	}
-
-	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
+	if err := h.billingCacheService.CheckBillingEligibility(
+		c.Request.Context(),
+		apiKey.User,
+		apiKey,
+		apiKey.Group,
+		subscription,
+		service.QuotaPlatform(c.Request.Context(), apiKey),
+	); err != nil {
 		status, code, message, retryAfter := billingErrorDetails(err)
 		if retryAfter > 0 {
 			c.Header("Retry-After", strconv.Itoa(retryAfter))
@@ -109,12 +129,12 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		return
 	}
 
-	searchID := strings.TrimSpace(gjson.GetBytes(body, "id").String())
-	sessionHash := h.gatewayService.GenerateSessionHashWithFallback(c, nil, searchID)
+	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, body)
 	failedAccountIDs := make(map[int64]struct{})
+	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
-	switchCount := 0
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
+	switchCount := 0
 	routingStart := time.Now()
 
 	for {
@@ -123,10 +143,10 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			apiKey.GroupID,
 			"",
 			sessionHash,
-			requestedModel,
+			routingModel,
 			failedAccountIDs,
 			service.OpenAIUpstreamTransportHTTPSSE,
-			service.OpenAIEndpointCapabilityAlphaSearch,
+			service.OpenAIEndpointCapabilityCodexDirect,
 			false,
 			service.OpenAIAccountSchedulingOptions{
 				CanTemporarilyOverflow: true,
@@ -135,15 +155,19 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		)
 		if err != nil || selection == nil || selection.Account == nil {
 			if failoverClientGone(c) {
-				reqLog.Info("openai_alpha_search.account_select_aborted_client_disconnected", zap.Error(err))
+				reqLog.Info("openai.codex_memories.account_select_aborted_client_disconnected", zap.Error(err))
 				return
 			}
 			if len(failedAccountIDs) == 0 {
-				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, requestedModel, requestedModel, service.PlatformOpenAI)
+				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, clientRequestModel, routingModel, service.PlatformOpenAI)
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
-				h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
+				message := cls.Message
+				if !cls.ModelNotFound {
+					message = "No available compatible OAuth accounts"
+				}
+				h.errorResponse(c, cls.Status, cls.ErrType, message)
 				return
 			}
 			if lastFailoverErr != nil {
@@ -155,8 +179,18 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		}
 
 		account := selection.Account
+		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		setOpsSelectedAccount(c, account.ID, account.Platform)
-		accountRelease, acquired, resolvedSessionHash := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, false, false, &streamStarted, reqLog)
+		accountRelease, acquired, resolvedSessionHash := h.acquireResponsesAccountSlot(
+			c,
+			apiKey.GroupID,
+			sessionHash,
+			selection,
+			false,
+			false,
+			&streamStarted,
+			reqLog,
+		)
 		sessionHash = resolvedSessionHash
 		if !acquired {
 			return
@@ -164,46 +198,68 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		account = selection.Account
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
+
 		writerSizeBeforeForward := c.Writer.Size()
 		forwardStart := time.Now()
-		var result *service.OpenAIForwardResult
-		result, err = func() (*service.OpenAIForwardResult, error) {
+		result, err := func() (*service.OpenAIForwardResult, error) {
 			if accountRelease != nil {
 				defer accountRelease()
 			}
-			return h.gatewayService.ForwardAlphaSearch(c.Request.Context(), c, account, forwardBody)
+			return h.gatewayService.ForwardCodexMemories(
+				c.Request.Context(),
+				c,
+				account,
+				body,
+				requestedModel,
+				channelMapping.MappedModel,
+			)
 		}()
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, time.Since(forwardStart).Milliseconds())
 
 		if err == nil {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(requestedModel), true, nil)
+			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(routingModel), true, nil)
 			if result != nil {
-				h.recordAlphaSearchUsage(c, apiKey, account, subscription, channelMapping, requestedModel, body, result, subject.UserID)
+				if !account.IsShadow() {
+					h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(c.Request.Context(), account.ID, result.ResponseHeaders)
+				}
+				h.recordCodexDirectUsage(c, apiKey, account, subscription, channelMapping, requestedModel, body, result, subject.UserID)
 			}
 			return
 		}
 
 		var failoverErr *service.UpstreamFailoverError
 		if !errors.As(err, &failoverErr) {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(requestedModel), false, nil)
+			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(routingModel), false, nil)
 			if c.Writer.Size() == writerSizeBeforeForward {
 				h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
 			}
-			reqLog.Warn("openai_alpha_search.forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+			reqLog.Warn("openai.codex_memories.forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			return
 		}
 
-		h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(requestedModel), false, nil)
+		h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(routingModel), false, nil)
 		if c.Writer.Size() != writerSizeBeforeForward {
 			h.handleFailoverExhausted(c, failoverErr, true)
 			return
 		}
 		if failoverClientGone(c) {
-			reqLog.Info("openai_alpha_search.failover_aborted_client_disconnected",
+			reqLog.Info("openai.codex_memories.failover_aborted_client_disconnected",
 				zap.Int64("account_id", account.ID),
 				zap.Int("upstream_status", failoverErr.StatusCode),
 			)
 			return
+		}
+		if failoverErr.RetryableOnSameAccount {
+			retryLimit := account.GetPoolModeRetryCount()
+			if sameAccountRetryCount[account.ID] < retryLimit {
+				sameAccountRetryCount[account.ID]++
+				select {
+				case <-c.Request.Context().Done():
+					return
+				case <-time.After(sameAccountRetryDelay):
+				}
+				continue
+			}
 		}
 		h.gatewayService.RecordOpenAIAccountSwitch()
 		failedAccountIDs[account.ID] = struct{}{}
@@ -217,7 +273,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			h.handleFailoverExhausted(c, failoverErr, false)
 			return
 		}
-		reqLog.Warn("openai_alpha_search.upstream_failover_switching",
+		reqLog.Warn("openai.codex_memories.upstream_failover_switching",
 			zap.Int64("account_id", account.ID),
 			zap.Int("upstream_status", failoverErr.StatusCode),
 			zap.Int("switch_count", switchCount),
@@ -225,10 +281,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 	}
 }
 
-// recordAlphaSearchUsage 为一次成功的 alpha/search 网页搜索落按次计费用量行
-// （上游不返回 usage 字段，按 WebSearchCalls 走分组单价 × 倍率的按次口径）。
-// 与 images 一致使用 mandatory 池提交，池满时同步兜底执行，保证扣费不丢。
-func (h *OpenAIGatewayHandler) recordAlphaSearchUsage(
+func (h *OpenAIGatewayHandler) recordCodexDirectUsage(
 	c *gin.Context,
 	apiKey *service.APIKey,
 	account *service.Account,
@@ -244,7 +297,7 @@ func (h *OpenAIGatewayHandler) recordAlphaSearchUsage(
 	sessionID := service.ExtractClientSessionID(c)
 	requestPayloadHash := service.HashUsageRequestPayload(body)
 	inboundEndpoint := GetInboundEndpoint(c)
-	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+	upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
 	quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 
 	h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
@@ -265,13 +318,13 @@ func (h *OpenAIGatewayHandler) recordAlphaSearchUsage(
 			ChannelUsageFields: channelMapping.ToUsageFields(requestedModel, result.UpstreamModel),
 		}); err != nil {
 			logger.L().With(
-				zap.String("component", "handler.openai_gateway.alpha_search"),
+				zap.String("component", "handler.openai_gateway.codex_memories"),
 				zap.Int64("user_id", userID),
 				zap.Int64("api_key_id", apiKey.ID),
 				zap.Any("group_id", apiKey.GroupID),
 				zap.String("model", requestedModel),
 				zap.Int64("account_id", account.ID),
-			).Error("openai_alpha_search.record_usage_failed", zap.Error(err))
+			).Error("openai.codex_memories.record_usage_failed", zap.Error(err))
 		}
 	})
 }

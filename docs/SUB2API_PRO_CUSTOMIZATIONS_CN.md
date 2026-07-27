@@ -25,11 +25,12 @@ sub2api-pro 当前增加或改变了以下能力：
 1. OpenAI 账号按 `Priority` 顺序逐个饱和使用，并在所有旧调度策略之前生效；
 2. 为历史亲和会话提供全局百分比并发预留，默认预留 `20%`；
 3. 统一 HTTP、WebSocket 和其他 OpenAI 请求入口的会话 owner 与并发槽位语义；
-4. Cyber Policy 命中时保存完整原始请求体，供管理员复核；
-5. Prompt Audit 增加 Groq GPT-OSS Safeguard 节点，并强化结构化审计结果；
-6. 修复 OpenAI WebSocket 控制关闭帧在取消竞态中丢失的问题；
-7. 将内置自更新源、安装脚本和镜像来源切换到本 Fork；
-8. 建立 `product/main` 产品分支、上游同步规则和 Fork 专属 Release/GHCR 发布流程。
+4. 对齐官方 Codex 的 ChatGPT OAuth 缓存身份、内部接口、Realtime 和响应头协议；
+5. Cyber Policy 命中时保存完整原始请求体，供管理员复核；
+6. Prompt Audit 增加 Groq GPT-OSS Safeguard 节点，并强化结构化审计结果；
+7. 修复 OpenAI WebSocket 控制关闭帧在取消竞态中丢失的问题；
+8. 将内置自更新源、安装脚本和镜像来源切换到本 Fork；
+9. 建立 `product/main` 产品分支、上游同步规则和 Fork 专属 Release/GHCR 发布流程。
 
 ## 3. OpenAI 优先级饱和调度
 
@@ -142,9 +143,70 @@ G = C - R
 
 这些规则不是 Priority Saturation 私有行为。即使关闭新调度器，owner-aware 写入和两级槽位语义仍然保留。
 
-## 6. 风控审计差异
+## 6. ChatGPT OAuth 与 Codex 协议对齐
 
-### 6.1 Cyber Policy 请求证据
+完整的官方依据、生产基线、根因判断、实现边界和部署后观测口径见
+[ChatGPT OAuth Prompt Cache 分析与优化](CHATGPT_OAUTH_PROMPT_CACHE_CN.md)。
+
+本次对齐的核心差异：
+
+- `/v1/messages` 转 ChatGPT Codex Responses 时保留 body `prompt_cache_key`，不再只
+  依赖 session header；
+- `/v1/responses/compact` 保留与普通 Responses 相同的 `prompt_cache_key`；
+- 识别官方 Codex 的 `session-id`，并统一用于粘性调度、HTTP/WebSocket 转发、
+  compact session 解析和 `usage_logs.session_id`；
+- session/thread/parent/window identity 默认生效，按下游 API Key 确定性隔离；
+- root 与 child thread 共享 session、保持独立 thread，并保留 parent 关系；
+- 普通 HTTP、compact、OAuth passthrough、普通 WebSocket 和 WebSocket passthrough
+  使用相同身份协议；WS 后续帧继承首帧身份；
+- 提供默认开启的 `gateway.openai_codex_prompt_cache_optimization_enabled` 开关，
+  并在管理端网关设置最前面的“Fork 专属功能”中支持即时控制；
+- 开启时，官方 Codex 原生 Responses 使用独立文件中的局部 JSON patch，保持已有
+  `instructions/tools/input/text` 前缀与数组顺序；
+- 该开关只控制最小 JSON patch 翻译器，不控制上述默认身份协议；
+- 不通过全局共享 key 或删除动态请求语义追求表面命中率。
+
+生产基线显示原生 `/v1/responses` 的可缓存 token 加权命中率已经约为 94%–96%，
+Priority Saturation 指标未发生账号切换。首次部署默认身份隔离修复时，新隔离 key
+相对旧 raw body key 可能有一次冷启动；之后单独开启 JSON patch 优化器不会改变身份
+key。验收应比较同一 session 的后续轮次，而不是把首轮 miss 当作回归。管理员显式
+关闭优化器时仍走上游完整翻译器。
+
+当前 Codex internal API 兼容还包括：
+
+- V1 Realtime：`POST /v1/realtime/calls`、
+  `GET /v1/realtime?call_id=...`；
+- Frameless Live：`POST /v1/live`、`GET /v1/live/:call_id`；
+- Realtime/Live 创建与 Sideband 复用同一组隔离后的 `x-session-id`、`session-id`、
+  `thread-id` 和 `x-client-request-id`；
+- OAuth-only images generations/edits 与 memories trace summarization；
+- models、memories、images、alpha search 和 Realtime/Live 这类协议固定端点在
+  Composite 分组中显式解析为 OpenAI；纯非 OpenAI 分组拒绝，已由模型解析成其他平台
+  的 Composite 请求也拒绝，保证调度、`QuotaPlatform()` 和计费平台一致；
+- Codex models manifest 保留实际上游路径和响应头，即使走本地 ETag 304 缓存也不丢失；
+  handler 用实际路径记录端点，并用响应头刷新账号限额快照。API Key 账号的 header
+  override 最后应用，可覆盖默认 `Originator` 与 `User-Agent`；
+- 动态 `x-codex-*`、模型、reasoning、safety buffering 和授权错误响应头透传；
+- 新版绝对 `x-codex-*-reset-at` 与旧版相对
+  `x-codex-*-reset-after-seconds` 限额头兼容；管理员配置的 `force_remove` 仍能删除
+  任意动态 `x-codex-*`，不会被前缀透传规则重新放行。
+
+Realtime/WebRTC 兼容头以当前官方 Codex 实现为准：`OpenAI-Alpha`、
+`x-session-id`、`session-id`、`thread-id` 和 `originator`。官方调用链
+`realtime_request_headers` / `prepare_realtime_start` 当前没有发送
+`x-codex-installation-id`，因此 Fork 不人为添加该头，避免制造与官方客户端不同的
+身份信号。
+
+主要实现：
+
+- `backend/internal/service/openai_codex_native_transform.go`
+- `backend/internal/service/openai_codex_direct.go`
+- `backend/internal/service/openai_live.go`
+- `backend/internal/util/responseheaders/responseheaders.go`
+
+## 7. 风控审计差异
+
+### 7.1 Cyber Policy 请求证据
 
 Cyber Policy 命中时，Fork 会把命中事件与请求证据关联保存，并在管理端风险控制详情中提供查询和展示：
 
@@ -164,13 +226,13 @@ Cyber Policy 命中时，Fork 会把命中事件与请求证据关联保存，�
 
 > **安全与隐私警告：**完整请求体可能包含用户提示词、工具调用参数、工具结果、媒体引用，以及被用户放入请求 JSON 的令牌或其他 credential。数据库、备份、管理员接口和日志访问必须按敏感数据处理，并配置最小权限、加密、保留期限和删除流程。这是 sub2api-pro 相对官方版本最重要的敏感行为差异之一。
 
-### 6.2 OAuth 安全审查结论
+### 7.2 OAuth 安全审查结论
 
 在本快照的 17 个 Fork 独有提交中，没有新增专门遍历、导出或扫描已授权 OAuth 账号凭据的后台任务。OAuth 相关定制集中在账号调度、资格复核、并发兼容和测试。
 
 这个结论只适用于上述快照，不能替代未来版本的代码审查、镜像来源验证和运行时流量审计。
 
-## 7. Prompt Audit 扩展
+## 8. Prompt Audit 扩展
 
 Prompt Audit 在现有 Qwen3Guard OpenAI-compatible 节点之外，增加了 Groq GPT-OSS Safeguard 节点支持：
 
@@ -185,6 +247,9 @@ Prompt Audit 在现有 Qwen3Guard OpenAI-compatible 节点之外，增加了 Gro
 - 生成适用于 GPT-OSS Safeguard 的 system policy；
 - 使用结构化 JSON Schema 约束模型输出；
 - 解析风险分类、动作、理由和各 scanner 结果；
+- 启用 `openai/gpt-oss-safeguard-20b` 时，整个优先级审计池会审计 `system`、
+  `developer`、`assistant`、`user` 的文本；仅 tool 输出、图片块和文件块不会进入
+  扫描请求或该次审计事件；
 - 审计记录包含 scanner backend、版本、endpoint、policy/config version 和证据元数据；
 - 管理端可选择 Qwen3Guard 或 Groq Safeguard，并显示相应默认值与说明；
 - 对外请求继续经过 Prompt Audit 的出站 URL 与安全校验。
@@ -196,7 +261,7 @@ Prompt Audit 在现有 Qwen3Guard OpenAI-compatible 节点之外，增加了 Gro
 - `backend/internal/securityaudit/prompt_config.go`
 - `frontend/src/features/prompt-audit/`
 
-## 8. OpenAI WebSocket 关闭帧修复
+## 9. OpenAI WebSocket 关闭帧修复
 
 `backend/internal/service/openai_ws_v2_passthrough_adapter.go` 修复了取消上下文与控制关闭帧写入之间的竞态：
 
@@ -205,9 +270,9 @@ Prompt Audit 在现有 Qwen3Guard OpenAI-compatible 节点之外，增加了 Gro
 - ingress capacity lease 丢失时，客户端能收到 `1013 Try Again Later` 和重连原因，而不是只看到直接 EOF；
 - 上游繁忙、连接超时等其他 1013 场景同样保留标准 WebSocket close frame。
 
-## 9. 自更新与容器运行方式
+## 10. 自更新与容器运行方式
 
-### 9.1 Fork 自更新源
+### 10.1 Fork 自更新源
 
 内置 Release 查询和二进制下载源已从官方仓库改为：
 
@@ -226,16 +291,16 @@ killaragorn/sub2api-pro
 
 更新仍只允许从 GitHub/objects.githubusercontent.com 下载，并继续执行 Release 资产和 checksum 校验。
 
-### 9.2 容器更新边界
+### 10.2 容器更新边界
 
 - `docker restart <container>` 只重启同一个容器，容器可写层中的已更新二进制会保留；
 - `docker compose up -d --force-recreate`、删除容器或重新拉起容器，会恢复到 Compose 中固定的镜像版本；
 - 因此验证环境应先部署一个明确的 Release 镜像 Tag，后续可通过容器内二进制自更新验证新 Release；
 - 不应依赖旧 Pro 容器或旧备份作为全新验证环境的基础。
 
-## 10. Release、镜像与仓库维护
+## 11. Release、镜像与仓库维护
 
-### 10.1 发布产物
+### 11.1 发布产物
 
 - 正式发布源为 `product/main`；
 - Tag 格式为 `v<官方版本>-pro.<修订号>`；
@@ -248,7 +313,7 @@ killaragorn/sub2api-pro
 - workflow 增加 Fork/仓库归属保护，避免在错误的上游仓库上下文发布下游产物；
 - Release 文档链接固定到对应 Tag，避免历史版本说明随分支移动。
 
-### 10.2 分支与上游同步
+### 11.2 分支与上游同步
 
 完整规则见 [sub2api-pro 分支管理规范](DOWNSTREAM_BRANCHING_CN.md)。核心约束：
 
@@ -259,14 +324,14 @@ killaragorn/sub2api-pro
 - 禁止对 `main`、`product/main` Force Push；
 - 发布前必须确认工作区干净、CI 通过，并记录官方基线。
 
-## 11. 测试与维护性修正
+## 12. 测试与维护性修正
 
 - 增加 Priority Saturation、全局预留、迁移默认值、会话 owner 原子性、混合调度器和前端设置表单测试；
 - 为 Prompt Audit、Cyber 请求证据和管理端详情增加后端与前端测试；
 - 系统回滚测试显式使用 15 分钟请求超时，避免长时间回滚被客户端默认超时提前终止；
 - 修复调度器初版在 CI 中暴露的接口、stub 和契约检查问题。
 
-## 12. Fork 独有提交台账
+## 13. Fork 独有提交台账
 
 以下为 `v0.1.165..v0.1.165-pro.4` 的非合并提交，按新到旧排列：
 
@@ -290,7 +355,7 @@ killaragorn/sub2api-pro
 | `ddda3fb6a` | 发布下游 GHCR 镜像 |
 | `813245125` | 建立下游分支和上游同步规范 |
 
-## 13. 复核命令
+## 14. 复核命令
 
 每次同步官方版本或发布新 Pro 修订后，应更新本文的基线、快照和提交台账。可以用以下命令复核：
 

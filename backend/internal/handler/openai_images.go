@@ -383,7 +383,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			requestPayloadHash = service.HashUsageRequestPayload([]byte(parsed.StickySessionSeed()))
 		}
 		inboundEndpoint := GetInboundEndpoint(c)
-		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+		upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 
 		upstreamModel := ""

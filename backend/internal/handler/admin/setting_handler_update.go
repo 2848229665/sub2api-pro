@@ -223,17 +223,18 @@ type UpdateSettingsRequest struct {
 	BackendModeEnabled bool `json:"backend_mode_enabled"`
 
 	// Gateway forwarding behavior
-	EnableFingerprintUnification           *bool   `json:"enable_fingerprint_unification"`
-	EnableMetadataPassthrough              *bool   `json:"enable_metadata_passthrough"`
-	EnableCCHSigning                       *bool   `json:"enable_cch_signing"`
-	EnableClaudeOAuthSystemPromptInjection *bool   `json:"enable_claude_oauth_system_prompt_injection"`
-	ClaudeOAuthSystemPrompt                *string `json:"claude_oauth_system_prompt"`
-	ClaudeOAuthSystemPromptBlocks          *string `json:"claude_oauth_system_prompt_blocks"`
-	EnableAnthropicCacheTTL1hInjection     *bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
-	RewriteMessageCacheControl             *bool   `json:"rewrite_message_cache_control"`
-	EnableClientDatelineNormalization      *bool   `json:"enable_client_dateline_normalization"`
-	AntigravityUserAgentVersion            *string `json:"antigravity_user_agent_version"`
-	OpenAICodexUserAgent                   *string `json:"openai_codex_user_agent"`
+	EnableFingerprintUnification              *bool   `json:"enable_fingerprint_unification"`
+	EnableMetadataPassthrough                 *bool   `json:"enable_metadata_passthrough"`
+	EnableCCHSigning                          *bool   `json:"enable_cch_signing"`
+	EnableClaudeOAuthSystemPromptInjection    *bool   `json:"enable_claude_oauth_system_prompt_injection"`
+	ClaudeOAuthSystemPrompt                   *string `json:"claude_oauth_system_prompt"`
+	ClaudeOAuthSystemPromptBlocks             *string `json:"claude_oauth_system_prompt_blocks"`
+	EnableAnthropicCacheTTL1hInjection        *bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
+	RewriteMessageCacheControl                *bool   `json:"rewrite_message_cache_control"`
+	EnableClientDatelineNormalization         *bool   `json:"enable_client_dateline_normalization"`
+	OpenAICodexPromptCacheOptimizationEnabled *bool   `json:"openai_codex_prompt_cache_optimization_enabled"`
+	AntigravityUserAgentVersion               *string `json:"antigravity_user_agent_version"`
+	OpenAICodexUserAgent                      *string `json:"openai_codex_user_agent"`
 
 	// codex_cli_only 加固（global-only）
 	MinCodexVersion                      string `json:"min_codex_version"`
@@ -1525,6 +1526,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.EnableClientDatelineNormalization
 		}(),
+		OpenAICodexPromptCacheOptimizationEnabled: func() bool {
+			if req.OpenAICodexPromptCacheOptimizationEnabled != nil {
+				return *req.OpenAICodexPromptCacheOptimizationEnabled
+			}
+			return previousSettings.OpenAICodexPromptCacheOptimizationEnabled
+		}(),
 		AntigravityUserAgentVersion: func() string {
 			if req.AntigravityUserAgentVersion != nil {
 				return *req.AntigravityUserAgentVersion
@@ -1995,6 +2002,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableAnthropicCacheTTL1hInjection:                     updatedSettings.EnableAnthropicCacheTTL1hInjection,
 		RewriteMessageCacheControl:                             updatedSettings.RewriteMessageCacheControl,
 		EnableClientDatelineNormalization:                      updatedSettings.EnableClientDatelineNormalization,
+		OpenAICodexPromptCacheOptimizationEnabled:              updatedSettings.OpenAICodexPromptCacheOptimizationEnabled,
 		AntigravityUserAgentVersion:                            updatedSettings.AntigravityUserAgentVersion,
 		OpenAICodexUserAgent:                                   updatedSettings.OpenAICodexUserAgent,
 		MinCodexVersion:                                        updatedSettings.MinCodexVersion,

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	pkgopenai "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/imroc/req/v3"
@@ -47,6 +48,9 @@ type OpenAIImagesCapability string
 const (
 	OpenAIImagesCapabilityBasic  OpenAIImagesCapability = "images-basic"
 	OpenAIImagesCapabilityNative OpenAIImagesCapability = "images-native"
+	// OpenAIImagesCapabilityCodexDirect keeps Codex's internal JSON image
+	// protocol on ChatGPT OAuth accounts and away from API-key endpoints.
+	OpenAIImagesCapabilityCodexDirect OpenAIImagesCapability = "images-codex-direct"
 )
 
 type OpenAIImagesUpload struct {
@@ -82,6 +86,7 @@ type OpenAIImagesRequest struct {
 	HasMask            bool
 	HasNativeOptions   bool
 	RequiredCapability OpenAIImagesCapability
+	CodexDirect        bool
 	InputImageURLs     []string
 	MaskImageURL       string
 	Uploads            []OpenAIImagesUpload
@@ -191,6 +196,10 @@ func (s *OpenAIGatewayService) ParseOpenAIImagesRequest(c *gin.Context, body []b
 		N:           1,
 		Body:        body,
 	}
+	req.CodexDirect = isOpenAICodexDirectImagesRequest(c)
+	if req.CodexDirect && isMultipartImagesContentTypeValue(contentType) {
+		return nil, fmt.Errorf("codex direct images require a JSON request body")
+	}
 	if len(body) > 0 {
 		sum := sha256.Sum256(body)
 		req.bodyHash = hex.EncodeToString(sum[:8])
@@ -219,8 +228,28 @@ func (s *OpenAIGatewayService) ParseOpenAIImagesRequest(c *gin.Context, body []b
 		return nil, err
 	}
 	req.SizeTier = normalizeOpenAIImageSizeTier(req.Size)
-	req.RequiredCapability = classifyOpenAIImagesCapability(req)
+	if req.CodexDirect {
+		req.RequiredCapability = OpenAIImagesCapabilityCodexDirect
+	} else {
+		req.RequiredCapability = classifyOpenAIImagesCapability(req)
+	}
 	return req, nil
+}
+
+func isOpenAICodexDirectImagesRequest(c *gin.Context) bool {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return false
+	}
+	path := strings.ToLower(strings.TrimSpace(c.Request.URL.Path))
+	if strings.HasPrefix(path, "/backend-api/codex/images/") {
+		return true
+	}
+	return pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("Originator"))
+}
+
+func isMultipartImagesContentTypeValue(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(contentType))
+	return err == nil && strings.EqualFold(mediaType, "multipart/form-data")
 }
 
 func parseOpenAIImagesJSONRequest(body []byte, req *OpenAIImagesRequest) error {
@@ -558,6 +587,9 @@ func (s *OpenAIGatewayService) ForwardImages(
 ) (*OpenAIForwardResult, error) {
 	if parsed == nil {
 		return nil, fmt.Errorf("parsed images request is required")
+	}
+	if parsed.CodexDirect {
+		return s.forwardOpenAICodexDirectImages(ctx, c, account, body, parsed, channelMappedModel)
 	}
 	switch account.Type {
 	case AccountTypeAPIKey:
