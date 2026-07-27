@@ -28,6 +28,10 @@ func TestGatewayCacheLiveCallIdentityAndController(t *testing.T) {
 		LeaseID:               "lease",
 		Model:                 "gpt-live-test",
 		AttestationCiphertext: "encrypted-attestation",
+		OpenAIAlpha:           "quicksilver=v1",
+		RealtimeSession:       "realtime-session",
+		SessionID:             "session-id",
+		ThreadID:              "thread-id",
 		CreatedAt:             time.Now(),
 		ExpiresAt:             time.Now().Add(time.Hour),
 		Controller:            service.LiveControllerPending,
@@ -39,6 +43,10 @@ func TestGatewayCacheLiveCallIdentityAndController(t *testing.T) {
 	require.Equal(t, record.CallID, loaded.CallID)
 	require.Equal(t, record.AccountID, loaded.AccountID)
 	require.Equal(t, record.AttestationCiphertext, loaded.AttestationCiphertext)
+	require.Equal(t, record.OpenAIAlpha, loaded.OpenAIAlpha)
+	require.Equal(t, record.RealtimeSession, loaded.RealtimeSession)
+	require.Equal(t, record.SessionID, loaded.SessionID)
+	require.Equal(t, record.ThreadID, loaded.ThreadID)
 
 	claimed, err := cache.ClaimLiveController(context.Background(), record.CallHash, service.LiveControllerObserver, "observer-1")
 	require.NoError(t, err)

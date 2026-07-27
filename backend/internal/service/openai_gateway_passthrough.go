@@ -384,14 +384,19 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	// OAuth 透传到 ChatGPT internal API 时补齐必要头。
 	if account.Type == AccountTypeOAuth {
 		promptCacheKey := strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String())
+		codexIdentity, hasCodexIdentity := openAICodexUpstreamIdentityFromContext(c)
 		req.Host = "chatgpt.com"
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, req.Header, account); err != nil {
 			return nil, fmt.Errorf("resolve chatgpt account headers: %w", err)
 		}
 		apiKeyID := getAPIKeyIDFromContext(c)
 		// 先保存客户端原始值，再做 compact 补充，避免后续统一隔离时读到已处理的值。
-		clientSessionID := strings.TrimSpace(req.Header.Get("session_id"))
+		clientSessionID := strings.TrimSpace(req.Header.Get(openAIOfficialSessionIDHeader))
+		if clientSessionID == "" {
+			clientSessionID = strings.TrimSpace(req.Header.Get("session_id"))
+		}
 		clientConversationID := strings.TrimSpace(req.Header.Get("conversation_id"))
+		clearOpenAIUpstreamSessionHeaders(req.Header)
 		if isOpenAIResponsesCompactPath(c) {
 			req.Header.Set("accept", "application/json")
 			if req.Header.Get("version") == "" {
@@ -417,10 +422,21 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 			clientConversationID = promptCacheKey
 		}
 		if clientSessionID != "" {
-			req.Header.Set("session_id", isolateOpenAISessionID(apiKeyID, clientSessionID))
+			isolatedSessionID := isolateOpenAISessionID(apiKeyID, clientSessionID)
+			if hasCodexIdentity && codexIdentity.SessionID != "" {
+				isolatedSessionID = codexIdentity.SessionID
+			}
+			setOpenAIUpstreamSessionHeaders(req.Header, isolatedSessionID)
 		}
 		if clientConversationID != "" {
-			req.Header.Set("conversation_id", isolateOpenAISessionID(apiKeyID, clientConversationID))
+			isolatedConversationID := isolateOpenAISessionID(apiKeyID, clientConversationID)
+			if hasCodexIdentity && codexIdentity.SessionID != "" {
+				isolatedConversationID = codexIdentity.SessionID
+			}
+			req.Header.Set("conversation_id", isolatedConversationID)
+		}
+		if hasCodexIdentity {
+			applyOpenAICodexUpstreamIdentityHeaders(req.Header, codexIdentity)
 		}
 	} else if isOpenAIResponsesCompactPath(c) {
 		// 透传白名单会放行客户端的 Accept: text/event-stream；compact 上游是
@@ -1360,38 +1376,29 @@ func writeOpenAIPassthroughResponseHeaders(dst http.Header, src http.Header, fil
 	}
 	if filter != nil {
 		responseheaders.WriteFilteredHeaders(dst, src, filter)
-	} else {
-		// 兜底：尽量保留最基础的 content-type
-		if v := strings.TrimSpace(src.Get("Content-Type")); v != "" {
-			dst.Set("Content-Type", v)
-		}
+		return
 	}
-	// 透传模式强制放行 x-codex-* 响应头（若上游返回）。
+	// 兜底：尽量保留最基础的 content-type
+	if v := strings.TrimSpace(src.Get("Content-Type")); v != "" {
+		dst.Set("Content-Type", v)
+	}
+	// 透传模式强制放行 Codex 协议响应头（若上游返回）。官方 Codex
+	// 会动态增加按 limit id 命名的 x-codex-* header family，不能维护固定列表；
+	// 其余少量握手/模型头不在该 namespace 下，需显式保留。
 	// 注意：真实 http.Response.Header 的 key 一般会被 canonicalize；但为了兼容测试/自建响应，
-	// 这里用 EqualFold 做一次大小写不敏感的查找。
-	getCaseInsensitiveValues := func(h http.Header, want string) []string {
-		if h == nil {
-			return nil
+	// 这里直接按小写 key 匹配。
+	for rawKey, vals := range src {
+		lowerKey := strings.ToLower(strings.TrimSpace(rawKey))
+		forceCodexHeader := strings.HasPrefix(lowerKey, "x-codex-")
+		switch lowerKey {
+		case "x-models-etag",
+			"openai-model",
+			"x-openai-model",
+			"x-reasoning-included",
+			"x-openai-authorization-error":
+			forceCodexHeader = true
 		}
-		for k, vals := range h {
-			if strings.EqualFold(k, want) {
-				return vals
-			}
-		}
-		return nil
-	}
-
-	for _, rawKey := range []string{
-		"x-codex-primary-used-percent",
-		"x-codex-primary-reset-after-seconds",
-		"x-codex-primary-window-minutes",
-		"x-codex-secondary-used-percent",
-		"x-codex-secondary-reset-after-seconds",
-		"x-codex-secondary-window-minutes",
-		"x-codex-primary-over-secondary-limit-percent",
-	} {
-		vals := getCaseInsensitiveValues(src, rawKey)
-		if len(vals) == 0 {
+		if !forceCodexHeader {
 			continue
 		}
 		key := http.CanonicalHeaderKey(rawKey)

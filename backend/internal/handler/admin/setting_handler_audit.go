@@ -431,6 +431,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.EnableClientDatelineNormalization != after.EnableClientDatelineNormalization {
 		changed = append(changed, "enable_client_dateline_normalization")
 	}
+	if before.OpenAICodexPromptCacheOptimizationEnabled != after.OpenAICodexPromptCacheOptimizationEnabled {
+		changed = append(changed, "openai_codex_prompt_cache_optimization_enabled")
+	}
 	if before.AntigravityUserAgentVersion != after.AntigravityUserAgentVersion {
 		changed = append(changed, "antigravity_user_agent_version")
 	}

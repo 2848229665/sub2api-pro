@@ -82,6 +82,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	}
 
 	sessionResolution := resolveOpenAIWSSessionHeaders(c, promptCacheKey)
+	codexIdentity, hasCodexIdentity := openAICodexUpstreamIdentityFromContext(c)
 	if c != nil && c.Request != nil {
 		if v := strings.TrimSpace(c.Request.Header.Get("accept-language")); v != "" {
 			headers.Set("accept-language", v)
@@ -101,14 +102,19 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	if account != nil && account.Type == AccountTypeOAuth {
 		apiKeyID := getAPIKeyIDFromContext(c)
 		if sessionResolution.SessionID != "" {
-			headers.Set("session_id", isolateOpenAISessionID(apiKeyID, sessionResolution.SessionID))
+			isolatedSessionID := isolateOpenAISessionID(apiKeyID, sessionResolution.SessionID)
+			if hasCodexIdentity && codexIdentity.SessionID != "" {
+				isolatedSessionID = codexIdentity.SessionID
+			}
+			setOpenAIUpstreamSessionHeaders(headers, isolatedSessionID)
 		}
 		if sessionResolution.ConversationID != "" {
-			headers.Set("conversation_id", isolateOpenAISessionID(apiKeyID, sessionResolution.ConversationID))
+			isolatedConversationID := isolateOpenAISessionID(apiKeyID, sessionResolution.ConversationID)
+			headers.Set("conversation_id", isolatedConversationID)
 		}
 	} else {
 		if sessionResolution.SessionID != "" {
-			headers.Set("session_id", sessionResolution.SessionID)
+			setOpenAIUpstreamSessionHeaders(headers, sessionResolution.SessionID)
 		}
 		if sessionResolution.ConversationID != "" {
 			headers.Set("conversation_id", sessionResolution.ConversationID)
@@ -119,6 +125,9 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	}
 	if metadata := strings.TrimSpace(turnMetadata); metadata != "" {
 		headers.Set(openAIWSTurnMetadataHeader, metadata)
+	}
+	if account != nil && account.Type == AccountTypeOAuth && hasCodexIdentity {
+		applyOpenAICodexUpstreamIdentityHeaders(headers, codexIdentity)
 	}
 
 	if account != nil && account.Type == AccountTypeOAuth {

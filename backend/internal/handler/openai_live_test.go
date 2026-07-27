@@ -70,9 +70,52 @@ func TestLiveSidebandLocationMatchesCreateRoute(t *testing.T) {
 	require.Equal(t, "/v1/live/call_123", liveSidebandLocation("/v1/live", "call_123"))
 	require.Equal(
 		t,
+		"/v1/realtime/calls/call_123",
+		liveSidebandLocation("/v1/realtime/calls", "call_123"),
+	)
+	require.Equal(
+		t,
 		"/backend-api/codex/call_123",
 		liveSidebandLocation("/backend-api/codex/realtime/calls", "call_123"),
 	)
+}
+
+func TestLiveSidebandCallIDSupportsPathAndQueryProtocols(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	pathContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	pathContext.Request = httptest.NewRequest(http.MethodGet, "/v1/live/path-call", nil)
+	pathContext.Params = gin.Params{{Key: "call_id", Value: " path-call "}}
+	require.Equal(t, "path-call", liveSidebandCallID(pathContext))
+
+	queryContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	queryContext.Request = httptest.NewRequest(http.MethodGet, "/v1/realtime?call_id=query-call", nil)
+	require.Equal(t, "query-call", liveSidebandCallID(queryContext))
+
+	pathContext.Request = httptest.NewRequest(http.MethodGet, "/v1/live/path-call?call_id=query-call", nil)
+	require.Equal(t, "path-call", liveSidebandCallID(pathContext), "path call id must take precedence")
+}
+
+func TestLiveOpenAIAlphaFollowsCurrentRealtimeProtocols(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/realtime/calls", nil)
+
+	require.Equal(t, "quicksilver=v1", liveOpenAIAlpha(context, &service.LiveCallRequest{
+		Session: json.RawMessage(`{"type":"quicksilver"}`),
+	}))
+	require.Equal(t, "quicksilver=v2", liveOpenAIAlpha(context, &service.LiveCallRequest{
+		Session: json.RawMessage(`{"delegation":{"type":"client"}}`),
+	}))
+
+	context.Request.Header.Set("OpenAI-Alpha", "quicksilver=v1")
+	require.Equal(t, "quicksilver=v1", liveOpenAIAlpha(context, &service.LiveCallRequest{
+		Session: json.RawMessage(`{"delegation":{"type":"client"}}`),
+	}))
+	context.Request.Header.Set("OpenAI-Alpha", "untrusted=value")
+	require.Equal(t, "quicksilver=v2", liveOpenAIAlpha(context, &service.LiveCallRequest{
+		Session: json.RawMessage(`{"delegation":{"type":"client"}}`),
+	}))
 }
 
 func TestLiveEnabledForAPIKey(t *testing.T) {
@@ -86,6 +129,9 @@ func TestLiveEnabledForAPIKey(t *testing.T) {
 	}))
 	require.True(t, liveEnabledForAPIKey(&service.APIKey{
 		Group: &service.Group{Platform: service.PlatformOpenAI, AllowLive: true},
+	}))
+	require.True(t, liveEnabledForAPIKey(&service.APIKey{
+		Group: &service.Group{Platform: service.PlatformComposite, AllowLive: true},
 	}))
 }
 

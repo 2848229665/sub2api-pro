@@ -339,15 +339,19 @@ func TestProxyLiveSidebandForwardsTextAndBinary(t *testing.T) {
 		},
 	}
 	record := &LiveCallRecord{
-		CallID:     "call_proxy",
-		CallHash:   hashLiveCallID("call_proxy"),
-		AccountID:  account.ID,
-		APIKeyID:   22,
-		UserID:     33,
-		LeaseID:    "lease-1",
-		CreatedAt:  time.Now(),
-		ExpiresAt:  time.Now().Add(time.Minute),
-		Controller: LiveControllerPending,
+		CallID:          "call_proxy",
+		CallHash:        hashLiveCallID("call_proxy"),
+		AccountID:       account.ID,
+		APIKeyID:        22,
+		UserID:          33,
+		LeaseID:         "lease-1",
+		CreatedAt:       time.Now(),
+		ExpiresAt:       time.Now().Add(time.Minute),
+		Controller:      LiveControllerPending,
+		OpenAIAlpha:     "quicksilver=v1",
+		RealtimeSession: "realtime-session",
+		SessionID:       "session-id",
+		ThreadID:        "thread-id",
 	}
 	attestationCipher := newLiveAttestationCipher(&config.Config{
 		JWT: config.JWTConfig{Secret: "live-sideband-test-secret"},
@@ -409,10 +413,15 @@ func TestProxyLiveSidebandForwardsTextAndBinary(t *testing.T) {
 	require.Equal(t, coderws.MessageBinary, messageType)
 	require.Equal(t, []byte{4, 5, 6}, payload)
 
-	require.Equal(t, "wss://chatgpt.com/backend-api/codex/call_proxy", dialer.url)
+	require.Equal(t, "wss://api.openai.com/v1/realtime?call_id=call_proxy", dialer.url)
 	require.Equal(t, "Bearer test-access-token", dialer.headers.Get("Authorization"))
 	require.Equal(t, "acct_test", dialer.headers.Get("Chatgpt-Account-Id"))
 	require.Equal(t, `{"v":1,"s":0,"t":"v1.sideband"}`, dialer.headers.Get(liveAttestationHeader))
+	require.Equal(t, "quicksilver=v1", dialer.headers.Get("OpenAI-Alpha"))
+	require.Equal(t, "realtime-session", dialer.headers.Get("X-Session-Id"))
+	require.Equal(t, "session-id", dialer.headers.Get("Session-Id"))
+	require.Equal(t, "thread-id", dialer.headers.Get("Thread-Id"))
+	require.Equal(t, "thread-id", dialer.headers.Get("X-Client-Request-Id"))
 	upstream.reads <- liveTestFrame{err: coderws.CloseError{Code: coderws.StatusNormalClosure}}
 	require.ErrorIs(t, <-proxyResult, ErrLiveCallNotFound)
 }

@@ -29,12 +29,9 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 		h.errorResponse(c, http.StatusInternalServerError, "api_error", "User context not found")
 		return
 	}
-	if apiKey.Group == nil || apiKey.Group.Platform != service.PlatformOpenAI {
+	if apiKey.Group == nil ||
+		(apiKey.Group.Platform != service.PlatformOpenAI && apiKey.Group.Platform != service.PlatformComposite) {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Live is not supported for this platform")
-		return
-	}
-	if !liveEnabledForAPIKey(apiKey) {
-		h.errorResponse(c, http.StatusForbidden, "permission_error", "Live is not enabled for this group")
 		return
 	}
 	request, err := parseLiveCallRequest(c)
@@ -43,6 +40,14 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 		return
 	}
 	model := strings.TrimSpace(gjson.GetBytes(request.Session, "model").String())
+	if !fixedEndpointTargetPlatformAllowed(c, apiKey, model, service.PlatformOpenAI) {
+		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Live is not supported for this platform")
+		return
+	}
+	if !liveEnabledForAPIKey(apiKey) {
+		h.errorResponse(c, http.StatusForbidden, "permission_error", "Live is not enabled for this group")
+		return
+	}
 	reqLog := requestLogger(
 		c,
 		"handler.openai_gateway.live",
@@ -99,7 +104,7 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 	}
 	defer userRelease()
 
-	identity := liveCallIdentity(c, apiKey, subject.UserID, subscription)
+	identity := liveCallIdentity(c, apiKey, subject.UserID, subscription, request)
 	created, err := h.gatewayService.CreateLiveCall(c.Request.Context(), request, identity, subject.Concurrency)
 	if err != nil {
 		h.writeLiveCreateError(c, err)
@@ -136,10 +141,23 @@ func parseLiveCallRequest(c *gin.Context) (*service.LiveCallRequest, error) {
 
 func liveSidebandLocation(fullPath, callID string) string {
 	prefix := "/v1/live/"
-	if strings.HasPrefix(fullPath, "/backend-api/codex/") {
+	switch {
+	case strings.HasPrefix(fullPath, "/backend-api/codex/"):
 		prefix = "/backend-api/codex/"
+	case strings.TrimRight(fullPath, "/") == "/v1/realtime/calls":
+		prefix = "/v1/realtime/calls/"
 	}
 	return prefix + url.PathEscape(callID)
+}
+
+func liveSidebandCallID(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	if callID := strings.TrimSpace(c.Param("call_id")); callID != "" {
+		return callID
+	}
+	return strings.TrimSpace(c.Query("call_id"))
 }
 
 func liveCallIdentity(
@@ -147,6 +165,7 @@ func liveCallIdentity(
 	apiKey *service.APIKey,
 	userID int64,
 	subscription *service.UserSubscription,
+	request *service.LiveCallRequest,
 ) service.LiveCallIdentity {
 	var subscriptionID *int64
 	if subscription != nil {
@@ -161,7 +180,41 @@ func liveCallIdentity(
 		UserAgent:       c.GetHeader("User-Agent"),
 		IPAddress:       ip.GetClientIP(c),
 		InboundEndpoint: GetInboundEndpoint(c),
+		OpenAIAlpha:     liveOpenAIAlpha(c, request),
+		RealtimeSession: strings.TrimSpace(c.GetHeader("x-session-id")),
+		SessionID:       strings.TrimSpace(c.GetHeader("session-id")),
+		ThreadID:        firstNonEmptyTrimmed(c.GetHeader("thread-id"), c.GetHeader("x-client-request-id")),
 	}
+}
+
+func liveOpenAIAlpha(c *gin.Context, request *service.LiveCallRequest) string {
+	if c != nil {
+		switch strings.ToLower(strings.TrimSpace(c.GetHeader("OpenAI-Alpha"))) {
+		case "quicksilver=v1":
+			return "quicksilver=v1"
+		case "quicksilver=v2":
+			return "quicksilver=v2"
+		}
+		if strings.TrimRight(c.FullPath(), "/") == "/v1/live" {
+			return "quicksilver=v2"
+		}
+	}
+	if request != nil && strings.EqualFold(
+		strings.TrimSpace(gjson.GetBytes(request.Session, "delegation.type").String()),
+		"client",
+	) {
+		return "quicksilver=v2"
+	}
+	return "quicksilver=v1"
+}
+
+func firstNonEmptyTrimmed(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (h *OpenAIGatewayHandler) writeLiveCreateError(c *gin.Context, err error) {
@@ -196,6 +249,10 @@ func (h *OpenAIGatewayHandler) LiveSideband(c *gin.Context) {
 		h.errorResponse(c, http.StatusInternalServerError, "api_error", "User context not found")
 		return
 	}
+	if !fixedEndpointTargetPlatformAllowed(c, apiKey, "", service.PlatformOpenAI) {
+		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Live is not supported for this platform")
+		return
+	}
 	if !liveEnabledForAPIKey(apiKey) {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", "Live is not enabled for this group")
 		return
@@ -205,7 +262,12 @@ func (h *OpenAIGatewayHandler) LiveSideband(c *gin.Context) {
 		UserID:   subject.UserID,
 		GroupID:  apiKey.GroupID,
 	}
-	record, err := h.gatewayService.GetLiveCallForIdentity(c.Request.Context(), c.Param("call_id"), identity)
+	callID := liveSidebandCallID(c)
+	if callID == "" {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "call_id is required")
+		return
+	}
+	record, err := h.gatewayService.GetLiveCallForIdentity(c.Request.Context(), callID, identity)
 	if err != nil {
 		if errors.Is(err, service.ErrLiveIdentityMismatch) {
 			h.errorResponse(c, http.StatusForbidden, "permission_error", "Live call belongs to another identity")
@@ -229,8 +291,9 @@ func (h *OpenAIGatewayHandler) LiveSideband(c *gin.Context) {
 }
 
 func liveEnabledForAPIKey(apiKey *service.APIKey) bool {
-	return apiKey != nil &&
-		apiKey.Group != nil &&
-		apiKey.Group.Platform == service.PlatformOpenAI &&
-		apiKey.Group.AllowLive
+	if apiKey == nil || apiKey.Group == nil || !apiKey.Group.AllowLive {
+		return false
+	}
+	return apiKey.Group.Platform == service.PlatformOpenAI ||
+		apiKey.Group.Platform == service.PlatformComposite
 }

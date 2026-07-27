@@ -527,7 +527,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 	}()
 
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
-	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.5","stream":false,"input":"draw a cat"}`))
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.5","stream":false,"prompt_cache_key":"ws-codex-session","client_metadata":{"session_id":"ws-codex-session","thread_id":"ws-codex-thread","x-codex-window-id":"ws-codex-thread:0"},"input":"draw a cat"}`))
 	cancelWrite()
 	require.NoError(t, err)
 
@@ -616,6 +616,19 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 	require.False(t, gjson.Get(functionPayload, `tools.#(type=="image_generation")`).Exists())
 	require.False(t, gjson.Get(functionPayload, "tool_choice").Exists())
 	require.NotContains(t, gjson.Get(functionPayload, "instructions").String(), codexImageGenerationBridgeMarker)
+
+	wantSession := isolateOpenAISessionID(apiKey.ID, "ws-codex-session")
+	wantThread := isolateOpenAISessionID(apiKey.ID, "ws-codex-thread")
+	for index, payload := range []string{nonLitePayload, litePayload, functionPayload} {
+		require.Equal(t, wantSession, gjson.Get(payload, "prompt_cache_key").String(), "turn %d", index+1)
+	}
+	require.Equal(t, wantSession, gjson.Get(nonLitePayload, "client_metadata.session_id").String())
+	require.Equal(t, wantThread, gjson.Get(nonLitePayload, "client_metadata.thread_id").String())
+	require.Equal(t, wantSession, gjson.Get(litePayload, "client_metadata.session_id").String())
+	require.Equal(t, wantThread, gjson.Get(litePayload, "client_metadata.thread_id").String())
+	require.Equal(t, wantSession, captureDialer.lastHeaders.Get(openAIOfficialSessionIDHeader))
+	require.Equal(t, wantThread, captureDialer.lastHeaders.Get(openAIOfficialThreadIDHeader))
+	require.Equal(t, wantThread, captureDialer.lastHeaders.Get(openAIOfficialClientRequestIDHeader))
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_DedicatedModeDoesNotReuseConnAcrossSessions(t *testing.T) {

@@ -385,6 +385,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyEnableAnthropicCacheTTL1hInjection] = strconv.FormatBool(settings.EnableAnthropicCacheTTL1hInjection)
 	updates[SettingKeyRewriteMessageCacheControl] = strconv.FormatBool(settings.RewriteMessageCacheControl)
 	updates[SettingKeyEnableClientDatelineNormalization] = strconv.FormatBool(settings.EnableClientDatelineNormalization)
+	updates[SettingKeyOpenAICodexPromptCacheOptimizationEnabled] = strconv.FormatBool(settings.OpenAICodexPromptCacheOptimizationEnabled)
 	updates[SettingKeyAntigravityUserAgentVersion] = antigravity.NormalizeUserAgentVersion(settings.AntigravityUserAgentVersion)
 	updates[SettingKeyOpenAICodexUserAgent] = strings.TrimSpace(settings.OpenAICodexUserAgent)
 	// codex_cli_only 加固
@@ -532,16 +533,17 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	})
 	gatewayForwardingSF.Forget("gateway_forwarding")
 	gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{
-		fingerprintUnification:           settings.EnableFingerprintUnification,
-		metadataPassthrough:              settings.EnableMetadataPassthrough,
-		cchSigning:                       settings.EnableCCHSigning,
-		claudeOAuthSystemPromptInjection: settings.EnableClaudeOAuthSystemPromptInjection,
-		claudeOAuthSystemPrompt:          settings.ClaudeOAuthSystemPrompt,
-		claudeOAuthSystemPromptBlocks:    settings.ClaudeOAuthSystemPromptBlocks,
-		anthropicCacheTTL1hInjection:     settings.EnableAnthropicCacheTTL1hInjection,
-		rewriteMessageCacheControl:       settings.RewriteMessageCacheControl,
-		clientDatelineNormalization:      settings.EnableClientDatelineNormalization,
-		expiresAt:                        time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
+		fingerprintUnification:             settings.EnableFingerprintUnification,
+		metadataPassthrough:                settings.EnableMetadataPassthrough,
+		cchSigning:                         settings.EnableCCHSigning,
+		claudeOAuthSystemPromptInjection:   settings.EnableClaudeOAuthSystemPromptInjection,
+		claudeOAuthSystemPrompt:            settings.ClaudeOAuthSystemPrompt,
+		claudeOAuthSystemPromptBlocks:      settings.ClaudeOAuthSystemPromptBlocks,
+		anthropicCacheTTL1hInjection:       settings.EnableAnthropicCacheTTL1hInjection,
+		rewriteMessageCacheControl:         settings.RewriteMessageCacheControl,
+		clientDatelineNormalization:        settings.EnableClientDatelineNormalization,
+		openAICodexPromptCacheOptimization: settings.OpenAICodexPromptCacheOptimizationEnabled,
+		expiresAt:                          time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
 	})
 	s.antigravityUAVersionSF.Forget("antigravity_user_agent_version")
 	antigravityUserAgentVersion := antigravity.NormalizeUserAgentVersion(settings.AntigravityUserAgentVersion)
@@ -609,6 +611,12 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 
 func (s *SettingService) defaultRewriteMessageCacheControl() bool {
 	return false
+}
+
+func (s *SettingService) defaultOpenAICodexPromptCacheOptimizationEnabled() bool {
+	return s != nil &&
+		s.cfg != nil &&
+		s.cfg.Gateway.OpenAICodexPromptCacheOptimizationEnabled
 }
 
 func (s *SettingService) validateDefaultSubscriptionGroups(ctx context.Context, items []DefaultSubscriptionSetting) error {

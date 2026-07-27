@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -201,15 +202,22 @@ func TestOpenAIGatewayService_GenerateSessionHash_Priority(t *testing.T) {
 
 	bodyWithKey := []byte(`{"prompt_cache_key":"ses_aaa"}`)
 
-	// 1) session_id header wins
+	// 1) official Codex session-id header wins
+	c.Request.Header.Set(openAIOfficialSessionIDHeader, "official-session")
 	c.Request.Header.Set("session_id", "sess-123")
 	c.Request.Header.Set("conversation_id", "conv-456")
+	h0 := svc.GenerateSessionHash(c, bodyWithKey)
+	require.NotEmpty(t, h0)
+
+	// 2) legacy session_id is used when the official header is absent
+	c.Request.Header.Del(openAIOfficialSessionIDHeader)
 	h1 := svc.GenerateSessionHash(c, bodyWithKey)
 	if h1 == "" {
 		t.Fatalf("expected non-empty hash")
 	}
+	require.NotEqual(t, h0, h1)
 
-	// 2) conversation_id used when session_id absent
+	// 3) conversation_id used when both session headers are absent
 	c.Request.Header.Del("session_id")
 	h2 := svc.GenerateSessionHash(c, bodyWithKey)
 	if h2 == "" {
@@ -219,7 +227,7 @@ func TestOpenAIGatewayService_GenerateSessionHash_Priority(t *testing.T) {
 		t.Fatalf("expected different hashes for different keys")
 	}
 
-	// 3) prompt_cache_key used when both headers absent
+	// 4) prompt_cache_key used when all session headers are absent
 	c.Request.Header.Del("conversation_id")
 	h3 := svc.GenerateSessionHash(c, bodyWithKey)
 	if h3 == "" {
@@ -229,7 +237,7 @@ func TestOpenAIGatewayService_GenerateSessionHash_Priority(t *testing.T) {
 		t.Fatalf("expected different hashes for different keys")
 	}
 
-	// 4) empty when no signals
+	// 5) empty when no signals
 	h4 := svc.GenerateSessionHash(c, []byte(`{}`))
 	if h4 != "" {
 		t.Fatalf("expected empty hash when no signals")
@@ -247,6 +255,7 @@ func TestOpenAIGatewayService_ClientSessionHeaderPriority(t *testing.T) {
 		name  string
 		value string
 	}{
+		{name: openAIOfficialSessionIDHeader, value: "official-codex-session"},
 		{name: "session_id", value: "generic-session"},
 		{name: "conversation_id", value: "generic-conversation"},
 		{name: openCodeSessionAffinityHeader, value: "opencode-affinity"},
@@ -3192,6 +3201,42 @@ func TestOpenAIUpdateCodexUsageSnapshotFromHeaders(t *testing.T) {
 	}
 }
 
+func TestParseCodexRateLimitHeadersSupportsCurrentResetAt(t *testing.T) {
+	observedAt := time.Date(2026, 7, 27, 12, 0, 0, 500_000_000, time.UTC)
+	headers := http.Header{}
+	headers.Set("x-codex-primary-used-percent", "12.5")
+	headers.Set("x-codex-primary-window-minutes", "10080")
+	headers.Set("x-codex-primary-reset-at", strconv.FormatInt(observedAt.Add(24*time.Hour).Unix(), 10))
+	headers.Set("x-codex-secondary-used-percent", "34.5")
+	headers.Set("x-codex-secondary-window-minutes", "300")
+	headers.Set("x-codex-secondary-reset-at", strconv.FormatInt(observedAt.Add(90*time.Minute).Unix(), 10))
+
+	snapshot := parseCodexRateLimitHeadersAt(headers, observedAt)
+
+	require.NotNil(t, snapshot)
+	require.Equal(t, 12.5, *snapshot.PrimaryUsedPercent)
+	require.Equal(t, 34.5, *snapshot.SecondaryUsedPercent)
+	require.Equal(t, 24*60*60, *snapshot.PrimaryResetAfterSeconds)
+	require.Equal(t, 90*60, *snapshot.SecondaryResetAfterSeconds)
+	require.Equal(t, observedAt.Format(time.RFC3339), snapshot.UpdatedAt)
+}
+
+func TestParseCodexRateLimitHeadersPrefersResetAtAndKeepsLegacyFallback(t *testing.T) {
+	observedAt := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	headers := http.Header{}
+	headers.Set("x-codex-primary-used-percent", "100")
+	headers.Set("x-codex-primary-reset-at", strconv.FormatInt(observedAt.Add(10*time.Minute).Unix(), 10))
+	headers.Set("x-codex-primary-reset-after-seconds", "9999")
+	headers.Set("x-codex-secondary-used-percent", "100")
+	headers.Set("x-codex-secondary-reset-after-seconds", "300")
+
+	snapshot := parseCodexRateLimitHeadersAt(headers, observedAt)
+
+	require.NotNil(t, snapshot)
+	require.Equal(t, 600, *snapshot.PrimaryResetAfterSeconds)
+	require.Equal(t, 300, *snapshot.SecondaryResetAfterSeconds)
+}
+
 func TestOpenAIResponsesRequestPathSuffix(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -3230,9 +3275,59 @@ func TestNormalizeOpenAICompactRequestBodyPreservesCurrentCodexPayloadFields(t *
 	require.Equal(t, "high", gjson.GetBytes(normalized, "reasoning.effort").String())
 	require.Equal(t, "low", gjson.GetBytes(normalized, "text.verbosity").String())
 	require.Equal(t, "resp_123", gjson.GetBytes(normalized, "previous_response_id").String())
+	require.Equal(t, "cache_123", gjson.GetBytes(normalized, "prompt_cache_key").String())
 	require.False(t, gjson.GetBytes(normalized, "store").Exists())
 	require.False(t, gjson.GetBytes(normalized, "stream").Exists())
-	require.False(t, gjson.GetBytes(normalized, "prompt_cache_key").Exists())
+}
+
+func TestOpenAIBuildUpstreamRequestOAuthForwardsIsolatedOfficialSessionID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set(openAIOfficialSessionIDHeader, "official-session")
+	c.Set("api_key", &APIKey{ID: 77})
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
+	}
+	body := []byte(`{"model":"gpt-5.5","input":"hello"}`)
+
+	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", true, "", true)
+	require.NoError(t, err)
+
+	want := isolateOpenAISessionID(77, "official-session")
+	require.Equal(t, want, req.Header.Get(openAIOfficialSessionIDHeader))
+	require.Equal(t, want, req.Header.Get("session_id"))
+	require.NotEqual(t, "official-session", req.Header.Get(openAIOfficialSessionIDHeader))
+}
+
+func TestOpenAIBuildUpstreamRequestOAuthPassthroughForwardsIsolatedOfficialSessionID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set(openAIOfficialSessionIDHeader, "official-passthrough-session")
+	c.Set("api_key", &APIKey{ID: 78})
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
+	}
+	body := []byte(`{"model":"gpt-5.5","input":"hello","prompt_cache_key":"cache-key"}`)
+
+	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, body, "token")
+	require.NoError(t, err)
+
+	want := isolateOpenAISessionID(78, "official-passthrough-session")
+	require.Equal(t, want, req.Header.Get(openAIOfficialSessionIDHeader))
+	require.Equal(t, want, req.Header.Get("session_id"))
+	require.NotEqual(t, "official-passthrough-session", req.Header.Get(openAIOfficialSessionIDHeader))
 }
 
 func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesCompactPath(t *testing.T) {
@@ -3327,6 +3422,9 @@ func TestOpenAIBuildUpstreamRequestPreservesCodexIdentityHeaders(t *testing.T) {
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.144.1")
 	c.Request.Header.Set("X-Codex-Window-ID", "window-http")
 	c.Request.Header.Set("X-Codex-Installation-ID", "installation-http")
+	c.Request.Header.Set("X-Codex-Parent-Thread-ID", "parent-thread-http")
+	c.Request.Header.Set("X-OAI-Attestation", "attestation-http")
+	c.Request.Header.Set("X-ResponsesAPI-Include-Timing-Metrics", "true")
 	c.Request.Header.Set("X-Test", "blocked")
 
 	body := []byte(`{"model":"gpt-5","input":"hello"}`)
@@ -3341,6 +3439,9 @@ func TestOpenAIBuildUpstreamRequestPreservesCodexIdentityHeaders(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "window-http", req.Header.Get("X-Codex-Window-ID"))
 	require.Equal(t, "installation-http", req.Header.Get("X-Codex-Installation-ID"))
+	require.Equal(t, "parent-thread-http", req.Header.Get("X-Codex-Parent-Thread-ID"))
+	require.Equal(t, "attestation-http", req.Header.Get("X-OAI-Attestation"))
+	require.Equal(t, "true", req.Header.Get("X-ResponsesAPI-Include-Timing-Metrics"))
 	require.Empty(t, req.Header.Get("X-Test"))
 	require.True(t, openai.EvaluateEngineFingerprint(req.Header, body, openai.DefaultEngineFingerprintSignals))
 }

@@ -32,14 +32,21 @@ const (
 )
 
 var (
-	chatGPTLiveCallsURL        = "https://chatgpt.com/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas"
-	chatGPTLiveSidebandBaseURL = "wss://chatgpt.com/backend-api/codex"
+	chatGPTLiveCallsURL    = "https://chatgpt.com/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas"
+	chatGPTLiveSidebandURL = "wss://api.openai.com/v1/realtime"
 )
 
 type liveFrameConn interface {
 	ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error)
 	WriteFrame(ctx context.Context, msgType coderws.MessageType, payload []byte) error
 	Close() error
+}
+
+type liveUpstreamIdentity struct {
+	OpenAIAlpha     string
+	RealtimeSession string
+	SessionID       string
+	ThreadID        string
 }
 
 func liveSidebandReadError(err error) error {
@@ -138,6 +145,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 	if err != nil {
 		return nil, err
 	}
+	upstreamIdentity := resolveLiveUpstreamIdentity(identity)
 
 	excluded := make(map[int64]struct{})
 	var lastErr error
@@ -188,7 +196,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			return nil, ErrLiveConcurrencyFull
 		}
 
-		created, createErr := s.createUpstreamLiveCall(ctx, account, request, attestation)
+		created, createErr := s.createUpstreamLiveCall(ctx, account, request, attestation, upstreamIdentity)
 		selection.ReleaseFunc()
 		if createErr != nil {
 			s.releaseLiveLease(account.ID, identity.UserID, identity.APIKeyID, leaseID)
@@ -221,6 +229,10 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			UserAgent:             identity.UserAgent,
 			IPAddress:             identity.IPAddress,
 			InboundEndpoint:       identity.InboundEndpoint,
+			OpenAIAlpha:           upstreamIdentity.OpenAIAlpha,
+			RealtimeSession:       upstreamIdentity.RealtimeSession,
+			SessionID:             upstreamIdentity.SessionID,
+			ThreadID:              upstreamIdentity.ThreadID,
 			AttestationCiphertext: attestationCiphertext,
 		}
 		mappingTTL := s.liveMaxSessionDuration() + 5*time.Minute
@@ -256,6 +268,7 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	account *Account,
 	request *LiveCallRequest,
 	attestation string,
+	identity liveUpstreamIdentity,
 ) (*LiveCallCreated, error) {
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
@@ -295,7 +308,7 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	upstreamReq.Header.Set("Content-Type", "application/json")
 	upstreamReq.Header.Set("Accept", "application/sdp")
 	upstreamReq.Header.Set(liveAttestationHeader, attestation)
-	applyLiveUpstreamIdentityHeaders(upstreamReq.Header)
+	applyLiveUpstreamIdentityHeaders(upstreamReq.Header, identity)
 
 	resp, err := s.httpUpstream.Do(upstreamReq, resolveAccountProxyURL(account), account.ID, account.Concurrency)
 	if err != nil {
@@ -392,16 +405,96 @@ func liveCallIDFromLocation(location string) (string, error) {
 	return callID, nil
 }
 
-func applyLiveUpstreamIdentityHeaders(headers http.Header) {
-	headers.Set("OpenAI-Alpha", "quicksilver=v2")
+func resolveLiveUpstreamIdentity(identity LiveCallIdentity) liveUpstreamIdentity {
+	alpha := strings.ToLower(strings.TrimSpace(identity.OpenAIAlpha))
+	if alpha != "quicksilver=v1" && alpha != "quicksilver=v2" {
+		alpha = "quicksilver=v2"
+	}
+
+	rawSessionID := strings.TrimSpace(identity.SessionID)
+	if rawSessionID == "" {
+		rawSessionID = strings.TrimSpace(identity.RealtimeSession)
+	}
+	sessionID := isolateOpenAISessionID(identity.APIKeyID, rawSessionID)
+	if sessionID == "" {
+		sessionID = uuid.NewString()
+	}
+	realtimeSession := isolateOpenAISessionID(identity.APIKeyID, identity.RealtimeSession)
+	if realtimeSession == "" {
+		realtimeSession = sessionID
+	}
+	threadID := isolateOpenAISessionID(identity.APIKeyID, identity.ThreadID)
+	if threadID == "" {
+		threadID = uuid.NewString()
+	}
+	return liveUpstreamIdentity{
+		OpenAIAlpha:     alpha,
+		RealtimeSession: realtimeSession,
+		SessionID:       sessionID,
+		ThreadID:        threadID,
+	}
+}
+
+func liveUpstreamIdentityFromRecord(record *LiveCallRecord) liveUpstreamIdentity {
+	if record == nil {
+		return liveUpstreamIdentity{}
+	}
+	identity := liveUpstreamIdentity{
+		OpenAIAlpha:     record.OpenAIAlpha,
+		RealtimeSession: record.RealtimeSession,
+		SessionID:       record.SessionID,
+		ThreadID:        record.ThreadID,
+	}
+	if identity.OpenAIAlpha == "" {
+		identity.OpenAIAlpha = "quicksilver=v2"
+	}
+
+	// Records written before the identity fields were added cannot recover the
+	// random create-time values. Derive a stable per-call fallback so observer
+	// and proxy reconnects at least keep one consistent identity instead of
+	// generating a different session/thread on every dial.
+	callSeed := strings.TrimSpace(record.CallID)
+	if callSeed == "" {
+		callSeed = strings.TrimSpace(record.CallHash)
+	}
+	if callSeed == "" {
+		return identity
+	}
+	if identity.SessionID == "" {
+		identity.SessionID = isolateOpenAISessionID(record.APIKeyID, "live-session:"+callSeed)
+	}
+	if identity.RealtimeSession == "" {
+		identity.RealtimeSession = identity.SessionID
+	}
+	if identity.ThreadID == "" {
+		identity.ThreadID = isolateOpenAISessionID(record.APIKeyID, "live-thread:"+callSeed)
+	}
+	return identity
+}
+
+func applyLiveUpstreamIdentityHeaders(headers http.Header, identity liveUpstreamIdentity) {
+	alpha := strings.ToLower(strings.TrimSpace(identity.OpenAIAlpha))
+	if alpha != "quicksilver=v1" && alpha != "quicksilver=v2" {
+		alpha = "quicksilver=v2"
+	}
+	headers.Set("OpenAI-Alpha", alpha)
 	ensureCodexIdentityHeaders(headers)
 	enforceCodexIdentityHeaders(headers)
-	if strings.TrimSpace(headers.Get("session-id")) == "" {
-		headers.Set("session-id", uuid.NewString())
+	sessionID := strings.TrimSpace(identity.SessionID)
+	if sessionID == "" {
+		sessionID = uuid.NewString()
 	}
-	if strings.TrimSpace(headers.Get("thread-id")) == "" {
-		headers.Set("thread-id", uuid.NewString())
+	realtimeSession := strings.TrimSpace(identity.RealtimeSession)
+	if realtimeSession == "" {
+		realtimeSession = sessionID
 	}
+	threadID := strings.TrimSpace(identity.ThreadID)
+	if threadID == "" {
+		threadID = uuid.NewString()
+	}
+	headers.Set("x-session-id", realtimeSession)
+	setOpenAIUpstreamSessionHeaders(headers, sessionID)
+	setOpenAIUpstreamThreadHeaders(headers, threadID)
 	// Realtime/Live 不使用 Responses 的实验头。
 	headers.Del("OpenAI-Beta")
 }
@@ -427,7 +520,7 @@ func (s *OpenAIGatewayService) liveSidebandHeaders(
 		return nil, err
 	}
 	headers.Set(liveAttestationHeader, attestation)
-	applyLiveUpstreamIdentityHeaders(headers)
+	applyLiveUpstreamIdentityHeaders(headers, liveUpstreamIdentityFromRecord(record))
 	return headers, nil
 }
 
@@ -443,7 +536,7 @@ func (s *OpenAIGatewayService) dialLiveSideband(ctx context.Context, record *Liv
 	if err != nil {
 		return nil, err
 	}
-	target := strings.TrimRight(chatGPTLiveSidebandBaseURL, "/") + "/" + url.PathEscape(record.CallID)
+	target := strings.TrimRight(chatGPTLiveSidebandURL, "/") + "?call_id=" + url.QueryEscape(record.CallID)
 	conn, status, _, err := s.getOpenAIWSPassthroughDialer().Dial(ctx, target, headers, resolveAccountProxyURL(account))
 	if err != nil {
 		return nil, fmt.Errorf("dial live sideband (status %d): %w", status, err)

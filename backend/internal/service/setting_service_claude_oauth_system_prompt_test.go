@@ -47,3 +47,61 @@ func TestSettingService_GetClaudeOAuthSystemPromptInjectionSettings(t *testing.T
 		require.Equal(t, customBlocks, blocks)
 	})
 }
+
+func TestSettingService_OpenAICodexPromptCacheOptimization(t *testing.T) {
+	t.Run("uses config when database value is missing", func(t *testing.T) {
+		resetGatewayForwardingSettingsCacheForTest(t)
+		cfg := &config.Config{}
+		cfg.Gateway.OpenAICodexPromptCacheOptimizationEnabled = true
+		svc := NewSettingService(&gatewayTTLSettingRepo{data: map[string]string{}}, cfg)
+
+		require.True(t, svc.IsOpenAICodexPromptCacheOptimizationEnabled(context.Background()))
+
+		settings, err := svc.GetAllSettings(context.Background())
+		require.NoError(t, err)
+		require.True(t, settings.OpenAICodexPromptCacheOptimizationEnabled)
+	})
+
+	t.Run("database value overrides config", func(t *testing.T) {
+		resetGatewayForwardingSettingsCacheForTest(t)
+		cfg := &config.Config{}
+		cfg.Gateway.OpenAICodexPromptCacheOptimizationEnabled = true
+		svc := NewSettingService(&gatewayTTLSettingRepo{data: map[string]string{
+			SettingKeyOpenAICodexPromptCacheOptimizationEnabled: "false",
+		}}, cfg)
+
+		require.False(t, svc.IsOpenAICodexPromptCacheOptimizationEnabled(context.Background()))
+	})
+
+	t.Run("update refreshes the request hot-path cache immediately", func(t *testing.T) {
+		resetGatewayForwardingSettingsCacheForTest(t)
+		cfg := &config.Config{}
+		cfg.Gateway.OpenAICodexPromptCacheOptimizationEnabled = true
+		repo := &gatewayTTLSettingRepo{data: map[string]string{}}
+		svc := NewSettingService(repo, cfg)
+
+		settings, err := svc.GetAllSettings(context.Background())
+		require.NoError(t, err)
+		require.True(t, svc.IsOpenAICodexPromptCacheOptimizationEnabled(context.Background()))
+
+		settings.OpenAICodexPromptCacheOptimizationEnabled = false
+		require.NoError(t, svc.UpdateSettings(context.Background(), settings))
+		require.Equal(t, "false", repo.data[SettingKeyOpenAICodexPromptCacheOptimizationEnabled])
+		require.False(t, svc.IsOpenAICodexPromptCacheOptimizationEnabled(context.Background()))
+	})
+}
+
+func TestOpenAIGatewayPromptCacheOptimizationUsesRuntimeSetting(t *testing.T) {
+	resetGatewayForwardingSettingsCacheForTest(t)
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAICodexPromptCacheOptimizationEnabled = true
+	settingService := NewSettingService(&gatewayTTLSettingRepo{data: map[string]string{
+		SettingKeyOpenAICodexPromptCacheOptimizationEnabled: "false",
+	}}, cfg)
+	gateway := &OpenAIGatewayService{
+		cfg:            cfg,
+		settingService: settingService,
+	}
+
+	require.False(t, gateway.openAICodexPromptCacheOptimizationEnabled(context.Background()))
+}

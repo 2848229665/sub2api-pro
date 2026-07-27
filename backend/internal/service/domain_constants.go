@@ -501,6 +501,9 @@ const (
 	SettingKeyEnableClientDatelineNormalization = "enable_client_dateline_normalization"
 	// SettingKeyRewriteMessageCacheControl 是否改写 messages[*].content[*].cache_control（默认 false）
 	SettingKeyRewriteMessageCacheControl = "rewrite_message_cache_control"
+	// SettingKeyOpenAICodexPromptCacheOptimizationEnabled 是否对官方 Codex 原生
+	// Responses 请求启用保持稳定 prompt 前缀的局部 JSON patch 翻译器。
+	SettingKeyOpenAICodexPromptCacheOptimizationEnabled = "openai_codex_prompt_cache_optimization_enabled"
 	// SettingKeyAntigravityUserAgentVersion Antigravity 上游 User-Agent 版本号（空值使用环境变量/默认值）
 	SettingKeyAntigravityUserAgentVersion = "antigravity_user_agent_version"
 	// SettingKeyOpenAICodexUserAgent OpenAI Codex 完整 User-Agent（空值使用内置默认）

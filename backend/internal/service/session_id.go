@@ -12,9 +12,9 @@ import (
 // distinct identifiers can never alias through truncation.
 const maxPersistedSessionIDLength = 255
 
-// clientSessionIDHeaders extends the OpenAI-compatible sticky-session signals with
-// native protocol identifiers that are safe to persist but must not alter OpenAI
-// scheduling behavior.
+// clientSessionIDHeaders extends the OpenAI-compatible sticky-session signals
+// (including official Codex session-id) with native protocol identifiers that are
+// safe to persist but must not alter OpenAI scheduling behavior.
 var clientSessionIDHeaders = append(
 	append([]string(nil), explicitOpenAIHeaderSessionNames...),
 	claudeCodeSessionHeader,

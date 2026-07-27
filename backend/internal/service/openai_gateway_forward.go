@@ -82,6 +82,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			return nil, err
 		}
 	}
+	if account.Type == AccountTypeOAuth {
+		body, _, err = prepareOpenAICodexUpstreamIdentity(
+			c,
+			account,
+			body,
+			isOpenAIResponsesCompactPath(c),
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	originalBody := body
 	requestView := newOpenAIRequestView(body)
@@ -112,7 +123,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	compatMessagesBridge := isOpenAICompatMessagesBridgeBody(body)
 	setOpenAICompatMessagesBridgeContext(c, compatMessagesBridge)
 
-	isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
+	isOfficialCodexClient := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
+	isCodexCLI := isOfficialCodexClient || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
 	codexImageGenerationExplicitToolPolicy := codexImageGenerationExplicitToolPolicyAllow
 	if isCodexCLI {
 		codexImageGenerationExplicitToolPolicy = account.CodexImageGenerationExplicitToolPolicy()
@@ -379,24 +391,38 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	if account.Type == AccountTypeOAuth {
-		decoded, decodeErr := ensureReqBody()
-		if decodeErr != nil {
-			return nil, decodeErr
+		optimization, optimizationErr := s.tryApplyOpenAICodexPromptCacheOptimization(
+			c, account, body, requestView, reqBody != nil,
+			isOfficialCodexClient, compatMessagesBridge, isCompactRequest,
+		)
+		if optimizationErr != nil {
+			return nil, optimizationErr
 		}
-		codexResult := codexTransformResult{}
-		if compatMessagesBridge {
-			codexResult = applyCodexOAuthTransformWithOptions(decoded, codexOAuthTransformOptions{IsCodexCLI: isCodexCLI, IsCompact: isCompactRequest, SkipDefaultInstructions: true, PreserveToolCallIDs: true})
-			ensureCodexOAuthInstructionsField(decoded)
-			markDecodedModified()
-		} else {
-			codexResult = applyCodexOAuthTransform(decoded, isCodexCLI, isCompactRequest)
+		codexResult := optimization.CodexResult
+		if optimization.Applied {
+			body = optimization.Body
+			requestView = optimization.RequestView
+			bodyModified = false
 		}
-		if codexResult.Modified {
-			markDecodedModified()
-		}
-		// 带真实 device_id 时补齐 client_metadata 安装标识，与真实 Codex 对齐（compact 形态不同，跳过）。
-		if !isCompactRequest && applyCodexClientMetadata(decoded, account) {
-			markDecodedModified()
+		if !optimization.Applied {
+			decoded, decodeErr := ensureReqBody()
+			if decodeErr != nil {
+				return nil, decodeErr
+			}
+			if compatMessagesBridge {
+				codexResult = applyCodexOAuthTransformWithOptions(decoded, codexOAuthTransformOptions{IsCodexCLI: isCodexCLI, IsCompact: isCompactRequest, SkipDefaultInstructions: true, PreserveToolCallIDs: true})
+				ensureCodexOAuthInstructionsField(decoded)
+				markDecodedModified()
+			} else {
+				codexResult = applyCodexOAuthTransform(decoded, isCodexCLI, isCompactRequest)
+			}
+			if codexResult.Modified {
+				markDecodedModified()
+			}
+			// 带真实 device_id 时补齐 client_metadata 安装标识，与真实 Codex 对齐（compact 形态不同，跳过）。
+			if !isCompactRequest && applyCodexClientMetadata(decoded, account) {
+				markDecodedModified()
+			}
 		}
 		if codexResult.NormalizedModel != "" {
 			upstreamModel = codexResult.NormalizedModel
@@ -1046,10 +1072,15 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	}
 	if account.Type == AccountTypeOAuth {
 		compatMessagesBridge := isOpenAICompatMessagesBridgeContext(c) || isOpenAICompatMessagesBridgeBody(body)
+		codexIdentity, hasCodexIdentity := openAICodexUpstreamIdentityFromContext(c)
 		// 清除客户端透传的 session 头，后续用隔离后的值重新设置，防止跨用户会话碰撞。
+		clientSessionID := strings.TrimSpace(req.Header.Get(openAIOfficialSessionIDHeader))
+		if clientSessionID == "" {
+			clientSessionID = strings.TrimSpace(req.Header.Get("session_id"))
+		}
 		clientConversationID := strings.TrimSpace(req.Header.Get("conversation_id"))
 		req.Header.Del("conversation_id")
-		req.Header.Del("session_id")
+		clearOpenAIUpstreamSessionHeaders(req.Header)
 
 		if compatMessagesBridge {
 			req.Header.Del("OpenAI-Beta")
@@ -1065,16 +1096,28 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 				req.Header.Set("version", codexCLIVersion)
 			}
 			compactSession := resolveOpenAICompactSessionID(c)
-			req.Header.Set("session_id", isolateOpenAISessionID(apiKeyID, compactSession))
+			isolatedCompactSession := isolateOpenAISessionID(apiKeyID, compactSession)
+			if hasCodexIdentity && codexIdentity.SessionID != "" {
+				isolatedCompactSession = codexIdentity.SessionID
+			}
+			setOpenAIUpstreamSessionHeaders(req.Header, isolatedCompactSession)
 		} else {
 			req.Header.Set("accept", "text/event-stream")
 		}
 		if promptCacheKey != "" {
 			isolated := isolateOpenAISessionID(apiKeyID, promptCacheKey)
-			req.Header.Set("session_id", isolated)
+			if hasCodexIdentity && codexIdentity.SessionID != "" {
+				isolated = codexIdentity.SessionID
+			}
+			setOpenAIUpstreamSessionHeaders(req.Header, isolated)
 			if !compatMessagesBridge || clientConversationID != "" {
 				req.Header.Set("conversation_id", isolated)
 			}
+		} else if clientSessionID != "" {
+			setOpenAIUpstreamSessionHeaders(req.Header, isolateOpenAISessionID(apiKeyID, clientSessionID))
+		}
+		if hasCodexIdentity {
+			applyOpenAICodexUpstreamIdentityHeaders(req.Header, codexIdentity)
 		}
 	} else if isOpenAIResponsesCompactPath(c) {
 		// compact 上游是 unary JSON 协议：API-key 账号也显式声明 Accept，

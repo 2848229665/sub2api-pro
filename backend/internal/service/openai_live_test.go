@@ -119,7 +119,12 @@ func TestCreateUpstreamLiveCallPreservesSession(t *testing.T) {
 	created, err := service.createUpstreamLiveCall(context.Background(), account, &LiveCallRequest{
 		SDP:     "v=offer\r\n",
 		Session: session,
-	}, `{"v":1,"s":0,"t":"v1.test"}`)
+	}, `{"v":1,"s":0,"t":"v1.test"}`, liveUpstreamIdentity{
+		OpenAIAlpha:     "quicksilver=v2",
+		RealtimeSession: "realtime-session",
+		SessionID:       "session-id",
+		ThreadID:        "thread-id",
+	})
 	require.NoError(t, err)
 	require.Equal(t, "call_test", created.CallID)
 	require.Equal(t, []byte("v=0\r\n"), created.SDP)
@@ -135,11 +140,61 @@ func TestCreateUpstreamLiveCallPreservesSession(t *testing.T) {
 	require.Equal(t, "acct_test", upstream.request.Header.Get("Chatgpt-Account-Id"))
 	require.Equal(t, "quicksilver=v2", upstream.request.Header.Get("OpenAI-Alpha"))
 	require.Equal(t, `{"v":1,"s":0,"t":"v1.test"}`, upstream.request.Header.Get(liveAttestationHeader))
-	require.NotEmpty(t, upstream.request.Header.Get("Session-Id"))
-	require.NotEmpty(t, upstream.request.Header.Get("Thread-Id"))
+	require.Equal(t, "realtime-session", upstream.request.Header.Get("X-Session-Id"))
+	require.Equal(t, "session-id", upstream.request.Header.Get("Session-Id"))
+	require.Equal(t, "thread-id", upstream.request.Header.Get("Thread-Id"))
+	require.Equal(t, "thread-id", upstream.request.Header.Get("X-Client-Request-Id"))
 	require.Empty(t, upstream.request.Header.Get("OpenAI-Beta"))
 	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(upstream.request.Context()))
 	require.True(t, HTTPUpstreamRedirectsDisabled(upstream.request.Context()))
+}
+
+func TestResolveLiveUpstreamIdentityIsStableAndAPIKeyIsolated(t *testing.T) {
+	input := LiveCallIdentity{
+		APIKeyID:        77,
+		OpenAIAlpha:     "quicksilver=v1",
+		RealtimeSession: "realtime-session",
+		ThreadID:        "thread",
+	}
+	first := resolveLiveUpstreamIdentity(input)
+	second := resolveLiveUpstreamIdentity(input)
+	otherAPIKey := resolveLiveUpstreamIdentity(LiveCallIdentity{
+		APIKeyID:        78,
+		OpenAIAlpha:     "quicksilver=v1",
+		RealtimeSession: "realtime-session",
+		ThreadID:        "thread",
+	})
+
+	require.Equal(t, "quicksilver=v1", first.OpenAIAlpha)
+	require.Equal(t, first, second)
+	require.NotEqual(t, "realtime-session", first.RealtimeSession)
+	require.Equal(t, first.RealtimeSession, first.SessionID)
+	require.NotEqual(t, first.RealtimeSession, otherAPIKey.RealtimeSession)
+	require.NotEqual(t, first.ThreadID, otherAPIKey.ThreadID)
+}
+
+func TestLiveUpstreamIdentityFromLegacyRecordUsesStableFallback(t *testing.T) {
+	record := &LiveCallRecord{
+		CallID:   "legacy-call",
+		CallHash: hashLiveCallID("legacy-call"),
+		APIKeyID: 79,
+	}
+
+	first := liveUpstreamIdentityFromRecord(record)
+	second := liveUpstreamIdentityFromRecord(record)
+	otherAPIKey := liveUpstreamIdentityFromRecord(&LiveCallRecord{
+		CallID:   record.CallID,
+		CallHash: record.CallHash,
+		APIKeyID: 80,
+	})
+
+	require.Equal(t, first, second)
+	require.Equal(t, "quicksilver=v2", first.OpenAIAlpha)
+	require.NotEmpty(t, first.SessionID)
+	require.Equal(t, first.SessionID, first.RealtimeSession)
+	require.NotEmpty(t, first.ThreadID)
+	require.NotEqual(t, first.SessionID, otherAPIKey.SessionID)
+	require.NotEqual(t, first.ThreadID, otherAPIKey.ThreadID)
 }
 
 func TestLiveAttestationCipherRoundTripAndRejectsOtherInstanceKey(t *testing.T) {

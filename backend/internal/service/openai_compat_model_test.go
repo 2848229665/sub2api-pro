@@ -532,7 +532,7 @@ func TestForwardAsAnthropic_OAuthCompatKeepsFullReplayForCacheGrowth(t *testing.
 	require.Contains(t, gjson.GetBytes(upstream.lastBody, "input.0.content.0.text").String(), "<sub2api-claude-code-todo-guard>")
 	require.Equal(t, "message-00", gjson.GetBytes(upstream.lastBody, "input.1.content.0.text").String())
 	require.Equal(t, "message-14", gjson.GetBytes(upstream.lastBody, "input.15.content.0.text").String())
-	require.False(t, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").Exists())
+	require.NotEmpty(t, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
 }
 
 func TestForwardAsAnthropic_AttachesPreviousResponseIDForCompatContinuation(t *testing.T) {
@@ -882,27 +882,35 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	firstCtx, _ := gin.CreateTestContext(firstRec)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
+	firstCtx.Set("api_key", &APIKey{ID: 501})
 
 	firstResult, err := svc.ForwardAsAnthropic(context.Background(), firstCtx, account, firstBody, "stable-cache-key", "gpt-5.4")
 	require.NoError(t, err)
 	require.NotNil(t, firstResult)
 	require.Empty(t, upstream.requests[0].Header.Get("x-codex-turn-state"))
 	requireOpenAIMessagesCodexIdentity(t, upstream.requests[0], codexCLIUserAgent, "codex_cli_rs")
+	wantCacheKey := isolateOpenAISessionID(501, "stable-cache-key")
+	require.Equal(t, wantCacheKey, gjson.GetBytes(upstream.bodies[0], "prompt_cache_key").String())
+	require.Equal(t, wantCacheKey, upstream.requests[0].Header.Get("session_id"))
+	require.Equal(t, wantCacheKey, upstream.requests[0].Header.Get(openAIOfficialSessionIDHeader))
+	require.NotEqual(t, isolateOpenAISessionID(502, "stable-cache-key"), wantCacheKey)
 
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	secondRec := httptest.NewRecorder()
 	secondCtx, _ := gin.CreateTestContext(secondRec)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
+	secondCtx.Set("api_key", &APIKey{ID: 501})
 
 	secondResult, err := svc.ForwardAsAnthropic(context.Background(), secondCtx, account, secondBody, "stable-cache-key", "gpt-5.4")
 	require.NoError(t, err)
 	require.NotNil(t, secondResult)
 	require.Equal(t, "turn_state_first", upstream.requests[1].Header.Get("x-codex-turn-state"))
-	require.Equal(t, generateSessionUUID(isolateOpenAISessionID(0, "stable-cache-key")), upstream.requests[1].Header.Get("session_id"))
+	require.Equal(t, wantCacheKey, upstream.requests[1].Header.Get("session_id"))
+	require.Equal(t, upstream.requests[1].Header.Get("session_id"), upstream.requests[1].Header.Get(openAIOfficialSessionIDHeader))
 	require.Empty(t, upstream.requests[1].Header.Get("conversation_id"))
 	requireOpenAIMessagesCodexIdentity(t, upstream.requests[1], codexCLIUserAgent, "codex_cli_rs")
-	require.False(t, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").Exists())
+	require.Equal(t, wantCacheKey, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").String())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
 }
 
@@ -999,6 +1007,7 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 	firstCtx, _ := gin.CreateTestContext(firstRec)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
+	firstCtx.Set("api_key", &APIKey{ID: 503})
 
 	firstResult, err := svc.ForwardAsAnthropic(context.Background(), firstCtx, account, firstBody, "", "gpt-5.4")
 	require.NoError(t, err)
@@ -1007,13 +1016,22 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 	require.NotEmpty(t, firstSessionID)
 	require.Empty(t, upstream.requests[0].Header.Get("x-codex-turn-state"))
 	requireOpenAIMessagesCodexIdentity(t, upstream.requests[0], codexCLIUserAgent, "codex_cli_rs")
-	require.False(t, gjson.GetBytes(upstream.bodies[0], "prompt_cache_key").Exists())
+	firstCacheKey := gjson.GetBytes(upstream.bodies[0], "prompt_cache_key").String()
+	require.NotEmpty(t, firstCacheKey)
+	var firstAnthropicReq apicompat.AnthropicRequest
+	require.NoError(t, json.Unmarshal(firstBody, &firstAnthropicReq))
+	rawCacheKey := promptCacheKeyFromAnthropicDigest(buildOpenAICompatAnthropicDigestChain(&firstAnthropicReq))
+	require.Equal(t, isolateOpenAISessionID(503, rawCacheKey), firstCacheKey)
+	require.Equal(t, firstCacheKey, firstSessionID)
+	require.Equal(t, firstSessionID, upstream.requests[0].Header.Get(openAIOfficialSessionIDHeader))
+	require.NotEqual(t, isolateOpenAISessionID(504, rawCacheKey), firstCacheKey)
 
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	secondRec := httptest.NewRecorder()
 	secondCtx, _ := gin.CreateTestContext(secondRec)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
+	secondCtx.Set("api_key", &APIKey{ID: 503})
 
 	secondResult, err := svc.ForwardAsAnthropic(context.Background(), secondCtx, account, secondBody, "", "gpt-5.4")
 	require.NoError(t, err)
@@ -1022,7 +1040,7 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 	require.Equal(t, "turn_state_digest_first", upstream.requests[1].Header.Get("x-codex-turn-state"))
 	require.Empty(t, upstream.requests[1].Header.Get("conversation_id"))
 	requireOpenAIMessagesCodexIdentity(t, upstream.requests[1], codexCLIUserAgent, "codex_cli_rs")
-	require.False(t, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").Exists())
+	require.Equal(t, firstCacheKey, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").String())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
 }
 
@@ -1058,6 +1076,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *t
 	firstCtx, _ := gin.CreateTestContext(firstRec)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
+	firstCtx.Set("api_key", &APIKey{ID: 505})
 
 	firstResult, err := svc.ForwardAsAnthropic(context.Background(), firstCtx, account, firstBody, "", "gpt-5.5")
 	require.NoError(t, err)
@@ -1065,13 +1084,22 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *t
 	firstSessionID := upstream.requests[0].Header.Get("session_id")
 	require.NotEmpty(t, firstSessionID)
 	require.Empty(t, upstream.requests[0].Header.Get("x-codex-turn-state"))
-	require.False(t, gjson.GetBytes(upstream.bodies[0], "prompt_cache_key").Exists())
+	firstCacheKey := gjson.GetBytes(upstream.bodies[0], "prompt_cache_key").String()
+	require.NotEmpty(t, firstCacheKey)
+	var firstAnthropicReq apicompat.AnthropicRequest
+	require.NoError(t, json.Unmarshal(firstBody, &firstAnthropicReq))
+	rawCacheKey := promptCacheKeyFromAnthropicMetadataSession(&firstAnthropicReq)
+	require.Equal(t, isolateOpenAISessionID(505, rawCacheKey), firstCacheKey)
+	require.Equal(t, firstCacheKey, firstSessionID)
+	require.Equal(t, firstSessionID, upstream.requests[0].Header.Get(openAIOfficialSessionIDHeader))
+	require.NotEqual(t, isolateOpenAISessionID(506, rawCacheKey), firstCacheKey)
 
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"metadata":` + metadata + `,"messages":[{"role":"user","content":"rewritten plan"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	secondRec := httptest.NewRecorder()
 	secondCtx, _ := gin.CreateTestContext(secondRec)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
+	secondCtx.Set("api_key", &APIKey{ID: 505})
 
 	secondResult, err := svc.ForwardAsAnthropic(context.Background(), secondCtx, account, secondBody, "", "gpt-5.5")
 	require.NoError(t, err)
@@ -1079,7 +1107,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *t
 	require.Equal(t, firstSessionID, upstream.requests[1].Header.Get("session_id"))
 	require.Equal(t, "turn_state_metadata_first", upstream.requests[1].Header.Get("x-codex-turn-state"))
 	require.Empty(t, upstream.requests[1].Header.Get("conversation_id"))
-	require.False(t, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").Exists())
+	require.Equal(t, firstCacheKey, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").String())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
 }
 
@@ -1115,6 +1143,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnch
 	firstCtx, _ := gin.CreateTestContext(firstRec)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
+	firstCtx.Set("api_key", &APIKey{ID: 507})
 
 	firstResult, err := svc.ForwardAsAnthropic(context.Background(), firstCtx, account, firstBody, "", "gpt-5.5")
 	require.NoError(t, err)
@@ -1122,13 +1151,22 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnch
 	firstSessionID := upstream.requests[0].Header.Get("session_id")
 	require.NotEmpty(t, firstSessionID)
 	require.Empty(t, upstream.requests[0].Header.Get("x-codex-turn-state"))
-	require.False(t, gjson.GetBytes(upstream.bodies[0], "prompt_cache_key").Exists())
+	firstCacheKey := gjson.GetBytes(upstream.bodies[0], "prompt_cache_key").String()
+	require.NotEmpty(t, firstCacheKey)
+	var firstAnthropicReq apicompat.AnthropicRequest
+	require.NoError(t, json.Unmarshal(firstBody, &firstAnthropicReq))
+	rawCacheKey := promptCacheKeyFromAnthropicMetadataSession(&firstAnthropicReq)
+	require.Equal(t, isolateOpenAISessionID(507, rawCacheKey), firstCacheKey)
+	require.Equal(t, firstCacheKey, firstSessionID)
+	require.Equal(t, firstSessionID, upstream.requests[0].Header.Get(openAIOfficialSessionIDHeader))
+	require.NotEqual(t, isolateOpenAISessionID(508, rawCacheKey), firstCacheKey)
 
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"metadata":` + metadata + `,"system":[{"type":"text","text":"anchor two","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	secondRec := httptest.NewRecorder()
 	secondCtx, _ := gin.CreateTestContext(secondRec)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
+	secondCtx.Set("api_key", &APIKey{ID: 507})
 
 	secondResult, err := svc.ForwardAsAnthropic(context.Background(), secondCtx, account, secondBody, "", "gpt-5.5")
 	require.NoError(t, err)
@@ -1136,7 +1174,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnch
 	require.Equal(t, firstSessionID, upstream.requests[1].Header.Get("session_id"))
 	require.Equal(t, "turn_state_cache_anchor_first", upstream.requests[1].Header.Get("x-codex-turn-state"))
 	require.Empty(t, upstream.requests[1].Header.Get("conversation_id"))
-	require.False(t, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").Exists())
+	require.Equal(t, firstCacheKey, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").String())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
 }
 

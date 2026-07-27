@@ -158,6 +158,10 @@ func (c *gatewayCache) SaveLiveCall(ctx context.Context, record *service.LiveCal
 		"user_agent":       record.UserAgent,
 		"ip_address":       record.IPAddress,
 		"inbound_endpoint": record.InboundEndpoint,
+		"openai_alpha":     record.OpenAIAlpha,
+		"realtime_session": record.RealtimeSession,
+		"session_id":       record.SessionID,
+		"thread_id":        record.ThreadID,
 		"attestation":      record.AttestationCiphertext,
 	}
 	key := liveCallKey(record.CallHash)
@@ -199,6 +203,10 @@ func (c *gatewayCache) GetLiveCall(ctx context.Context, callHash string) (*servi
 		UserAgent:             values["user_agent"],
 		IPAddress:             values["ip_address"],
 		InboundEndpoint:       values["inbound_endpoint"],
+		OpenAIAlpha:           values["openai_alpha"],
+		RealtimeSession:       values["realtime_session"],
+		SessionID:             values["session_id"],
+		ThreadID:              values["thread_id"],
 		AttestationCiphertext: values["attestation"],
 	}, nil
 }

@@ -44,6 +44,29 @@ func compositeTargetPlatformResolved(c *gin.Context, apiKey *service.APIKey, mod
 	return ok
 }
 
+// fixedEndpointTargetPlatformAllowed resolves an endpoint whose protocol is
+// tied to one concrete provider even when the request carries no model (for
+// example Codex memories, models, and Live). A previously resolved composite
+// route remains authoritative and must agree with the endpoint platform.
+func fixedEndpointTargetPlatformAllowed(c *gin.Context, apiKey *service.APIKey, model, platform string) bool {
+	if c == nil || c.Request == nil || apiKey == nil || apiKey.Group == nil {
+		return false
+	}
+	switch apiKey.Group.Platform {
+	case platform:
+		return true
+	case service.PlatformComposite:
+		ensureCompositeTargetPlatform(c, apiKey, model)
+		if resolved, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context()); ok {
+			return resolved == platform
+		}
+		c.Request = c.Request.WithContext(service.WithResolvedTargetPlatform(c.Request.Context(), platform))
+		return true
+	default:
+		return false
+	}
+}
+
 func effectiveAPIKeyPlatform(c *gin.Context, apiKey *service.APIKey) string {
 	if c != nil && c.Request != nil {
 		if platform, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context()); ok {

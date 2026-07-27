@@ -79,6 +79,7 @@ func TestExtractClientSessionID_SupportedHeaders(t *testing.T) {
 		header string
 		value  string
 	}{
+		{"official Codex session-id", openAIOfficialSessionIDHeader, "codex-session"},
 		{"session_id", "session_id", "sess-A"},
 		{"conversation_id", "conversation_id", "conv-B"},
 		{"X-Session-Affinity", openCodeSessionAffinityHeader, "aff-C"},
@@ -96,14 +97,16 @@ func TestExtractClientSessionID_SupportedHeaders(t *testing.T) {
 }
 
 func TestExtractClientSessionID_HeaderPrecedence(t *testing.T) {
-	// session_id ranks ahead of conversation_id and the X-* variants.
+	// Official Codex session-id ranks ahead of legacy session_id,
+	// conversation_id, and the X-* variants.
 	c := newSessionHeaderContext(t, map[string]string{
-		"session_id":                "primary",
-		"conversation_id":           "secondary",
-		openCodeSessionIDHeader:     "tertiary",
-		codeBuddyConversationHeader: "quaternary",
+		openAIOfficialSessionIDHeader: "official",
+		"session_id":                  "primary",
+		"conversation_id":             "secondary",
+		openCodeSessionIDHeader:       "tertiary",
+		codeBuddyConversationHeader:   "quaternary",
 	})
-	require.Equal(t, "primary", ExtractClientSessionID(c))
+	require.Equal(t, "official", ExtractClientSessionID(c))
 }
 
 func TestExtractClientSessionID_Sanitizes(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -655,6 +656,10 @@ func (s *OpenAIGatewayService) resolveOpenAIChannelPricing(ctx context.Context, 
 // ParseCodexRateLimitHeaders extracts Codex usage limits from response headers.
 // Exported for use in ratelimit_service when handling OpenAI 429 responses.
 func ParseCodexRateLimitHeaders(headers http.Header) *OpenAICodexUsageSnapshot {
+	return parseCodexRateLimitHeadersAt(headers, time.Now())
+}
+
+func parseCodexRateLimitHeadersAt(headers http.Header, observedAt time.Time) *OpenAICodexUsageSnapshot {
 	snapshot := &OpenAICodexUsageSnapshot{}
 	hasData := false
 
@@ -678,12 +683,33 @@ func ParseCodexRateLimitHeaders(headers http.Header) *OpenAICodexUsageSnapshot {
 		return nil
 	}
 
+	// Current Codex returns an absolute Unix timestamp in *-reset-at. Keep
+	// accepting the legacy relative *-reset-after-seconds form so older
+	// upstreams and restored accounts remain compatible.
+	parseResetAfter := func(resetAtKey, legacyResetAfterKey string) *int {
+		if raw := strings.TrimSpace(headers.Get(resetAtKey)); raw != "" {
+			if epoch, err := strconv.ParseInt(raw, 10, 64); err == nil {
+				seconds := int64(math.Ceil(time.Unix(epoch, 0).Sub(observedAt).Seconds()))
+				if seconds < 0 {
+					seconds = 0
+				}
+				maxInt := int64(^uint(0) >> 1)
+				if seconds > maxInt {
+					seconds = maxInt
+				}
+				value := int(seconds)
+				return &value
+			}
+		}
+		return parseInt(legacyResetAfterKey)
+	}
+
 	// Primary (weekly) limits
 	if v := parseFloat("x-codex-primary-used-percent"); v != nil {
 		snapshot.PrimaryUsedPercent = v
 		hasData = true
 	}
-	if v := parseInt("x-codex-primary-reset-after-seconds"); v != nil {
+	if v := parseResetAfter("x-codex-primary-reset-at", "x-codex-primary-reset-after-seconds"); v != nil {
 		snapshot.PrimaryResetAfterSeconds = v
 		hasData = true
 	}
@@ -697,7 +723,7 @@ func ParseCodexRateLimitHeaders(headers http.Header) *OpenAICodexUsageSnapshot {
 		snapshot.SecondaryUsedPercent = v
 		hasData = true
 	}
-	if v := parseInt("x-codex-secondary-reset-after-seconds"); v != nil {
+	if v := parseResetAfter("x-codex-secondary-reset-at", "x-codex-secondary-reset-after-seconds"); v != nil {
 		snapshot.SecondaryResetAfterSeconds = v
 		hasData = true
 	}
@@ -716,7 +742,7 @@ func ParseCodexRateLimitHeaders(headers http.Header) *OpenAICodexUsageSnapshot {
 		return nil
 	}
 
-	snapshot.UpdatedAt = time.Now().Format(time.RFC3339)
+	snapshot.UpdatedAt = observedAt.Format(time.RFC3339)
 	return snapshot
 }
 

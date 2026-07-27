@@ -20,6 +20,7 @@ import (
 )
 
 const (
+	openAIOfficialSessionIDHeader = "session-id"
 	openCodeSessionAffinityHeader = "X-Session-Affinity"
 	openCodeSessionIDHeader       = "X-Session-Id"
 	openCodeNativeSessionHeader   = "X-OpenCode-Session"
@@ -27,6 +28,7 @@ const (
 )
 
 var explicitOpenAIHeaderSessionNames = []string{
+	openAIOfficialSessionIDHeader,
 	"session_id",
 	"conversation_id",
 	openCodeSessionAffinityHeader,
@@ -106,13 +108,14 @@ func (s *OpenAIGatewayService) GenerateExplicitSessionHash(c *gin.Context, body 
 // GenerateSessionHash generates a sticky-session hash for OpenAI requests.
 //
 // Priority:
-//  1. Header: session_id
-//  2. Header: conversation_id
-//  3. Header: x-session-affinity / x-session-id / x-opencode-session (OpenCode)
-//  4. Header: x-conversation-id (CodeBuddy)
-//  5. Header: x-grok-conv-id (Grok groups only)
-//  6. Body:   prompt_cache_key
-//  7. Body:   content-based fallback (model + system + tools + first user message)
+//  1. Header: session-id (official Codex)
+//  2. Header: session_id (legacy compatibility)
+//  3. Header: conversation_id
+//  4. Header: x-session-affinity / x-session-id / x-opencode-session (OpenCode)
+//  5. Header: x-conversation-id (CodeBuddy)
+//  6. Header: x-grok-conv-id (Grok groups only)
+//  7. Body:   prompt_cache_key
+//  8. Body:   content-based fallback (model + system + tools + first user message)
 func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) string {
 	if c == nil {
 		return ""
