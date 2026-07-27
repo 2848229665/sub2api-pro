@@ -247,6 +247,9 @@ Prompt Audit 在现有 Qwen3Guard OpenAI-compatible 节点之外，增加了 Gro
 - 生成适用于 GPT-OSS Safeguard 的 system policy；
 - 使用结构化 JSON Schema 约束模型输出；
 - 解析风险分类、动作、理由和各 scanner 结果；
+- 启用 `openai/gpt-oss-safeguard-20b` 时，整个优先级审计池会审计 `system`、
+  `developer`、`assistant`、`user` 的文本；仅 tool 输出、图片块和文件块不会进入
+  扫描请求或该次审计事件；
 - 审计记录包含 scanner backend、版本、endpoint、policy/config version 和证据元数据；
 - 管理端可选择 Qwen3Guard 或 Groq Safeguard，并显示相应默认值与说明；
 - 对外请求继续经过 Prompt Audit 的出站 URL 与安全校验。

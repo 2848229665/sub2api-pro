@@ -1,7 +1,7 @@
 export default {
   promptAudit: {
     title: '提示词审计',
-    description: '通过 Qwen3Guard 或 Groq GPT-OSS Safeguard 节点异步复核或同步阻止用户输入；事件的完整提示词会入库保存，仅供管理员复核。',
+    description: '通过 Qwen3Guard 或 Groq GPT-OSS Safeguard 节点异步复核或同步阻止提示词；GPT-OSS Safeguard 会接收 system、developer、assistant、user 的文本，仅忽略工具输出、图片和文件。事件的完整提示词会入库保存，仅供管理员复核。',
     configVersion: '配置版本 v{version}',
     tabs: { config: '配置', events: '事件' },
     actions: { refresh: '刷新运行态', retry: '重试', Allow: '放行', Warn: '警告', Block: '阻止' },

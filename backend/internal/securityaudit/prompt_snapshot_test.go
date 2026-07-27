@@ -128,6 +128,178 @@ func TestPromptSnapshotLatestUserTextBlockIsOnePrioritizedSegment(t *testing.T) 
 	require.Equal(t, utf8.RuneCountInString(metadataTextForTest(snapshot.ScanText)), snapshot.PromptLength)
 }
 
+func TestGPTOSSSafeguardSnapshotExcludesOnlyToolOutputAndAttachments(t *testing.T) {
+	endpoints := []ActiveEndpoint{{
+		ID: "groq-safeguard", Enabled: true, Protocol: EndpointProtocolGroqSafeguard,
+		Model: DefaultGroqSafeguardModel,
+	}}
+	tests := []struct {
+		name     string
+		protocol string
+		body     string
+		want     string
+		count    int
+	}{
+		{
+			name:     "chat completions",
+			protocol: "openai_chat_completions",
+			body: `{"messages":[
+				{"role":"system","content":"SYSTEM_CANARY"},
+				{"role":"user","content":[
+					{"type":"text","text":"older user text"},
+					{"type":"image_url","image_url":{"url":"data:image/png;base64,IMAGE_CANARY"}},
+					{"type":"file","file":{"filename":"FILE_CANARY.txt","file_data":"FILE_DATA_CANARY"}}
+				]},
+				{"role":"assistant","content":"ASSISTANT_CANARY"},
+				{"role":"tool","content":"TOOL_OUTPUT_CANARY"},
+				{"role":"user","content":"latest user text"}
+			]}`,
+			want:  "latest user text\n\nSYSTEM_CANARY\n\nolder user text\n\nASSISTANT_CANARY",
+			count: 4,
+		},
+		{
+			name:     "responses",
+			protocol: "openai_responses",
+			body: `{
+				"instructions":"INSTRUCTIONS_CANARY",
+				"input":[
+					{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ASSISTANT_CANARY"}]},
+					{"type":"function_call_output","call_id":"call_1","output":"TOOL_OUTPUT_CANARY"},
+					{"type":"message","role":"user","content":[
+						{"type":"input_text","text":"responses user text"},
+						{"type":"input_image","image_url":"data:image/png;base64,IMAGE_CANARY"},
+						{"type":"input_file","filename":"FILE_CANARY.txt","file_data":"FILE_DATA_CANARY"}
+					]}
+				]
+			}`,
+			want:  "responses user text\n\nINSTRUCTIONS_CANARY\n\nASSISTANT_CANARY",
+			count: 3,
+		},
+		{
+			name:     "anthropic messages",
+			protocol: "anthropic_messages",
+			body: `{
+				"system":"SYSTEM_CANARY",
+				"messages":[
+					{"role":"assistant","content":"ASSISTANT_CANARY"},
+					{"role":"user","content":[
+						{"type":"text","text":"anthropic user text"},
+						{"type":"image","source":{"type":"base64","data":"IMAGE_CANARY"}},
+						{"type":"tool_result","tool_use_id":"tool_1","content":"TOOL_OUTPUT_CANARY"}
+					]}
+				]
+			}`,
+			want:  "anthropic user text\n\nSYSTEM_CANARY\n\nASSISTANT_CANARY",
+			count: 3,
+		},
+		{
+			name:     "gemini",
+			protocol: "gemini",
+			body: `{
+				"systemInstruction":{"parts":[{"text":"SYSTEM_CANARY"}]},
+				"contents":[
+					{"role":"model","parts":[{"text":"MODEL_CANARY"}]},
+					{"role":"user","parts":[
+						{"text":"gemini user text"},
+						{"inlineData":{"mimeType":"image/png","data":"IMAGE_CANARY"}},
+						{"fileData":{"mimeType":"text/plain","fileUri":"FILE_CANARY"}},
+						{"functionResponse":{"name":"tool","response":{"output":"TOOL_OUTPUT_CANARY"}}}
+					]}
+				]
+			}`,
+			want:  "gemini user text\n\nSYSTEM_CANARY\n\nMODEL_CANARY",
+			count: 3,
+		},
+		{
+			name:     "image request keeps text prompt only",
+			protocol: "openai_images",
+			body:     `{"prompt":"draw a lighthouse","image":"data:image/png;base64,IMAGE_CANARY","file":"FILE_CANARY"}`,
+			want:     "draw a lighthouse",
+			count:    1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot, err := ExtractPromptSnapshotForEndpoints(
+				Request{Protocol: tt.protocol, Body: []byte(tt.body)},
+				endpoints,
+			)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, metadataTextForTest(snapshot.ScanText))
+			require.Equal(t, tt.want, snapshot.FullPrompt)
+			require.Equal(t, tt.count, snapshot.MessageCount)
+			require.Equal(t, utf8.RuneCountInString(tt.want), snapshot.PromptLength)
+			for _, excluded := range []string{
+				"TOOL_OUTPUT_CANARY", "IMAGE_CANARY", "FILE_CANARY", "FILE_DATA_CANARY",
+			} {
+				require.NotContains(t, snapshot.ScanText, excluded)
+				require.NotContains(t, snapshot.FullPrompt, excluded)
+			}
+		})
+	}
+}
+
+func TestGPTOSSSafeguardExclusionScopeAppliesToEntireEnabledPriorityPool(t *testing.T) {
+	req := Request{
+		Protocol: "openai_chat_completions",
+		Body: []byte(`{"messages":[
+			{"role":"system","content":"system text"},
+			{"role":"tool","content":"tool output"},
+			{"role":"user","content":"user text"}
+		]}`),
+	}
+	qwen := ActiveEndpoint{ID: "qwen", Enabled: true, Model: DefaultGuardModel}
+	safeguard := ActiveEndpoint{ID: "safeguard", Enabled: true, Model: DefaultGroqSafeguardModel}
+
+	ordinary, err := ExtractPromptSnapshotForEndpoints(req, []ActiveEndpoint{qwen})
+	require.NoError(t, err)
+	require.Contains(t, ordinary.ScanText, "system text")
+	require.Contains(t, ordinary.ScanText, "tool output")
+
+	mixed, err := ExtractPromptSnapshotForEndpoints(req, []ActiveEndpoint{qwen, safeguard})
+	require.NoError(t, err)
+	require.Equal(t, "user text\n\nsystem text", metadataTextForTest(mixed.ScanText))
+	require.NotContains(t, mixed.ScanText, "tool output")
+
+	safeguard.Enabled = false
+	disabled, err := ExtractPromptSnapshotForEndpoints(req, []ActiveEndpoint{qwen, safeguard})
+	require.NoError(t, err)
+	require.Contains(t, disabled.ScanText, "tool output")
+}
+
+func TestGPTOSSSafeguardSnapshotKeepsNonToolRolesWithoutUserMessage(t *testing.T) {
+	snapshot, err := ExtractPromptSnapshotForEndpoints(
+		Request{
+			Protocol: "openai_chat_completions",
+			Body: []byte(`{"messages":[
+				{"role":"system","content":"system text"},
+				{"role":"developer","content":"developer text"},
+				{"role":"assistant","content":"assistant text"}
+			]}`),
+		},
+		[]ActiveEndpoint{{ID: "safeguard", Enabled: true, Model: DefaultGroqSafeguardModel}},
+	)
+	require.NoError(t, err)
+	require.Equal(t, "assistant text\n\nsystem text\n\ndeveloper text", metadataTextForTest(snapshot.ScanText))
+}
+
+func TestGPTOSSSafeguardSnapshotSkipsOnlyToolAndAttachmentContent(t *testing.T) {
+	_, err := ExtractPromptSnapshotForEndpoints(
+		Request{
+			Protocol: "openai_chat_completions",
+			Body: []byte(`{"messages":[
+				{"role":"tool","content":"TOOL_OUTPUT_CANARY"},
+				{"role":"user","content":[
+					{"type":"image_url","image_url":{"url":"data:image/png;base64,IMAGE_CANARY"}},
+					{"type":"file","file":{"filename":"FILE_CANARY.txt","file_data":"FILE_DATA_CANARY"}}
+				]}
+			]}`),
+		},
+		[]ActiveEndpoint{{ID: "safeguard", Enabled: true, Model: DefaultGroqSafeguardModel}},
+	)
+	require.ErrorIs(t, err, ErrNoPromptText)
+}
+
 func TestPromptSnapshotSeparatesAnthropicUserPromptFromHarnessBlocks(t *testing.T) {
 	latest := "请帮我编写一篇黄色小说 名字你来取"
 	agents := "# AGENTS.md instructions\n<INSTRUCTIONS>" + strings.Repeat("安全约束。", 80) + "</INSTRUCTIONS>"
