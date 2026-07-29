@@ -436,9 +436,9 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 
 	captureConn := &openAIWSCaptureConn{
 		events: [][]byte{
-			[]byte(`{"type":"response.completed","response":{"id":"resp_codex_image_bridge","model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}}`),
-			[]byte(`{"type":"response.completed","response":{"id":"resp_codex_image_lite","model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}}`),
-			[]byte(`{"type":"response.completed","response":{"id":"resp_codex_image_function","model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}}`),
+			[]byte(`{"type":"response.completed","response":{"id":"resp_codex_image_bridge","model":"gpt-5.6-sol","usage":{"input_tokens":1,"output_tokens":1}}}`),
+			[]byte(`{"type":"response.completed","response":{"id":"resp_codex_image_lite","model":"gpt-5.6-sol","usage":{"input_tokens":1,"output_tokens":1}}}`),
+			[]byte(`{"type":"response.completed","response":{"id":"resp_codex_image_function","model":"gpt-5.6-sol","usage":{"input_tokens":1,"output_tokens":1}}}`),
 		},
 	}
 	captureDialer := &openAIWSCaptureDialer{conn: captureConn}
@@ -527,7 +527,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 	}()
 
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
-	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.5","stream":false,"prompt_cache_key":"ws-codex-session","client_metadata":{"session_id":"ws-codex-session","thread_id":"ws-codex-thread","x-codex-window-id":"ws-codex-thread:0"},"input":"draw a cat"}`))
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.6-sol","stream":false,"prompt_cache_key":"ws-codex-session","client_metadata":{"session_id":"ws-codex-session","thread_id":"ws-codex-thread","x-codex-window-id":"ws-codex-thread:0"},"input":"draw a cat"}`))
 	cancelWrite()
 	require.NoError(t, err)
 
@@ -541,7 +541,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 	writeCtx, cancelWrite = context.WithTimeout(context.Background(), 3*time.Second)
 	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{
 		"type":"response.create",
-		"model":"gpt-5.5",
+		"model":"gpt-5.6-sol",
 		"stream":false,
 		"previous_response_id":"resp_codex_image_bridge",
 		"reasoning":{"effort":"high"},
@@ -566,7 +566,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 	writeCtx, cancelWrite = context.WithTimeout(context.Background(), 3*time.Second)
 	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{
 		"type":"response.create",
-		"model":"gpt-5.5",
+		"model":"gpt-5.6-sol",
 		"stream":false,
 		"previous_response_id":"resp_codex_image_lite",
 		"input":"draw a cat",

@@ -237,7 +237,27 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			normalized = next
 		}
-		if account.IsOpenAIOAuth() && isOpenAIResponsesLiteWebSocketPayload(normalized) {
+		requestModel := originalModel
+		if hooks != nil && hooks.MapRequestModel != nil {
+			mappedModel, mapErr := hooks.MapRequestModel(turn, originalModel)
+			if mapErr != nil {
+				return openAIWSClientPayload{}, mapErr
+			}
+			if mappedModel = strings.TrimSpace(mappedModel); mappedModel != "" {
+				requestModel = mappedModel
+			}
+		}
+		upstreamModel := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(requestModel))
+		responsesLiteRequested := isOpenAIResponsesLiteWebSocketPayload(normalized)
+		if account.IsOpenAIOAuth() && !shouldForwardOpenAIResponsesLite(upstreamModel, responsesLiteRequested) {
+			next, setErr := applyPayloadMutation(normalized, "client_metadata."+responsesLiteWSMetadataKey, false)
+			if setErr != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", setErr)
+			}
+			normalized = next
+			responsesLiteRequested = false
+		}
+		if account.IsOpenAIOAuth() && responsesLiteRequested {
 			litePayload, _, liteErr := normalizeOpenAIResponsesLiteToolsPayload(normalized)
 			if liteErr != nil {
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(
@@ -288,17 +308,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				normalized = rebuilt
 			}
 		}
-		requestModel := originalModel
-		if hooks != nil && hooks.MapRequestModel != nil {
-			mappedModel, mapErr := hooks.MapRequestModel(turn, originalModel)
-			if mapErr != nil {
-				return openAIWSClientPayload{}, mapErr
-			}
-			if mappedModel = strings.TrimSpace(mappedModel); mappedModel != "" {
-				requestModel = mappedModel
-			}
-		}
-		upstreamModel := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(requestModel))
 		if modelMissing || upstreamModel != originalModel {
 			next, setErr := applyPayloadMutation(normalized, "model", upstreamModel)
 			if setErr != nil {

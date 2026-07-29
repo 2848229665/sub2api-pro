@@ -19,6 +19,22 @@ func isOpenAIResponsesLiteHeader(value string) bool {
 	return strings.EqualFold(strings.TrimSpace(value), "true")
 }
 
+var openAIResponsesLiteSupportedModels = map[string]struct{}{
+	"gpt-5.6-sol":   {},
+	"gpt-5.6-terra": {},
+	"gpt-5.6-luna":  {},
+}
+
+// shouldForwardOpenAIResponsesLite applies the model capability advertised by
+// the ChatGPT Codex manifest even when a stale client keeps requesting Lite.
+func shouldForwardOpenAIResponsesLite(model string, requested bool) bool {
+	if !requested {
+		return false
+	}
+	_, supported := openAIResponsesLiteSupportedModels[strings.ToLower(strings.TrimSpace(model))]
+	return supported
+}
+
 func isOpenAIResponsesLiteWebSocketPayload(body []byte) bool {
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return false
