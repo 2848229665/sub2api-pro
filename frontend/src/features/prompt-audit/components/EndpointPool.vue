@@ -122,7 +122,7 @@
               class="input w-full font-mono text-sm"
               type="password"
               autocomplete="new-password"
-              :placeholder="editing.has_token ? t('admin.promptAudit.pool.keepSecret') : isGroqSafeguard ? 'gsk_...' : ''"
+              :placeholder="credentialInvalid(editing) ? t('admin.promptAudit.pool.reenterSecret') : editing.has_token ? t('admin.promptAudit.pool.keepSecret') : isGroqSafeguard ? 'gsk_...' : ''"
               :aria-label="t('admin.promptAudit.pool.apiKey')"
             />
           </label>
@@ -423,7 +423,8 @@ function validURL(value: string): boolean {
 }
 
 function hasCredential(endpoint: PromptAuditEndpointDraft): boolean {
-  return Boolean(endpoint.token.trim() || (endpoint.has_token && !endpoint.clear_token))
+  if (endpoint.token.trim()) return true
+  return Boolean(endpoint.has_token && !endpoint.clear_token && !credentialInvalid(endpoint))
 }
 
 function canProbe(endpoint: PromptAuditEndpointDraft): boolean {
@@ -445,6 +446,7 @@ function endpointLimitSummary(endpoint: PromptAuditEndpointDraft): string {
 }
 
 function credentialLabel(endpoint: PromptAuditEndpointDraft): string {
+  if (credentialInvalid(endpoint)) return t('admin.promptAudit.pool.invalid')
   if (hasCredential(endpoint)) return t('admin.promptAudit.pool.configured')
   return endpoint.protocol === 'groq_safeguard'
     ? t('admin.promptAudit.pool.credentialRequired')
@@ -452,6 +454,7 @@ function credentialLabel(endpoint: PromptAuditEndpointDraft): string {
 }
 
 function credentialClass(endpoint: PromptAuditEndpointDraft): string {
+  if (credentialInvalid(endpoint)) return 'text-red-600 dark:text-red-300'
   if (hasCredential(endpoint)) return 'text-emerald-700 dark:text-emerald-300'
   return endpoint.protocol === 'groq_safeguard'
     ? 'text-red-600 dark:text-red-300'
@@ -459,7 +462,12 @@ function credentialClass(endpoint: PromptAuditEndpointDraft): string {
 }
 
 function credentialDotClass(endpoint: PromptAuditEndpointDraft): string {
+  if (credentialInvalid(endpoint)) return 'bg-red-500'
   if (hasCredential(endpoint)) return 'bg-emerald-500'
   return endpoint.protocol === 'groq_safeguard' ? 'bg-red-500' : 'bg-gray-300 dark:bg-dark-500'
+}
+
+function credentialInvalid(endpoint: PromptAuditEndpointDraft): boolean {
+  return endpoint.token_status === 'invalid' && !endpoint.token.trim() && !endpoint.clear_token
 }
 </script>

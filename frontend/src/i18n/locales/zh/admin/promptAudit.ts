@@ -108,9 +108,9 @@ export default {
     pool: {
       title: '审计池', description: '按顺序使用启用的审计节点；探测由服务端真实网络环境发起，Groq Safeguard 探测会验证一次结构化模型调用。',
       add: '新增节点', edit: '编辑节点', empty: '尚未配置审计节点', emptyHint: '新增 Qwen3Guard 或 Groq GPT-OSS Safeguard 节点后才能启用审计。', editorHint: '先选择模型服务，再配置连接与凭据。节点保存到当前草稿，提交整个配置后才会生效。', enabled: '启用此节点', unnamedNode: '未命名节点', node: '节点', model: '模型', limits: '超时 / 输入预算', credential: '凭据与探测',
-      configured: 'API Key 已配置', missing: '未配置 API Key', probe: '连接测试', probing: '探测中…',
+      configured: 'API Key 已配置', missing: '未配置 API Key', invalid: 'API Key 无法解密，请重新输入', probe: '连接测试', probing: '探测中…',
       probeProgress: '配置校验 ✓ · 请求已发送 · 等待服务响应…', probeResult: '配置校验 ✓ · 请求 ✓ · HTTP {http} · {status} · {latency} ms',
-      name: '节点名称', id: '稳定节点 ID', protocol: '审计模型类型', baseUrl: 'Base URL', apiKey: 'API Key', keepSecret: '留空以保留已保存的 API Key',
+      name: '节点名称', id: '稳定节点 ID', protocol: '审计模型类型', baseUrl: 'Base URL', apiKey: 'API Key', keepSecret: '留空以保留已保存的 API Key', reenterSecret: '已保存的 API Key 无法解密（加密密钥已变更），请重新输入',
       protocols: { openai_compatible: 'Qwen3Guard · OpenAI 兼容', groq_safeguard: 'GPT-OSS Safeguard 20B · Groq API' },
       protocolDescriptions: {
         openai_compatible: '适用于自托管 Qwen3Guard 或返回 Qwen3Guard 两行判定格式的兼容服务。',
@@ -199,6 +199,7 @@ export default {
     errors: {
       loadConfig: '无法加载提示词审计配置。', loadRuntime: '无法加载提示词审计运行态。', loadGroups: '无法加载分组列表。', loadEvents: '无法加载审计事件。', loadDetail: '无法加载事件详情。', saveConfig: '配置保存失败。', probe: '节点探测失败。', previewPolicy: '无法生成审核策略预览。', delete: '事件删除失败。', previewDelete: '无法生成删除预览，请检查时间范围。', deleteConfirmation: '删除确认无效或已过期，请重新预览。',
       prompt_audit_config_conflict: '配置已被其他管理员更新。请重新加载服务端配置，再决定如何合并本地草稿。',
+      prompt_audit_encryption_key_required: '未配置固定加密密钥，审计节点 API Key 将在服务重启后失效。请先设置 TOTP_ENCRYPTION_KEY 环境变量并重启服务。',
       prompt_guard_requires_audit_enabled: '开启同步阻止前必须先启用提示词审计。', prompt_audit_invalid_endpoint: '审计节点配置无效。', prompt_audit_endpoint_required: '启用审计前至少需要一个启用节点。', prompt_audit_groups_required: '指定分组模式至少需要选择一个分组。', prompt_audit_scanners_required: '至少需要启用一个风险分类。', prompt_audit_invalid_safeguard_policy: 'Groq Safeguard 审核策略长度或内容无效。', prompt_audit_invalid_tpm_limit: 'Groq 审计节点 TPM 上限无效。',
     },
   },
