@@ -215,8 +215,15 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if err != nil {
 		return nil, err
 	}
-	if account.Platform != PlatformGrok && isOpenAIResponsesLiteWebSocketPayload(payload) {
+	responsesLiteRequested := isOpenAIResponsesLiteWebSocketPayload(payload)
+	responsesLiteModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	if responsesLiteModel == "" {
+		responsesLiteModel = strings.TrimSpace(originalModel)
+	}
+	if account.Platform != PlatformGrok && shouldForwardOpenAIResponsesLite(responsesLiteModel, responsesLiteRequested) {
 		upstreamReq.Header.Set(responsesLiteHeader, "true")
+	} else if account.Platform != PlatformGrok {
+		upstreamReq.Header.Del(responsesLiteHeader)
 	}
 
 	proxyURL := ""

@@ -17,6 +17,16 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func TestShouldForwardOpenAIResponsesLiteUsesExplicitCapabilityAllowlist(t *testing.T) {
+	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+		require.True(t, shouldForwardOpenAIResponsesLite(model, true), model)
+	}
+	for _, model := range []string{"gpt-5.5", "gpt-5.4-mini", "future-model", ""} {
+		require.False(t, shouldForwardOpenAIResponsesLite(model, true), model)
+	}
+	require.False(t, shouldForwardOpenAIResponsesLite("gpt-5.6-sol", false))
+}
+
 func TestNormalizeOpenAIResponsesLiteTools_MovesNamespacesAndKeepsSupportedTools(t *testing.T) {
 	reqBody := map[string]any{
 		"model": "gpt-5.6-terra",
@@ -308,4 +318,92 @@ func TestOpenAIGatewayServiceForward_NormalizesResponsesLiteToolsForOAuth(t *tes
 			require.Equal(t, "collaboration", gjson.GetBytes(upstream.lastBody, "tool_choice.name").String())
 		})
 	}
+}
+
+func TestOpenAIGatewayServiceForward_StripsResponsesLiteForUnsupportedModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("User-Agent", "Codex Desktop/0.146.0-alpha.3.1")
+	c.Request.Header.Set(responsesLiteHeader, "true")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_full\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n" +
+				"data: [DONE]\n\n",
+		)),
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID: 502, Name: "responses-full", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Concurrency: 1, Status: StatusActive, Schedulable: true, RateMultiplier: f64p(1),
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"},
+	}
+	body := []byte(`{"model":"gpt-5.5","stream":true,"instructions":"test","input":"hello"}`)
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Empty(t, upstream.lastReq.Header.Get(responsesLiteHeader))
+	require.Equal(t, "true", c.GetHeader(responsesLiteHeader), "attempt-local guard must restore the client header")
+}
+
+func TestOpenAIGatewayServiceForward_ResponsesLiteDecisionIsIsolatedAcrossMappedAccountAttempts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("User-Agent", "Codex Desktop/0.146.0-alpha.3.1")
+	c.Request.Header.Set(responsesLiteHeader, "true")
+	body := []byte(`{"model":"public-alias","stream":true,"instructions":"test","input":"hello"}`)
+
+	unsupportedUpstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"unsupported"}}`)),
+	}}
+	unsupportedService := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: unsupportedUpstream}
+	unsupportedAccount := &Account{
+		ID: 503, Name: "unsupported", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Concurrency: 1, Status: StatusActive, Schedulable: true, RateMultiplier: f64p(1),
+		Credentials: map[string]any{
+			"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account",
+			"model_mapping": map[string]any{"public-alias": "gpt-5.5"},
+		},
+	}
+
+	_, firstErr := unsupportedService.Forward(context.Background(), c, unsupportedAccount, body)
+
+	require.Error(t, firstErr)
+	require.Empty(t, unsupportedUpstream.lastReq.Header.Get(responsesLiteHeader))
+	require.Equal(t, "true", c.GetHeader(responsesLiteHeader))
+
+	supportedUpstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_lite\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n" +
+				"data: [DONE]\n\n",
+		)),
+	}}
+	supportedService := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: supportedUpstream}
+	supportedAccount := &Account{
+		ID: 504, Name: "supported", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Concurrency: 1, Status: StatusActive, Schedulable: true, RateMultiplier: f64p(1),
+		Credentials: map[string]any{
+			"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account",
+			"model_mapping": map[string]any{"public-alias": "gpt-5.6-sol"},
+		},
+	}
+
+	result, secondErr := supportedService.Forward(context.Background(), c, supportedAccount, body)
+
+	require.NoError(t, secondErr)
+	require.NotNil(t, result)
+	require.Equal(t, "true", supportedUpstream.lastReq.Header.Get(responsesLiteHeader))
 }

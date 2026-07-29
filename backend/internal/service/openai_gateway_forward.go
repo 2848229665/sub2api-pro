@@ -45,7 +45,23 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if normalized {
 		body = normalizedBody
 	}
-	if account.IsOpenAIOAuth() && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) {
+	responsesLiteRequested := isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader))
+	responsesLiteModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	if account.IsOpenAIOAuth() {
+		responsesLiteModel = normalizeOpenAIModelForUpstream(account, account.GetMappedModel(responsesLiteModel))
+		if !shouldForwardOpenAIResponsesLite(responsesLiteModel, responsesLiteRequested) {
+			originalResponsesLiteHeaders := append([]string(nil), c.Request.Header.Values(responsesLiteHeader)...)
+			c.Request.Header.Del(responsesLiteHeader)
+			defer func() {
+				c.Request.Header.Del(responsesLiteHeader)
+				for _, value := range originalResponsesLiteHeaders {
+					c.Request.Header.Add(responsesLiteHeader, value)
+				}
+			}()
+			responsesLiteRequested = false
+		}
+	}
+	if account.IsOpenAIOAuth() && responsesLiteRequested {
 		liteBody, changed, liteErr := normalizeOpenAIResponsesLiteToolsPayload(body)
 		if liteErr != nil {
 			setOpsUpstreamError(c, http.StatusBadRequest, liteErr.Error(), "")
