@@ -267,9 +267,10 @@ func (s *OpenAIGatewayService) finalizeLegacyOpenAISelection(
 	}
 	selection = attachOpenAISelectionRequest(selection, req)
 	if !selection.Acquired {
-		return selection, nil
+		return attachSelectionProfitGate(ctx, selection), nil
 	}
-	return s.settleAcquiredOpenAISelection(ctx, req, selection)
+	selection, err := s.settleAcquiredOpenAISelection(ctx, req, selection)
+	return attachSelectionProfitGate(ctx, selection), err
 }
 
 func markOpenAISelectionForStickyConvergence(selection *AccountSelectionResult) *AccountSelectionResult {

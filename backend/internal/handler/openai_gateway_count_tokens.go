@@ -143,6 +143,9 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	}
 
 	requestStart := time.Now()
+	// count_tokens 不计费：显式豁免利润门，避免高倍率账号池被门排除后连
+	// token 计数都返回 no available accounts。
+	c.Request = c.Request.WithContext(service.WithOpenAIProfitControlSuppressed(c.Request.Context()))
 	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
 	currentRoutingModel := routingModel
 	if preferredMappedModel != "" {
@@ -186,7 +189,7 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	account := selection.Account
 	setOpsSelectedAccount(c, account.ID, account.Platform)
 	streamStarted := false
-	accountReleaseFunc, acquired, _ := h.acquireResponsesAccountSlot(
+	accountReleaseFunc, slotResult, _ := h.acquireResponsesAccountSlot(
 		c,
 		apiKey.GroupID,
 		sessionHash,
@@ -196,7 +199,12 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 		&streamStarted,
 		reqLog,
 	)
-	if !acquired {
+	if slotResult == openAISlotAcquireProfitVetoed {
+		markOpsRoutingCapacityLimited(c)
+		h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts")
+		return
+	}
+	if slotResult != openAISlotAcquireOK {
 		return
 	}
 	account = selection.Account

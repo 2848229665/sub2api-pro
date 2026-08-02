@@ -14,6 +14,7 @@ export default {
       enabledHint: 'Audit requests in the configured group scope.',
       blocking: 'Synchronous blocking',
       blockingHint: 'Wait for the model decision before allowing upstream access.',
+      blockingLatestTurnOnlyHint: 'For synchronous blocking, scan only the latest user input and the preceding assistant output. Asynchronous audit still retains the full conversation.',
       storePass: 'Store safe events',
       storePassHint: 'Retain non-risk audit results for sampling and review.',
       blockingNotice: 'In synchronous blocking mode, an unavailable model, timeout, or invalid response prevents upstream access. Make sure at least one enabled node passes its connection test.',
@@ -161,7 +162,7 @@ export default {
       queueCapacity: 'Persistent queue capacity', queueCapacityHint: 'Maximum number of jobs waiting for processing, from 1 to 100000.',
       strategy: 'Node strategy', strategyHint: 'Try enabled nodes in configuration order and fail over to the next node when one fails.',
     },
-    saveBar: { enabled: 'Enable prompt audit', blocking: 'Synchronous blocking', storePass: 'Store safe events', dirty: 'Unsaved changes', synced: 'Configuration synced' },
+    saveBar: { enabled: 'Enable prompt audit', blocking: 'Synchronous blocking', blockingLatestTurnOnly: 'Only latest input and prior output', storePass: 'Store safe events', dirty: 'Unsaved changes', synced: 'Configuration synced' },
     blockingConfirm: {
       title: 'Enable synchronous blocking?',
       message: 'Applicable requests wait for Guard before account selection, billing, or upstream access. Block, unavailable Guard, and invalid responses all prevent upstream access.',

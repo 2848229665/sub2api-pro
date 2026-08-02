@@ -370,6 +370,11 @@ func isOpenAICompatibleAccountEligibleForRequest(ctx context.Context, account *A
 	if requireCompact && openAICompactSupportTier(account) == 0 {
 		return false
 	}
+	// 分组利润控制：legacy 引擎的粘性/候选循环与 DB recheck 共用
+	// 本判定，任何 fallback 都不能把利润不合格账号重新放回候选。
+	if vetoed, _ := openAIProfitControlVetoReason(ctx, account); vetoed {
+		return false
+	}
 	return true
 }
 
@@ -915,6 +920,9 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 		}()
 	}
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
+	// Legacy callers that do not enter through selectAccountWithScheduler must
+	// still use the same profit-admission gate as the regular text paths.
+	ctx = s.withOpenAIProfitControlGate(ctx, groupID)
 	requirePrivacySet, err := s.resolveOpenAISchedulingRequirePrivacySet(ctx, groupID)
 	if err != nil {
 		return nil, err
@@ -1533,12 +1541,12 @@ func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *
 	if err != nil {
 		return nil, err
 	}
-	return &AccountSelectionResult{
+	return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 		Account:     hydrated,
 		Acquired:    acquired,
 		ReleaseFunc: release,
 		WaitPlan:    waitPlan,
-	}, nil
+	}), nil
 }
 
 func (s *OpenAIGatewayService) newAcquiredSelectionResult(ctx context.Context, account *Account, release func()) (*AccountSelectionResult, error) {

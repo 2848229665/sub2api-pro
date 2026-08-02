@@ -14,6 +14,7 @@ export default {
       enabledHint: '对适用分组的请求执行已配置的提示词审核。',
       blocking: '同步阻止',
       blockingHint: '等待模型判定后再决定请求是否进入上游。',
+      blockingLatestTurnOnlyHint: '同步阻止仅审核最新用户输入及上一轮模型输出；异步审计仍保留完整会话。',
       storePass: '保存安全事件',
       storePassHint: '同时保存未命中风险的审核记录，便于抽样复核。',
       blockingNotice: '同步阻止模式下，模型不可用、超时或返回格式非法都会阻止请求进入上游。请确保至少一个启用节点已通过连接测试。',
@@ -161,7 +162,7 @@ export default {
       queueCapacity: '持久队列容量', queueCapacityHint: '等待处理的最大任务数量，范围 1–100000。',
       strategy: '节点策略', strategyHint: '按配置顺序优先尝试启用节点；当前节点失败时依次故障切换。',
     },
-    saveBar: { enabled: '启用提示词审计', blocking: '同步阻止', storePass: '保存安全事件', dirty: '有未保存的更改', synced: '配置已同步' },
+    saveBar: { enabled: '启用提示词审计', blocking: '同步阻止', blockingLatestTurnOnly: '仅审最新输入和上一轮输出', storePass: '保存安全事件', dirty: '有未保存的更改', synced: '配置已同步' },
     blockingConfirm: {
       title: '开启同步阻止？',
       message: '适用请求会在账号选择、计费和访问上游之前等待 Guard。命中 Block、Guard 不可用或响应非法时，请求都不会访问上游。',

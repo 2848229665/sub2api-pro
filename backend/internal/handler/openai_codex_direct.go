@@ -135,6 +135,7 @@ func (h *OpenAIGatewayHandler) CodexMemories(c *gin.Context) {
 	var lastFailoverErr *service.UpstreamFailoverError
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 	switchCount := 0
+	profitVetoCount := 0
 	routingStart := time.Now()
 
 	for {
@@ -181,7 +182,7 @@ func (h *OpenAIGatewayHandler) CodexMemories(c *gin.Context) {
 		account := selection.Account
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		setOpsSelectedAccount(c, account.ID, account.Platform)
-		accountRelease, acquired, resolvedSessionHash := h.acquireResponsesAccountSlot(
+		accountRelease, slotResult, resolvedSessionHash := h.acquireResponsesAccountSlot(
 			c,
 			apiKey.GroupID,
 			sessionHash,
@@ -192,7 +193,14 @@ func (h *OpenAIGatewayHandler) CodexMemories(c *gin.Context) {
 			reqLog,
 		)
 		sessionHash = resolvedSessionHash
-		if !acquired {
+		if slotResult == openAISlotAcquireProfitVetoed {
+			if !recordOpenAIProfitVeto(failedAccountIDs, account.ID, &profitVetoCount) {
+				h.handleOpenAIProfitVetoExhausted(c, streamStarted, reqLog, profitVetoCount)
+				return
+			}
+			continue
+		}
+		if slotResult != openAISlotAcquireOK {
 			return
 		}
 		account = selection.Account

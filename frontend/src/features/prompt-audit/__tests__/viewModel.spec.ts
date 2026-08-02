@@ -16,6 +16,7 @@ import {
 const config = (): PromptAuditConfig => ({
   enabled: true,
   blocking_enabled: false,
+  blocking_latest_turn_only: false,
   store_pass_events: false,
   groq_safeguard_policy: 'Default safeguard classification policy with enough detail for validation.',
   groq_safeguard_default_policy: 'Default safeguard classification policy with enough detail for validation.',
@@ -87,6 +88,12 @@ describe('Prompt Audit view model', () => {
       model: DEFAULT_GROQ_SAFEGUARD_MODEL,
       tpm_limit: DEFAULT_GROQ_TPM_LIMIT,
     })
+  })
+
+  it('includes the optional narrow blocking scope in the update payload', () => {
+    const draft = configToDraft(config())
+    draft.blocking_latest_turn_only = true
+    expect(buildUpdateRequest(draft)).toMatchObject({ blocking_latest_turn_only: true })
   })
 
   it('tracks dirty state from the full normalized save payload', () => {

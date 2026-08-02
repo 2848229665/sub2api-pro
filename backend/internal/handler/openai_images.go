@@ -148,6 +148,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
+	profitVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
@@ -232,9 +233,17 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		reqLog.Debug("openai.images.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, acquired, resolvedSessionHash := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, true, parsed.Stream, &streamStarted, reqLog)
+		accountReleaseFunc, slotResult, resolvedSessionHash := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, true, parsed.Stream, &streamStarted, reqLog)
 		sessionHash = resolvedSessionHash
-		if !acquired {
+		if slotResult == openAISlotAcquireProfitVetoed {
+			// Images 调度不装利润门，此分支实际不可达；防御性排除重选并受同一否决上限约束。
+			if !recordOpenAIProfitVeto(failedAccountIDs, account.ID, &profitVetoCount) {
+				h.handleOpenAIProfitVetoExhausted(c, streamStarted, reqLog, profitVetoCount)
+				return
+			}
+			continue
+		}
+		if slotResult != openAISlotAcquireOK {
 			return
 		}
 		account = selection.Account

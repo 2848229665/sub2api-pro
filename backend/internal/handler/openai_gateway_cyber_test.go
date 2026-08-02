@@ -135,7 +135,7 @@ func TestRecordCyberPolicyIfMarked_PersistsRequestBeforeReturning(t *testing.T) 
 	settings := &contentModerationHandlerSettingRepo{values: map[string]string{
 		service.SettingKeyRiskControlEnabled: "false",
 	}}
-	moderation := service.NewContentModerationService(settings, repo, nil, nil, nil, nil, nil)
+	moderation := service.NewContentModerationService(settings, repo, nil, nil, nil, nil, nil, nil)
 	h := &OpenAIGatewayHandler{contentModerationService: moderation}
 	body := []byte(`{"model":"gpt-5","input":[{"role":"user","content":"request retained for audit"},{"type":"function_call_output","output":"complete tool output"}],"temperature":1.2300}`)
 
