@@ -683,14 +683,6 @@ func isAssistantOutputSegment(segment promptSegment) bool {
 	return segment.role == "assistant" || segment.role == "model"
 }
 
-func promptSegmentTexts(values []promptSegment) []string {
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		result = append(result, value.text)
-	}
-	return result
-}
-
 func buildPrioritizedScanText(segments []string) (scanText string, metadataText string) {
 	metadataText = strings.Join(segments, "\n\n")
 	if len(segments) <= 1 {
