@@ -41,6 +41,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	}
 	failedAccountIDs := make(map[int64]struct{})
 	switchCount := 0
+	profitVetoCount := 0
 	var lastUpstreamErr error
 
 	for {
@@ -71,7 +72,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 			return
 		}
 		account := selection.Account
-		accountRelease, acquired, _ := h.acquireResponsesAccountSlot(
+		accountRelease, slotResult, _ := h.acquireResponsesAccountSlot(
 			c,
 			apiKey.GroupID,
 			"",
@@ -81,7 +82,14 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 			&streamStarted,
 			reqLog,
 		)
-		if !acquired {
+		if slotResult == openAISlotAcquireProfitVetoed {
+			if !recordOpenAIProfitVeto(failedAccountIDs, account.ID, &profitVetoCount) {
+				h.handleOpenAIProfitVetoExhausted(c, streamStarted, reqLog, profitVetoCount)
+				return
+			}
+			continue
+		}
+		if slotResult != openAISlotAcquireOK {
 			return
 		}
 		account = selection.Account

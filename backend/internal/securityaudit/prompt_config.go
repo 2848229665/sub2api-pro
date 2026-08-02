@@ -70,21 +70,22 @@ type StorageEndpoint struct {
 }
 
 type storageConfig struct {
-	Enabled             bool              `json:"enabled"`
-	BlockingEnabled     bool              `json:"blocking_enabled"`
-	StorePassEvents     bool              `json:"store_pass_events"`
-	GroqSafeguardPolicy string            `json:"groq_safeguard_policy,omitempty"`
-	Strategy            string            `json:"strategy"`
-	WorkerCount         int               `json:"worker_count"`
-	QueueCapacity       int               `json:"queue_capacity"`
-	Scanners            []string          `json:"scanners"`
-	AllGroups           bool              `json:"all_groups"`
-	GroupIDs            []int64           `json:"group_ids"`
-	Endpoints           []StorageEndpoint `json:"endpoints"`
-	ConfigVersion       int64             `json:"config_version"`
-	UpdatedAt           time.Time         `json:"updated_at"`
-	UpdatedBy           int64             `json:"updated_by"`
-	ChangeSummary       string            `json:"change_summary"`
+	Enabled                bool              `json:"enabled"`
+	BlockingEnabled        bool              `json:"blocking_enabled"`
+	BlockingLatestTurnOnly bool              `json:"blocking_latest_turn_only"`
+	StorePassEvents        bool              `json:"store_pass_events"`
+	GroqSafeguardPolicy    string            `json:"groq_safeguard_policy,omitempty"`
+	Strategy               string            `json:"strategy"`
+	WorkerCount            int               `json:"worker_count"`
+	QueueCapacity          int               `json:"queue_capacity"`
+	Scanners               []string          `json:"scanners"`
+	AllGroups              bool              `json:"all_groups"`
+	GroupIDs               []int64           `json:"group_ids"`
+	Endpoints              []StorageEndpoint `json:"endpoints"`
+	ConfigVersion          int64             `json:"config_version"`
+	UpdatedAt              time.Time         `json:"updated_at"`
+	UpdatedBy              int64             `json:"updated_by"`
+	ChangeSummary          string            `json:"change_summary"`
 }
 
 type ActiveEndpoint struct {
@@ -107,22 +108,23 @@ type ActiveEndpoint struct {
 }
 
 type ActiveConfig struct {
-	RiskControlEnabled  bool
-	Enabled             bool
-	BlockingEnabled     bool
-	StorePassEvents     bool
-	GroqSafeguardPolicy string
-	Strategy            string
-	WorkerCount         int
-	QueueCapacity       int
-	Scanners            []string
-	AllGroups           bool
-	GroupIDs            []int64
-	Endpoints           []ActiveEndpoint
-	ConfigVersion       int64
-	UpdatedAt           time.Time
-	UpdatedBy           int64
-	ChangeSummary       string
+	RiskControlEnabled     bool
+	Enabled                bool
+	BlockingEnabled        bool
+	BlockingLatestTurnOnly bool
+	StorePassEvents        bool
+	GroqSafeguardPolicy    string
+	Strategy               string
+	WorkerCount            int
+	QueueCapacity          int
+	Scanners               []string
+	AllGroups              bool
+	GroupIDs               []int64
+	Endpoints              []ActiveEndpoint
+	ConfigVersion          int64
+	UpdatedAt              time.Time
+	UpdatedBy              int64
+	ChangeSummary          string
 }
 
 type PublicEndpoint struct {
@@ -142,6 +144,7 @@ type PublicEndpoint struct {
 type PublicConfig struct {
 	Enabled                    bool             `json:"enabled"`
 	BlockingEnabled            bool             `json:"blocking_enabled"`
+	BlockingLatestTurnOnly     bool             `json:"blocking_latest_turn_only"`
 	StorePassEvents            bool             `json:"store_pass_events"`
 	GroqSafeguardPolicy        string           `json:"groq_safeguard_policy"`
 	GroqSafeguardDefaultPolicy string           `json:"groq_safeguard_default_policy"`
@@ -174,33 +177,35 @@ type UpdateEndpoint struct {
 }
 
 type UpdateConfigRequest struct {
-	ExpectedConfigVersion int64            `json:"expected_config_version" binding:"required"`
-	Enabled               bool             `json:"enabled"`
-	BlockingEnabled       bool             `json:"blocking_enabled"`
-	StorePassEvents       bool             `json:"store_pass_events"`
-	GroqSafeguardPolicy   string           `json:"groq_safeguard_policy"`
-	Strategy              string           `json:"strategy"`
-	WorkerCount           int              `json:"worker_count"`
-	QueueCapacity         int              `json:"queue_capacity"`
-	Scanners              []string         `json:"scanners"`
-	AllGroups             bool             `json:"all_groups"`
-	GroupIDs              []int64          `json:"group_ids"`
-	Endpoints             []UpdateEndpoint `json:"endpoints"`
+	ExpectedConfigVersion  int64            `json:"expected_config_version" binding:"required"`
+	Enabled                bool             `json:"enabled"`
+	BlockingEnabled        bool             `json:"blocking_enabled"`
+	BlockingLatestTurnOnly bool             `json:"blocking_latest_turn_only"`
+	StorePassEvents        bool             `json:"store_pass_events"`
+	GroqSafeguardPolicy    string           `json:"groq_safeguard_policy"`
+	Strategy               string           `json:"strategy"`
+	WorkerCount            int              `json:"worker_count"`
+	QueueCapacity          int              `json:"queue_capacity"`
+	Scanners               []string         `json:"scanners"`
+	AllGroups              bool             `json:"all_groups"`
+	GroupIDs               []int64          `json:"group_ids"`
+	Endpoints              []UpdateEndpoint `json:"endpoints"`
 }
 
 func DefaultStorageConfig() storageConfig {
 	return storageConfig{
-		Enabled:         false,
-		BlockingEnabled: false,
-		StorePassEvents: false,
-		Strategy:        "priority",
-		WorkerCount:     DefaultWorkerCount,
-		QueueCapacity:   DefaultQueueCapacity,
-		Scanners:        append([]string(nil), AllScannerIDs...),
-		AllGroups:       true,
-		GroupIDs:        []int64{},
-		Endpoints:       []StorageEndpoint{},
-		ConfigVersion:   1,
+		Enabled:                false,
+		BlockingEnabled:        false,
+		BlockingLatestTurnOnly: false,
+		StorePassEvents:        false,
+		Strategy:               "priority",
+		WorkerCount:            DefaultWorkerCount,
+		QueueCapacity:          DefaultQueueCapacity,
+		Scanners:               append([]string(nil), AllScannerIDs...),
+		AllGroups:              true,
+		GroupIDs:               []int64{},
+		Endpoints:              []StorageEndpoint{},
+		ConfigVersion:          1,
 	}
 }
 
@@ -454,7 +459,7 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 	}
 	active := ActiveConfig{RiskControlEnabled: riskControlEnabled, Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled}
 	return PublicConfig{
-		Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled, StorePassEvents: cfg.StorePassEvents,
+		Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled, BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly, StorePassEvents: cfg.StorePassEvents,
 		GroqSafeguardPolicy:        effectiveSafeguardPolicy(cfg.GroqSafeguardPolicy),
 		GroqSafeguardDefaultPolicy: DefaultGroqSafeguardPolicy,
 		EffectiveMode:              active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
@@ -468,7 +473,8 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 	policy := effectiveSafeguardPolicy(cfg.GroqSafeguardPolicy)
 	active := ActiveConfig{
 		RiskControlEnabled: riskControlEnabled, Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled,
-		StorePassEvents: cfg.StorePassEvents, GroqSafeguardPolicy: policy,
+		BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly,
+		StorePassEvents:        cfg.StorePassEvents, GroqSafeguardPolicy: policy,
 		Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: append([]string(nil), cfg.Scanners...), AllGroups: cfg.AllGroups,
 		GroupIDs: append([]int64(nil), cfg.GroupIDs...), ConfigVersion: cfg.ConfigVersion,
@@ -508,6 +514,7 @@ func changeSummary(cfg storageConfig) string {
 	summary := struct {
 		Enabled                 bool   `json:"enabled"`
 		BlockingEnabled         bool   `json:"blocking_enabled"`
+		BlockingLatestTurnOnly  bool   `json:"blocking_latest_turn_only"`
 		StorePassEvents         bool   `json:"store_pass_events"`
 		EndpointCount           int    `json:"endpoint_count"`
 		ScannerCount            int    `json:"scanner_count"`
@@ -516,13 +523,14 @@ func changeSummary(cfg storageConfig) string {
 		GroupHash               string `json:"group_hash"`
 		GroqSafeguardPolicyHash string `json:"groq_safeguard_policy_hash"`
 	}{
-		Enabled:         cfg.Enabled,
-		BlockingEnabled: cfg.BlockingEnabled,
-		StorePassEvents: cfg.StorePassEvents,
-		EndpointCount:   len(cfg.Endpoints),
-		ScannerCount:    len(cfg.Scanners),
-		AllGroups:       cfg.AllGroups,
-		GroupCount:      len(cfg.GroupIDs),
+		Enabled:                cfg.Enabled,
+		BlockingEnabled:        cfg.BlockingEnabled,
+		BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly,
+		StorePassEvents:        cfg.StorePassEvents,
+		EndpointCount:          len(cfg.Endpoints),
+		ScannerCount:           len(cfg.Scanners),
+		AllGroups:              cfg.AllGroups,
+		GroupCount:             len(cfg.GroupIDs),
 	}
 	rawGroups, _ := json.Marshal(cfg.GroupIDs)
 	digest := sha256.Sum256(rawGroups)

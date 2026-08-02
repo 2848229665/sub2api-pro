@@ -547,6 +547,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	req.generalRejectCounter = generalRejectCounter
 	start := time.Now()
 	defer func() {
+		selection = attachSelectionProfitGate(ctx, selection)
 		decision.LatencyMs = time.Since(start).Milliseconds()
 		decision.GeneralRejectCount = generalRejectCounter.count
 		s.metrics.recordSelect(decision)
@@ -1253,7 +1254,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 		if settleErr != nil {
 			return nil, compactBlocked, settleErr
 		}
-		return selection, compactBlocked, nil
+		return attachSelectionProfitGate(ctx, selection), compactBlocked, nil
 	}
 	return nil, compactBlocked, nil
 }
@@ -1333,11 +1334,12 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 				SessionOwnerID:        req.StickyAccountID,
 				PreserveStickyBinding: req.StickyWeighted && req.StickyAccountID > 0 && account.ID != req.StickyAccountID,
 			}
-			return s.service.settleAcquiredOpenAISelection(ctx, req, selection)
+			selection, settleErr := s.service.settleAcquiredOpenAISelection(ctx, req, selection)
+			return attachSelectionProfitGate(ctx, selection), settleErr
 		}
 		if s.service.concurrencyService != nil {
 			cfg := s.service.schedulingConfig()
-			return attachOpenAISelectionRequest(&AccountSelectionResult{
+			return attachSelectionProfitGate(ctx, attachOpenAISelectionRequest(&AccountSelectionResult{
 				Account:               account,
 				SessionOwnerID:        req.StickyAccountID,
 				PreserveStickyBinding: req.StickyWeighted && req.StickyAccountID > 0 && account.ID != req.StickyAccountID,
@@ -1347,7 +1349,7 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 					Timeout:        cfg.StickySessionWaitTimeout,
 					MaxWaiting:     cfg.StickySessionMaxWaiting,
 				},
-			}, req), nil
+			}, req)), nil
 		}
 	}
 	return nil, nil
@@ -1698,7 +1700,7 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 				continue
 			}
 			freshLimit := fresh.ConcurrencyLimitForAffinity(affinity, req.affinityReservePercent())
-			return attachOpenAISelectionRequest(&AccountSelectionResult{
+			return attachSelectionProfitGate(ctx, attachOpenAISelectionRequest(&AccountSelectionResult{
 				Account:        fresh,
 				SessionOwnerID: req.StickyAccountID,
 				PreserveStickyBinding: req.PreserveStickyBinding ||
@@ -1709,7 +1711,7 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 					Timeout:        cfg.FallbackWaitTimeout,
 					MaxWaiting:     cfg.FallbackMaxWaiting,
 				},
-			}, req), candidateCount, topK, loadSkew, nil
+			}, req)), candidateCount, topK, loadSkew, nil
 		}
 	}
 
@@ -1833,6 +1835,11 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	}
 	if !accountSupportsOpenAICapabilities(account, req.RequiredCapability, req.RequiredImageCapability) {
 		return false, "capability_mismatch"
+	}
+	// 分组利润控制：不合格账号在候选过滤与抢槽后终检阶段即被排除，
+	// 排序/评分/粘性/熔断只在合格账号之间工作；named reason 进入 filter stats。
+	if vetoed, reason := openAIProfitControlVetoReason(ctx, account); vetoed {
+		return false, reason
 	}
 	return true, ""
 }
@@ -2352,6 +2359,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	observedAt := time.Now()
 	schedulerPolicy := openAIAccountSchedulerPolicyLegacy
 	defer func() {
+		selection = attachSelectionProfitGate(ctx, selection)
 		s.observeOpenAIAccountSchedule(
 			schedulerPolicy,
 			groupID,
@@ -2377,6 +2385,17 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	}()
 
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
+	// 分组利润控制：唯一文本调度入口的防御性装门。handler 文本
+	// 入口已在请求开始经 WithOpenAIRequestPricingContext 装门并固定 pricingAt，
+	// 此处对同分组门直接复用（failover 重入阈值稳定），仅为不经 handler 装配的
+	// 内部调用兜底。图片/视频调度不在利润门范围：requiredImageCapability 非空的
+	// Images 调度不装门；requiredCapability == OpenAIEndpointCapabilityResponses
+	// 当前仅显式生图意图的 /v1/responses 设置（HTTP openAIResponsesRequiredCapability
+	// 与 WS 桥同款判定），同样不装门——若未来把该 capability 用于非生图流量，
+	// 需要同步收窄本条件（有测试钉死该映射）。
+	if requiredImageCapability == "" && requiredCapability != OpenAIEndpointCapabilityResponses {
+		ctx = s.withOpenAIProfitControlGate(ctx, groupID)
+	}
 	platform = normalizeOpenAICompatiblePlatform(platform)
 	runtimeSettings := s.openAIAdvancedSchedulerRuntimeSettings(ctx)
 	if affinityReservePercentSnapshot == nil {
@@ -3046,6 +3065,15 @@ func newOpenAILegacyUpstreamRateOrder(accounts []*Account, now time.Time, oauthS
 	var first float64
 	distinct := false
 	for _, account := range accounts {
+		if account == nil {
+			continue
+		}
+		// 与 openAIUpstreamCostFactors 使用同一道平台门控：只有 OpenAI 平台账号
+		// 的倍率参与 legacy 低倍率优先排序。上游自报倍率来自中转方，不能让它对
+		// 其他平台的调度产生影响——否则自报低价即可吸走流量，而实际结算走本地倍率。
+		if !account.IsOpenAIApiKey() && !account.IsOpenAIOAuth() {
+			continue
+		}
 		rate, ok := openAISchedulingRate(account, now, oauthSchedulingRateMultiplier)
 		if !ok {
 			continue

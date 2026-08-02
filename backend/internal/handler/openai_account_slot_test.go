@@ -33,7 +33,7 @@ func TestAcquireResponsesAccountSlotSharesReleaseGuardWithSelection(t *testing.T
 	}
 	streamStarted := false
 
-	release, acquired, _ := h.acquireResponsesAccountSlot(
+	release, slotResult, _ := h.acquireResponsesAccountSlot(
 		c,
 		nil,
 		"",
@@ -44,7 +44,7 @@ func TestAcquireResponsesAccountSlotSharesReleaseGuardWithSelection(t *testing.T
 		zap.NewNop(),
 	)
 
-	require.True(t, acquired)
+	require.Equal(t, openAISlotAcquireOK, slotResult)
 	require.NotNil(t, release)
 	require.NoError(t, gatewayService.RejectAcquiredOpenAISelection(ctx, nil, "", selection))
 	require.Equal(t, 1, releaseCount)
@@ -73,7 +73,7 @@ func TestAcquireResponsesAccountSlotReturnsPoolModeSessionHash(t *testing.T) {
 	}
 	streamStarted := false
 
-	release, acquired, sessionHash := h.acquireResponsesAccountSlot(
+	release, slotResult, sessionHash := h.acquireResponsesAccountSlot(
 		c,
 		nil,
 		"",
@@ -84,7 +84,7 @@ func TestAcquireResponsesAccountSlotReturnsPoolModeSessionHash(t *testing.T) {
 		zap.NewNop(),
 	)
 
-	require.True(t, acquired)
+	require.Equal(t, openAISlotAcquireOK, slotResult)
 	require.NotNil(t, release)
 	require.NotEmpty(t, sessionHash)
 	require.Contains(t, sessionHash, "openai-pool-retry-")

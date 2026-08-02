@@ -86,7 +86,7 @@
           <section>
             <h3 class="text-base font-semibold text-gray-950 dark:text-white">{{ t('admin.promptAudit.settings.modeTitle') }}</h3>
             <p class="mt-1 text-sm text-gray-500 dark:text-dark-300">{{ t('admin.promptAudit.settings.modeDescription') }}</p>
-            <div class="mt-4 grid gap-3 lg:grid-cols-3">
+            <div class="mt-4 grid gap-3 lg:grid-cols-2 xl:grid-cols-4">
               <div class="flex items-center justify-between gap-4 rounded-lg border border-gray-100 p-4 dark:border-dark-700">
                 <div>
                   <p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.settings.enabled') }}</p>
@@ -100,6 +100,13 @@
                   <p class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.promptAudit.settings.blockingHint') }}</p>
                 </div>
                 <SaveToggle :label="t('admin.promptAudit.settings.blocking')" :model-value="draft.blocking_enabled" :disabled="!draft.enabled" data-test="blocking-toggle" hide-label @update:model-value="setBlocking" />
+              </div>
+              <div class="flex items-center justify-between gap-4 rounded-lg border border-gray-100 p-4 dark:border-dark-700">
+                <div>
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.saveBar.blockingLatestTurnOnly') }}</p>
+                  <p class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.promptAudit.settings.blockingLatestTurnOnlyHint') }}</p>
+                </div>
+                <SaveToggle :label="t('admin.promptAudit.saveBar.blockingLatestTurnOnly')" :model-value="draft.blocking_latest_turn_only" :disabled="!draft.enabled || !draft.blocking_enabled" data-test="blocking-latest-turn-only-toggle" hide-label @update:model-value="replaceDraft({ ...draft!, blocking_latest_turn_only: $event })" />
               </div>
               <div class="flex items-center justify-between gap-4 rounded-lg border border-gray-100 p-4 dark:border-dark-700">
                 <div>

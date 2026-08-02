@@ -19,7 +19,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 const baseConfig = (): PromptAuditConfig => ({
-  enabled: true, blocking_enabled: false, store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
+  enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
   groq_safeguard_policy: 'Default safeguard classification policy with enough detail for validation.',
   groq_safeguard_default_policy: 'Default safeguard classification policy with enough detail for validation.',
   worker_count: 4, queue_capacity: 100, scanners: SCANNER_CATALOG.map((item) => item.id), all_groups: true, group_ids: [],
@@ -146,10 +146,13 @@ describe('PromptAuditView', () => {
     expect(wrapper.find('[data-test="confirm"]').exists()).toBe(true)
     await wrapper.get('[data-test="confirm-action"]').trigger('click')
     expect(wrapper.get('[data-test="blocking-toggle"]').attributes('aria-checked')).toBe('true')
+    await wrapper.get('[data-test="blocking-latest-turn-only-toggle"]').trigger('click')
+    expect(wrapper.get('[data-test="blocking-latest-turn-only-toggle"]').attributes('aria-checked')).toBe('true')
     await wrapper.get('[data-test="enabled-toggle"]').trigger('click')
     expect(wrapper.get('[data-test="enabled-toggle"]').attributes('aria-checked')).toBe('false')
     expect(wrapper.get('[data-test="blocking-toggle"]').attributes('aria-checked')).toBe('false')
     expect(wrapper.get('[data-test="blocking-toggle"]').attributes()).toHaveProperty('disabled')
+    expect(wrapper.get('[data-test="blocking-latest-turn-only-toggle"]').attributes()).toHaveProperty('disabled')
   })
 
   it('clears plaintext token state after a successful save', async () => {
@@ -215,7 +218,7 @@ describe('PromptAuditView', () => {
     await flushPromises()
     await wrapper.get('[data-test="open-settings"]').trigger('click')
     const switches = wrapper.findAll('[role="switch"]')
-    expect(switches).toHaveLength(3)
+    expect(switches).toHaveLength(4)
     expect(switches.every((item) => Boolean(item.attributes('aria-label')))).toBe(true)
     expect(wrapper.find('[data-test="prompt-audit-settings"]').exists()).toBe(true)
     expect(wrapper.findAll('[role="tab"]')).toHaveLength(4)

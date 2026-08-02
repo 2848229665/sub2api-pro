@@ -107,7 +107,7 @@ func newKeywordSessionModerationService(t *testing.T) (*service.ContentModeratio
 		service.SettingKeyContentModerationConfig: string(raw),
 	}}
 	repo := &contentModerationHandlerTestRepo{}
-	return service.NewContentModerationService(settings, repo, nil, nil, nil, nil, nil), repo, settings
+	return service.NewContentModerationService(settings, repo, nil, nil, nil, nil, nil, nil), repo, settings
 }
 
 func keywordSessionAuditContext(t *testing.T, sessionID string) *gin.Context {

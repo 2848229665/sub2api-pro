@@ -15,6 +15,7 @@ const {
   getCyberPolicyRequestAudit,
   getGroups,
   copyToClipboard,
+  getProxies,
   showError,
   showSuccess,
 } = vi.hoisted(() => ({
@@ -25,6 +26,7 @@ const {
   getCyberPolicyRequestAudit: vi.fn(),
   getGroups: vi.fn(),
   copyToClipboard: vi.fn(),
+  getProxies: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
 }))
@@ -44,6 +46,9 @@ vi.mock('@/api/admin', () => ({
     },
     groups: {
       getAll: getGroups,
+    },
+    proxies: {
+      getAll: getProxies,
     },
   },
 }))
@@ -95,6 +100,7 @@ const baseConfig = (): ContentModerationConfig => ({
   mode: 'pre_block',
   base_url: 'https://api.openai.com',
   model: 'omni-moderation-latest',
+  proxy_id: null,
   api_key_configured: false,
   api_key_masked: '',
   api_key_count: 0,
@@ -295,6 +301,7 @@ const riskControlViewStubs = {
   Toggle: true,
   Pagination: PaginationStub,
   ModelWhitelistSelector: ModelWhitelistSelectorStub,
+  ProxySelector: true,
 }
 
 type RiskControlViewStubs = Partial<Record<keyof typeof riskControlViewStubs, Component | boolean>>
@@ -329,6 +336,7 @@ describe('admin RiskControlView', () => {
     getCyberPolicyRequestAudit.mockReset()
     getGroups.mockReset()
     copyToClipboard.mockReset()
+    getProxies.mockReset()
     showError.mockReset()
     showSuccess.mockReset()
 
@@ -346,6 +354,7 @@ describe('admin RiskControlView', () => {
     })
     getGroups.mockResolvedValue([])
     copyToClipboard.mockResolvedValue(true)
+    getProxies.mockResolvedValue([])
     updateConfig.mockImplementation(async (payload: UpdateContentModerationConfig) => ({
       ...baseConfig(),
       ...payload,

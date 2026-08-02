@@ -56,7 +56,7 @@ func (r *cyberRequestAuditHandlerRepo) UpdateCyberPolicyOutcome(context.Context,
 func TestContentModerationHandlerListLogsPassesValidAction(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &cyberRequestAuditHandlerRepo{}
-	handler := NewContentModerationHandler(service.NewContentModerationService(nil, repo, nil, nil, nil, nil, nil))
+	handler := NewContentModerationHandler(service.NewContentModerationService(nil, repo, nil, nil, nil, nil, nil, nil))
 	router := gin.New()
 	router.GET("/logs", handler.ListLogs)
 
@@ -74,7 +74,7 @@ func TestContentModerationHandlerListLogsPassesValidAction(t *testing.T) {
 func TestContentModerationHandlerListLogsRejectsInvalidAction(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &cyberRequestAuditHandlerRepo{}
-	handler := NewContentModerationHandler(service.NewContentModerationService(nil, repo, nil, nil, nil, nil, nil))
+	handler := NewContentModerationHandler(service.NewContentModerationService(nil, repo, nil, nil, nil, nil, nil, nil))
 	router := gin.New()
 	router.GET("/logs", handler.ListLogs)
 
@@ -103,7 +103,7 @@ func TestContentModerationHandlerGetCyberPolicyRequestAudit(t *testing.T) {
 		StoredBytes:   len(requestBody),
 		Truncated:     false,
 	}}
-	handler := NewContentModerationHandler(service.NewContentModerationService(nil, repo, nil, nil, nil, nil, nil))
+	handler := NewContentModerationHandler(service.NewContentModerationService(nil, repo, nil, nil, nil, nil, nil, nil))
 	router := gin.New()
 	router.GET("/logs/:id/cyber-request", handler.GetCyberPolicyRequestAudit)
 
@@ -125,7 +125,7 @@ func TestContentModerationHandlerGetCyberPolicyRequestAudit(t *testing.T) {
 func TestContentModerationHandlerGetCyberPolicyRequestAuditRejectsInvalidID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &cyberRequestAuditHandlerRepo{}
-	handler := NewContentModerationHandler(service.NewContentModerationService(nil, repo, nil, nil, nil, nil, nil))
+	handler := NewContentModerationHandler(service.NewContentModerationService(nil, repo, nil, nil, nil, nil, nil, nil))
 	router := gin.New()
 	router.GET("/logs/:id/cyber-request", handler.GetCyberPolicyRequestAudit)
 
