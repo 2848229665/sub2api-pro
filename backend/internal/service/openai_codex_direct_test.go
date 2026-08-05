@@ -115,8 +115,10 @@ func TestForwardCodexDirectImagesPreservesJSONAndHeaders(t *testing.T) {
 	service := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
 	parsed, err := service.ParseOpenAIImagesRequest(c, body)
 	require.NoError(t, err)
+	account := newOpenAICodexDirectTestAccount(AccountTypeOAuth)
+	account.Credentials["user_agent"] = "codex_vscode/0.125.0 (Ubuntu 22.4.0; x86_64) vscode"
 
-	result, err := service.ForwardImages(context.Background(), c, newOpenAICodexDirectTestAccount(AccountTypeOAuth), body, parsed, "")
+	result, err := service.ForwardImages(context.Background(), c, account, body, parsed, "")
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -131,7 +133,9 @@ func TestForwardCodexDirectImagesPreservesJSONAndHeaders(t *testing.T) {
 	require.Equal(t, "Bearer oauth-token", upstream.lastReq.Header.Get("Authorization"))
 	require.Equal(t, "chatgpt-account", upstream.lastReq.Header.Get("ChatGPT-Account-ID"))
 	require.Equal(t, "application/json", upstream.lastReq.Header.Get("Accept"))
-	require.Equal(t, "codex_cli_rs", upstream.lastReq.Header.Get("Originator"))
+	require.Equal(t, "codex_vscode", upstream.lastReq.Header.Get("Originator"))
+	require.Equal(t, "codex_vscode/"+codexCLIVersion+" (Ubuntu 22.4.0; x86_64) vscode", upstream.lastReq.Header.Get("User-Agent"))
+	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("Version"))
 	require.Empty(t, upstream.lastReq.Header.Get("OpenAI-Beta"))
 	require.JSONEq(t, string(body), string(upstream.lastBody))
 	require.JSONEq(t, responseBody, recorder.Body.String())

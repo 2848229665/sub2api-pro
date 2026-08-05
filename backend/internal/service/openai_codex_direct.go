@@ -256,8 +256,9 @@ func (s *OpenAIGatewayService) buildOpenAICodexDirectRequest(
 	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
 		req.Header.Set("User-Agent", codexCLIUserAgent)
 	}
-	s.overrideBrowserUserAgent(ctx, account, req)
-	enforceCodexIdentityHeaders(req.Header)
+	// 与主 Responses/alpha-search 路径使用同一终态身份收口。上游已移除独立的
+	// 浏览器 UA 兜底；账号级显式 UA 仅贡献客户端与终端指纹，版本段由规范身份重建。
+	enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUA(account))
 	applyOpenAICodexDirectIdentityHeaders(c, account, req.Header)
 	account.ApplyHeaderOverrides(req.Header)
 	return req, nil
