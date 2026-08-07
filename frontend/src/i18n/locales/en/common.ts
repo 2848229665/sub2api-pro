@@ -196,6 +196,7 @@ export default {
     riskControl: 'Risk Control',
     securityAudit: 'Security Audit',
     contentModeration: 'Content Moderation',
+    keywordStats: 'Keyword Hit Statistics',
     promptAudit: 'Prompt Audit',
     auditLogs: 'Audit Logs',
   },

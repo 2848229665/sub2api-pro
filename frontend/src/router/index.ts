@@ -610,6 +610,19 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/keyword-stats',
+    name: 'AdminKeywordStats',
+    component: () => import('@/views/admin/KeywordStatsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Keyword Hit Statistics',
+      titleKey: 'admin.keywordStats.title',
+      descriptionKey: 'admin.keywordStats.description',
+      requiresRiskControl: true
+    }
+  },
+  {
     path: '/admin/prompt-audit',
     name: 'AdminPromptAudit',
     component: () => import('@/features/prompt-audit/PromptAuditView.vue'),

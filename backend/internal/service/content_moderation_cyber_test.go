@@ -41,6 +41,10 @@ func (r *cyberOrderingTestRepo) ListLogs(ctx context.Context, filter ContentMode
 	return nil, nil, nil
 }
 
+func (r *cyberOrderingTestRepo) GetKeywordHitStats(ctx context.Context, filter ContentModerationKeywordStatsFilter) (*ContentModerationKeywordStats, error) {
+	return &ContentModerationKeywordStats{}, nil
+}
+
 func (r *cyberOrderingTestRepo) GetCyberPolicyRequestAudit(ctx context.Context, id int64) (*CyberPolicyRequestAudit, error) {
 	return nil, ErrCyberPolicyRequestAuditNotFound
 }
