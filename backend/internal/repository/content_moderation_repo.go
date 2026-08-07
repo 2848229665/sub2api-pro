@@ -186,6 +186,137 @@ LIMIT $`+fmt.Sprint(len(queryArgs)-1)+` OFFSET $`+fmt.Sprint(len(queryArgs)),
 	return items, paginationResultFromTotal(total, params), nil
 }
 
+func (r *contentModerationRepository) GetKeywordHitStats(ctx context.Context, filter service.ContentModerationKeywordStatsFilter) (*service.ContentModerationKeywordStats, error) {
+	where, args := buildContentModerationKeywordStatsWhere(filter)
+	whereSQL := "WHERE " + strings.Join(where, " AND ")
+	userParams := normalizeContentModerationStatsPagination(filter.UserPagination)
+	keywordParams := normalizeContentModerationStatsPagination(filter.KeywordPagination)
+
+	stats := &service.ContentModerationKeywordStats{}
+	if err := r.db.QueryRowContext(ctx, `
+SELECT
+    COUNT(*),
+    COUNT(DISTINCT CASE
+        WHEN l.user_id IS NOT NULL THEN 'id:' || l.user_id::text
+        WHEN BTRIM(l.user_email) <> '' THEN 'email:' || LOWER(BTRIM(l.user_email))
+        ELSE NULL
+    END),
+    COUNT(DISTINCT LOWER(BTRIM(l.matched_keyword)))
+FROM content_moderation_logs l
+`+whereSQL, args...).Scan(&stats.TotalHits, &stats.UserCount, &stats.KeywordCount); err != nil {
+		return nil, fmt.Errorf("summarize content moderation keyword hits: %w", err)
+	}
+
+	userArgs := append([]any{}, args...)
+	userArgs = append(userArgs, userParams.Limit(), userParams.Offset())
+	userRows, err := r.db.QueryContext(ctx, `
+SELECT
+    ranked.user_id,
+    COALESCE(NULLIF(BTRIM(u.username), ''), ''),
+    COALESCE(NULLIF(BTRIM(u.email), ''), NULLIF(ranked.user_email, ''), ''),
+    ranked.hit_count,
+    ranked.keyword_count,
+    ranked.last_hit_at
+FROM (
+    SELECT
+        l.user_id,
+        MAX(BTRIM(l.user_email)) AS user_email,
+        COUNT(*) AS hit_count,
+        COUNT(DISTINCT LOWER(BTRIM(l.matched_keyword))) AS keyword_count,
+        MAX(l.created_at) AS last_hit_at,
+        CASE WHEN l.user_id IS NULL THEN LOWER(BTRIM(l.user_email)) ELSE '' END AS anonymous_email_key
+    FROM content_moderation_logs l
+    `+whereSQL+`
+      AND (l.user_id IS NOT NULL OR BTRIM(l.user_email) <> '')
+    GROUP BY
+        l.user_id,
+        CASE WHEN l.user_id IS NULL THEN LOWER(BTRIM(l.user_email)) ELSE '' END
+) ranked
+LEFT JOIN users u ON u.id = ranked.user_id
+ORDER BY ranked.hit_count DESC, ranked.last_hit_at DESC, COALESCE(ranked.user_id, 0), ranked.anonymous_email_key
+LIMIT $`+fmt.Sprint(len(userArgs)-1)+` OFFSET $`+fmt.Sprint(len(userArgs)), userArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("list content moderation user keyword hits: %w", err)
+	}
+	defer func() { _ = userRows.Close() }()
+
+	userItems := make([]service.ContentModerationUserHitCount, 0)
+	for userRows.Next() {
+		var item service.ContentModerationUserHitCount
+		var userID sql.NullInt64
+		if err := userRows.Scan(
+			&userID,
+			&item.Username,
+			&item.UserEmail,
+			&item.HitCount,
+			&item.KeywordCount,
+			&item.LastHitAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan content moderation user keyword hits: %w", err)
+		}
+		if userID.Valid {
+			value := userID.Int64
+			item.UserID = &value
+		}
+		userItems = append(userItems, item)
+	}
+	if err := userRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate content moderation user keyword hits: %w", err)
+	}
+
+	keywordArgs := append([]any{}, args...)
+	keywordArgs = append(keywordArgs, keywordParams.Limit(), keywordParams.Offset())
+	keywordRows, err := r.db.QueryContext(ctx, `
+SELECT
+    MIN(BTRIM(l.matched_keyword)) AS keyword,
+    COUNT(*) AS hit_count,
+    COUNT(DISTINCT CASE
+        WHEN l.user_id IS NOT NULL THEN 'id:' || l.user_id::text
+        WHEN BTRIM(l.user_email) <> '' THEN 'email:' || LOWER(BTRIM(l.user_email))
+        ELSE NULL
+    END) AS user_count,
+    MAX(l.created_at) AS last_hit_at
+FROM content_moderation_logs l
+`+whereSQL+`
+GROUP BY LOWER(BTRIM(l.matched_keyword))
+ORDER BY hit_count DESC, last_hit_at DESC, LOWER(BTRIM(l.matched_keyword))
+LIMIT $`+fmt.Sprint(len(keywordArgs)-1)+` OFFSET $`+fmt.Sprint(len(keywordArgs)), keywordArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("list content moderation keyword hit ranking: %w", err)
+	}
+	defer func() { _ = keywordRows.Close() }()
+
+	keywordItems := make([]service.ContentModerationKeywordHitCount, 0)
+	for keywordRows.Next() {
+		var item service.ContentModerationKeywordHitCount
+		if err := keywordRows.Scan(&item.Keyword, &item.HitCount, &item.UserCount, &item.LastHitAt); err != nil {
+			return nil, fmt.Errorf("scan content moderation keyword hit ranking: %w", err)
+		}
+		keywordItems = append(keywordItems, item)
+	}
+	if err := keywordRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate content moderation keyword hit ranking: %w", err)
+	}
+
+	userPage := paginationResultFromTotal(stats.UserCount, userParams)
+	stats.Users = service.ContentModerationUserHitCountPage{
+		Items:    userItems,
+		Total:    userPage.Total,
+		Page:     userPage.Page,
+		PageSize: userPage.PageSize,
+		Pages:    userPage.Pages,
+	}
+	keywordPage := paginationResultFromTotal(stats.KeywordCount, keywordParams)
+	stats.Keywords = service.ContentModerationKeywordHitCountPage{
+		Items:    keywordItems,
+		Total:    keywordPage.Total,
+		Page:     keywordPage.Page,
+		PageSize: keywordPage.PageSize,
+		Pages:    keywordPage.Pages,
+	}
+	return stats, nil
+}
+
 func (r *contentModerationRepository) GetCyberPolicyRequestAudit(ctx context.Context, id int64) (*service.CyberPolicyRequestAudit, error) {
 	var item service.CyberPolicyRequestAudit
 	err := r.db.QueryRowContext(ctx, `
@@ -331,4 +462,31 @@ func buildContentModerationLogWhere(filter service.ContentModerationLogFilter) (
 		add("l.created_at <= $%d", *filter.To)
 	}
 	return where, args
+}
+
+func buildContentModerationKeywordStatsWhere(filter service.ContentModerationKeywordStatsFilter) ([]string, []any) {
+	where := []string{"l.matched_keyword <> ''"}
+	args := make([]any, 0, 2)
+	if filter.From != nil && !filter.From.IsZero() {
+		args = append(args, *filter.From)
+		where = append(where, fmt.Sprintf("l.created_at >= $%d", len(args)))
+	}
+	if filter.To != nil && !filter.To.IsZero() {
+		args = append(args, *filter.To)
+		where = append(where, fmt.Sprintf("l.created_at <= $%d", len(args)))
+	}
+	return where, args
+}
+
+func normalizeContentModerationStatsPagination(params pagination.PaginationParams) pagination.PaginationParams {
+	if params.Page <= 0 {
+		params.Page = 1
+	}
+	if params.PageSize <= 0 {
+		params.PageSize = 20
+	}
+	if params.PageSize > 100 {
+		params.PageSize = 100
+	}
+	return params
 }

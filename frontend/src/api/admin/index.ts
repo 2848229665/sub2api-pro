@@ -114,4 +114,12 @@ export type { BalanceHistoryItem } from './users'
 export type { ErrorPassthroughRule, CreateRuleRequest, UpdateRuleRequest } from './errorPassthrough'
 export type { BackupAgentHealth, DataManagementConfig } from './dataManagement'
 export type { TLSFingerprintProfile, CreateProfileRequest, UpdateProfileRequest } from './tlsFingerprintProfile'
-export type { ContentModerationConfig, ContentModerationLog, CyberPolicyRequestAudit, ModerationMode } from './riskControl'
+export type {
+  ContentModerationConfig,
+  ContentModerationKeywordHitCount,
+  ContentModerationKeywordStats,
+  ContentModerationLog,
+  ContentModerationUserHitCount,
+  CyberPolicyRequestAudit,
+  ModerationMode,
+} from './riskControl'

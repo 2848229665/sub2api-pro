@@ -9,6 +9,7 @@ import (
 	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -117,5 +118,57 @@ func TestContentModerationRepositoryGetCyberPolicyRequestAudit_NotFound(t *testi
 
 	require.Nil(t, item)
 	require.ErrorIs(t, err, service.ErrCyberPolicyRequestAuditNotFound)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestContentModerationRepositoryGetKeywordHitStats(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	from := time.Date(2026, time.August, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, time.August, 7, 23, 59, 59, 0, time.UTC)
+	lastUserHit := time.Date(2026, time.August, 7, 8, 30, 0, 0, time.UTC)
+	lastKeywordHit := time.Date(2026, time.August, 7, 9, 0, 0, 0, time.UTC)
+	repo := NewContentModerationRepository(db)
+
+	mock.ExpectQuery(`(?s)COUNT\(DISTINCT LOWER\(BTRIM\(l\.matched_keyword\)\)\).*FROM content_moderation_logs l`).
+		WithArgs(from, to).
+		WillReturnRows(sqlmock.NewRows([]string{"total_hits", "user_count", "keyword_count"}).AddRow(12, 2, 3))
+	mock.ExpectQuery(`(?s)FROM \(.*COUNT\(DISTINCT LOWER\(BTRIM\(l\.matched_keyword\)\)\).*LEFT JOIN users u`).
+		WithArgs(from, to, 10, 10).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"user_id", "username", "user_email", "hit_count", "keyword_count", "last_hit_at",
+		}).AddRow(int64(42), "alice", "alice@example.com", 7, 2, lastUserHit))
+	mock.ExpectQuery(`(?s)MIN\(BTRIM\(l\.matched_keyword\)\).*GROUP BY LOWER\(BTRIM\(l\.matched_keyword\)\)`).
+		WithArgs(from, to, 5, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"keyword", "hit_count", "user_count", "last_hit_at",
+		}).AddRow("secret-token", 8, 2, lastKeywordHit))
+
+	stats, err := repo.GetKeywordHitStats(context.Background(), service.ContentModerationKeywordStatsFilter{
+		UserPagination: pagination.PaginationParams{
+			Page:     2,
+			PageSize: 10,
+		},
+		KeywordPagination: pagination.PaginationParams{
+			Page:     1,
+			PageSize: 5,
+		},
+		From: &from,
+		To:   &to,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(12), stats.TotalHits)
+	require.Equal(t, int64(2), stats.UserCount)
+	require.Equal(t, int64(3), stats.KeywordCount)
+	require.Equal(t, int64(42), *stats.Users.Items[0].UserID)
+	require.Equal(t, "alice", stats.Users.Items[0].Username)
+	require.Equal(t, int64(7), stats.Users.Items[0].HitCount)
+	require.Equal(t, 2, stats.Users.Page)
+	require.Equal(t, int64(3), stats.Keywords.Total)
+	require.Equal(t, "secret-token", stats.Keywords.Items[0].Keyword)
+	require.Equal(t, int64(8), stats.Keywords.Items[0].HitCount)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

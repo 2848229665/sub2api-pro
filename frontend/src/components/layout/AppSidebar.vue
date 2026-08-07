@@ -780,6 +780,7 @@ const adminNavItems = computed((): NavItem[] => {
       featureFlag: flagRiskControl,
       children: [
         { path: '/admin/risk-control', label: t('nav.contentModeration'), icon: ShieldIcon },
+        { path: '/admin/keyword-stats', label: t('nav.keywordStats'), icon: ChartIcon },
         { path: '/admin/prompt-audit', label: t('nav.promptAudit'), icon: ShieldIcon },
       ],
     },

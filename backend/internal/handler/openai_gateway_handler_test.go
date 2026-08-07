@@ -1222,6 +1222,10 @@ func (r *contentModerationHandlerTestRepo) ListLogs(ctx context.Context, filter 
 	return nil, nil, nil
 }
 
+func (r *contentModerationHandlerTestRepo) GetKeywordHitStats(ctx context.Context, filter service.ContentModerationKeywordStatsFilter) (*service.ContentModerationKeywordStats, error) {
+	return &service.ContentModerationKeywordStats{}, nil
+}
+
 func (r *contentModerationHandlerTestRepo) GetCyberPolicyRequestAudit(ctx context.Context, id int64) (*service.CyberPolicyRequestAudit, error) {
 	return nil, service.ErrCyberPolicyRequestAuditNotFound
 }

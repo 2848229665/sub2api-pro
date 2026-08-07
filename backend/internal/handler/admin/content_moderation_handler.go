@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -209,6 +210,75 @@ func (h *ContentModerationHandler) ListLogs(c *gin.Context) {
 		return
 	}
 	response.Paginated(c, items, pageResult.Total, pageResult.Page, pageResult.PageSize)
+}
+
+func (h *ContentModerationHandler) GetKeywordHitStats(c *gin.Context) {
+	userPagination, err := parseContentModerationStatsPagination(c, "user")
+	if err != nil {
+		response.BadRequest(c, "Invalid user pagination")
+		return
+	}
+	keywordPagination, err := parseContentModerationStatsPagination(c, "keyword")
+	if err != nil {
+		response.BadRequest(c, "Invalid keyword pagination")
+		return
+	}
+	filter := service.ContentModerationKeywordStatsFilter{
+		UserPagination:    userPagination,
+		KeywordPagination: keywordPagination,
+	}
+	if raw := strings.TrimSpace(c.Query("from")); raw != "" {
+		from, _, err := parseContentModerationDate(raw)
+		if err != nil {
+			response.BadRequest(c, "Invalid from")
+			return
+		}
+		filter.From = &from
+	}
+	if raw := strings.TrimSpace(c.Query("to")); raw != "" {
+		to, dateOnly, err := parseContentModerationDate(raw)
+		if err != nil {
+			response.BadRequest(c, "Invalid to")
+			return
+		}
+		if dateOnly {
+			to = to.Add(24*time.Hour - time.Nanosecond)
+		}
+		filter.To = &to
+	}
+	if filter.From != nil && filter.To != nil && filter.From.After(*filter.To) {
+		response.BadRequest(c, "Invalid date range")
+		return
+	}
+	stats, err := h.service.GetKeywordHitStats(c.Request.Context(), filter)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, stats)
+}
+
+func parseContentModerationStatsPagination(c *gin.Context, prefix string) (pagination.PaginationParams, error) {
+	params := pagination.PaginationParams{
+		Page:      1,
+		PageSize:  20,
+		SortOrder: pagination.SortOrderDesc,
+	}
+	if raw := strings.TrimSpace(c.Query(prefix + "_page")); raw != "" {
+		page, err := strconv.Atoi(raw)
+		if err != nil || page <= 0 {
+			return pagination.PaginationParams{}, errors.New("invalid page")
+		}
+		params.Page = page
+	}
+	if raw := strings.TrimSpace(c.Query(prefix + "_page_size")); raw != "" {
+		pageSize, err := strconv.Atoi(raw)
+		if err != nil || pageSize <= 0 {
+			return pagination.PaginationParams{}, errors.New("invalid page size")
+		}
+		params.PageSize = pageSize
+	}
+	return params, nil
 }
 
 func isValidContentModerationAction(action string) bool {

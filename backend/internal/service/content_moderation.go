@@ -456,6 +456,53 @@ type ContentModerationLogFilter struct {
 	To         *time.Time
 }
 
+type ContentModerationKeywordStatsFilter struct {
+	UserPagination    pagination.PaginationParams
+	KeywordPagination pagination.PaginationParams
+	From              *time.Time
+	To                *time.Time
+}
+
+type ContentModerationUserHitCount struct {
+	UserID       *int64    `json:"user_id"`
+	Username     string    `json:"username"`
+	UserEmail    string    `json:"user_email"`
+	HitCount     int64     `json:"hit_count"`
+	KeywordCount int64     `json:"keyword_count"`
+	LastHitAt    time.Time `json:"last_hit_at"`
+}
+
+type ContentModerationKeywordHitCount struct {
+	Keyword   string    `json:"keyword"`
+	HitCount  int64     `json:"hit_count"`
+	UserCount int64     `json:"user_count"`
+	LastHitAt time.Time `json:"last_hit_at"`
+}
+
+type ContentModerationUserHitCountPage struct {
+	Items    []ContentModerationUserHitCount `json:"items"`
+	Total    int64                           `json:"total"`
+	Page     int                             `json:"page"`
+	PageSize int                             `json:"page_size"`
+	Pages    int                             `json:"pages"`
+}
+
+type ContentModerationKeywordHitCountPage struct {
+	Items    []ContentModerationKeywordHitCount `json:"items"`
+	Total    int64                              `json:"total"`
+	Page     int                                `json:"page"`
+	PageSize int                                `json:"page_size"`
+	Pages    int                                `json:"pages"`
+}
+
+type ContentModerationKeywordStats struct {
+	TotalHits    int64                                `json:"total_hits"`
+	UserCount    int64                                `json:"user_count"`
+	KeywordCount int64                                `json:"keyword_count"`
+	Users        ContentModerationUserHitCountPage    `json:"users"`
+	Keywords     ContentModerationKeywordHitCountPage `json:"keywords"`
+}
+
 type ContentModerationCleanupResult struct {
 	DeletedHit    int64     `json:"deleted_hit"`
 	DeletedNonHit int64     `json:"deleted_non_hit"`
@@ -511,6 +558,7 @@ type ContentModerationClearHashesResult struct {
 type ContentModerationRepository interface {
 	CreateLog(ctx context.Context, log *ContentModerationLog) error
 	ListLogs(ctx context.Context, filter ContentModerationLogFilter) ([]ContentModerationLog, *pagination.PaginationResult, error)
+	GetKeywordHitStats(ctx context.Context, filter ContentModerationKeywordStatsFilter) (*ContentModerationKeywordStats, error)
 	GetCyberPolicyRequestAudit(ctx context.Context, id int64) (*CyberPolicyRequestAudit, error)
 	// CountFlaggedByUserSince 统计窗口内计入封号的违规次数（排除 hash_block；
 	// excludeCyberPolicy 为 true 时额外排除 cyber_policy 行）。
@@ -1354,6 +1402,32 @@ func (s *ContentModerationService) ListLogs(ctx context.Context, filter ContentM
 		filter.Pagination.SortOrder = pagination.SortOrderDesc
 	}
 	return s.repo.ListLogs(ctx, filter)
+}
+
+func (s *ContentModerationService) GetKeywordHitStats(ctx context.Context, filter ContentModerationKeywordStatsFilter) (*ContentModerationKeywordStats, error) {
+	if s == nil || s.repo == nil {
+		return nil, infraerrors.InternalServer("CONTENT_MODERATION_REPOSITORY_UNAVAILABLE", "内容审计仓储不可用")
+	}
+	filter.UserPagination = normalizeContentModerationStatsPagination(filter.UserPagination)
+	filter.KeywordPagination = normalizeContentModerationStatsPagination(filter.KeywordPagination)
+	if filter.From != nil && filter.To != nil && filter.From.After(*filter.To) {
+		return nil, infraerrors.BadRequest("INVALID_CONTENT_MODERATION_STATS_RANGE", "开始时间不能晚于结束时间")
+	}
+	return s.repo.GetKeywordHitStats(ctx, filter)
+}
+
+func normalizeContentModerationStatsPagination(params pagination.PaginationParams) pagination.PaginationParams {
+	if params.Page <= 0 {
+		params.Page = 1
+	}
+	if params.PageSize <= 0 {
+		params.PageSize = 20
+	}
+	if params.PageSize > 100 {
+		params.PageSize = 100
+	}
+	params.SortOrder = pagination.SortOrderDesc
+	return params
 }
 
 func (s *ContentModerationService) GetCyberPolicyRequestAudit(ctx context.Context, id int64) (*CyberPolicyRequestAudit, error) {

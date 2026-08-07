@@ -233,6 +233,55 @@ export interface ContentModerationLogsResponse {
   pages: number
 }
 
+export interface ContentModerationUserHitCount {
+  user_id: number | null
+  username: string
+  user_email: string
+  hit_count: number
+  keyword_count: number
+  last_hit_at: string
+}
+
+export interface ContentModerationKeywordHitCount {
+  keyword: string
+  hit_count: number
+  user_count: number
+  last_hit_at: string
+}
+
+export interface ContentModerationUserHitCountPage {
+  items: ContentModerationUserHitCount[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
+export interface ContentModerationKeywordHitCountPage {
+  items: ContentModerationKeywordHitCount[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
+export interface ContentModerationKeywordStats {
+  total_hits: number
+  user_count: number
+  keyword_count: number
+  users: ContentModerationUserHitCountPage
+  keywords: ContentModerationKeywordHitCountPage
+}
+
+export interface GetContentModerationKeywordStatsParams {
+  from?: string
+  to?: string
+  user_page?: number
+  user_page_size?: number
+  keyword_page?: number
+  keyword_page_size?: number
+}
+
 export interface ContentModerationUnbanUserResponse {
   user_id: number
   status: string
@@ -280,6 +329,16 @@ export async function listLogs(
   return data
 }
 
+export async function getKeywordHitStats(
+  params: GetContentModerationKeywordStatsParams = {}
+): Promise<ContentModerationKeywordStats> {
+  const { data } = await apiClient.get<ContentModerationKeywordStats>(
+    '/admin/risk-control/keyword-stats',
+    { params }
+  )
+  return data
+}
+
 export async function getCyberPolicyRequestAudit(logID: number): Promise<CyberPolicyRequestAudit> {
   const { data } = await apiClient.get<CyberPolicyRequestAudit>(
     `/admin/risk-control/logs/${logID}/cyber-request`
@@ -312,6 +371,7 @@ export const riskControlAPI = {
   getStatus,
   testAPIKeys,
   listLogs,
+  getKeywordHitStats,
   getCyberPolicyRequestAudit,
   unbanUser,
   deleteFlaggedHash,

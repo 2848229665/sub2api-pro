@@ -15,11 +15,14 @@ import (
 )
 
 type cyberRequestAuditHandlerRepo struct {
-	audit      *service.CyberPolicyRequestAudit
-	err        error
-	calls      int
-	listFilter service.ContentModerationLogFilter
-	listCalls  int
+	audit       *service.CyberPolicyRequestAudit
+	err         error
+	calls       int
+	listFilter  service.ContentModerationLogFilter
+	listCalls   int
+	stats       *service.ContentModerationKeywordStats
+	statsFilter service.ContentModerationKeywordStatsFilter
+	statsCalls  int
 }
 
 func (r *cyberRequestAuditHandlerRepo) CreateLog(context.Context, *service.ContentModerationLog) error {
@@ -30,6 +33,26 @@ func (r *cyberRequestAuditHandlerRepo) ListLogs(_ context.Context, filter servic
 	r.listCalls++
 	r.listFilter = filter
 	return []service.ContentModerationLog{}, &pagination.PaginationResult{Page: filter.Pagination.Page, PageSize: filter.Pagination.PageSize}, nil
+}
+
+func (r *cyberRequestAuditHandlerRepo) GetKeywordHitStats(_ context.Context, filter service.ContentModerationKeywordStatsFilter) (*service.ContentModerationKeywordStats, error) {
+	r.statsCalls++
+	r.statsFilter = filter
+	if r.stats != nil {
+		return r.stats, r.err
+	}
+	return &service.ContentModerationKeywordStats{
+		Users: service.ContentModerationUserHitCountPage{
+			Items:    []service.ContentModerationUserHitCount{},
+			Page:     filter.UserPagination.Page,
+			PageSize: filter.UserPagination.PageSize,
+		},
+		Keywords: service.ContentModerationKeywordHitCountPage{
+			Items:    []service.ContentModerationKeywordHitCount{},
+			Page:     filter.KeywordPagination.Page,
+			PageSize: filter.KeywordPagination.PageSize,
+		},
+	}, nil
 }
 
 func (r *cyberRequestAuditHandlerRepo) GetCyberPolicyRequestAudit(context.Context, int64) (*service.CyberPolicyRequestAudit, error) {
@@ -89,6 +112,75 @@ func TestContentModerationHandlerListLogsRejectsInvalidAction(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 	require.Equal(t, "Invalid action", response.Message)
+}
+
+func TestContentModerationHandlerGetKeywordHitStatsPassesDateRangeAndPagination(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	lastHitAt := time.Date(2026, time.August, 7, 8, 30, 0, 0, time.UTC)
+	repo := &cyberRequestAuditHandlerRepo{stats: &service.ContentModerationKeywordStats{
+		TotalHits:    9,
+		UserCount:    2,
+		KeywordCount: 3,
+		Users: service.ContentModerationUserHitCountPage{
+			Items: []service.ContentModerationUserHitCount{{
+				Username:  "alice",
+				UserEmail: "alice@example.com",
+				HitCount:  6,
+				LastHitAt: lastHitAt,
+			}},
+			Total:    2,
+			Page:     2,
+			PageSize: 15,
+			Pages:    1,
+		},
+		Keywords: service.ContentModerationKeywordHitCountPage{
+			Items:    []service.ContentModerationKeywordHitCount{},
+			Total:    3,
+			Page:     3,
+			PageSize: 10,
+			Pages:    1,
+		},
+	}}
+	handler := NewContentModerationHandler(service.NewContentModerationService(nil, repo, nil, nil, nil, nil, nil, nil))
+	router := gin.New()
+	router.GET("/keyword-stats", handler.GetKeywordHitStats)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/keyword-stats?from=2026-08-01&to=2026-08-07&user_page=2&user_page_size=15&keyword_page=3&keyword_page_size=10", nil)
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, 1, repo.statsCalls)
+	require.Equal(t, 2, repo.statsFilter.UserPagination.Page)
+	require.Equal(t, 15, repo.statsFilter.UserPagination.PageSize)
+	require.Equal(t, 3, repo.statsFilter.KeywordPagination.Page)
+	require.Equal(t, 10, repo.statsFilter.KeywordPagination.PageSize)
+	require.Equal(t, time.Date(2026, time.August, 1, 0, 0, 0, 0, time.UTC), *repo.statsFilter.From)
+	require.Equal(t, time.Date(2026, time.August, 7, 23, 59, 59, int(time.Second-time.Nanosecond), time.UTC), *repo.statsFilter.To)
+
+	var response struct {
+		Code int                                   `json:"code"`
+		Data service.ContentModerationKeywordStats `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Zero(t, response.Code)
+	require.Equal(t, int64(9), response.Data.TotalHits)
+	require.Equal(t, "alice@example.com", response.Data.Users.Items[0].UserEmail)
+}
+
+func TestContentModerationHandlerGetKeywordHitStatsRejectsInvalidPagination(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &cyberRequestAuditHandlerRepo{}
+	handler := NewContentModerationHandler(service.NewContentModerationService(nil, repo, nil, nil, nil, nil, nil, nil))
+	router := gin.New()
+	router.GET("/keyword-stats", handler.GetKeywordHitStats)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/keyword-stats?user_page=0", nil)
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Zero(t, repo.statsCalls)
 }
 
 func TestContentModerationHandlerGetCyberPolicyRequestAudit(t *testing.T) {
