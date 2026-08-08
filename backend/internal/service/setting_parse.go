@@ -238,6 +238,8 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		openAIAdvancedSchedulerSettingKey:                            "false",
 		SettingKeyOpenAIPrioritySaturationEnabled:                    "true",
 		SettingKeyOpenAIPrioritySaturationAffinityReservePercent:     strconv.Itoa(DefaultOpenAIPrioritySaturationAffinityReservePercent),
+		SettingKeyOpenAIPrioritySaturationPoolBalanceEnabled:         "false",
+		SettingKeyOpenAIPrioritySaturationAPIKeySharePercent:         strconv.Itoa(DefaultOpenAIPrioritySaturationAPIKeySharePercent),
 		SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled:       "false",
 		SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled: "false",
 		SettingKeyOpenAIAdvancedSchedulerLBTopK:                      "",
@@ -887,6 +889,10 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.OpenAIPrioritySaturationEnabled = settings[SettingKeyOpenAIPrioritySaturationEnabled] == "true"
 	result.OpenAIPrioritySaturationAffinityReservePercent = parseOpenAIPrioritySaturationAffinityReservePercent(
 		settings[SettingKeyOpenAIPrioritySaturationAffinityReservePercent],
+	)
+	result.OpenAIPrioritySaturationPoolBalanceEnabled = settings[SettingKeyOpenAIPrioritySaturationPoolBalanceEnabled] == "true"
+	result.OpenAIPrioritySaturationAPIKeySharePercent = parseOpenAIPrioritySaturationAPIKeySharePercent(
+		settings[SettingKeyOpenAIPrioritySaturationAPIKeySharePercent],
 	)
 	result.OpenAIAdvancedSchedulerStickyWeightedEnabled = settings[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled] == "true"
 	result.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled = settings[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled] == "true"

@@ -79,6 +79,11 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
+import {
+  addLocalDays,
+  formatLocalDate,
+  getNaturalUsagePeriodRanges
+} from '@/utils/dateRanges'
 
 interface DatePreset {
   labelKey: string
@@ -109,29 +114,14 @@ const localEndDate = ref(props.endDate)
 const activePreset = ref<string | null>('last24Hours')
 
 const today = computed(() => {
-  // Use local timezone to avoid UTC timezone issues
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+  return formatLocalDate(new Date())
 })
 
 // Tomorrow's date - used for max date to handle timezone differences
 // When user is in a timezone behind the server, "today" on server might be "tomorrow" locally
 const tomorrow = computed(() => {
-  const d = new Date()
-  d.setDate(d.getDate() + 1)
-  return formatDateToString(d)
+  return formatLocalDate(addLocalDays(new Date(), 1))
 })
-
-// Helper function to format date to YYYY-MM-DD using local timezone
-const formatDateToString = (date: Date): string => {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
 
 const presets: DatePreset[] = [
   {
@@ -146,10 +136,21 @@ const presets: DatePreset[] = [
     labelKey: 'dates.yesterday',
     value: 'yesterday',
     getRange: () => {
-      const d = new Date()
-      d.setDate(d.getDate() - 1)
-      const yesterday = formatDateToString(d)
-      return { start: yesterday, end: yesterday }
+      return getNaturalUsagePeriodRanges().yesterday
+    }
+  },
+  {
+    labelKey: 'dates.thisWeek',
+    value: 'thisWeek',
+    getRange: () => {
+      return getNaturalUsagePeriodRanges().thisWeek
+    }
+  },
+  {
+    labelKey: 'dates.lastWeek',
+    value: 'lastWeek',
+    getRange: () => {
+      return getNaturalUsagePeriodRanges().lastWeek
     }
   },
   {
@@ -159,8 +160,8 @@ const presets: DatePreset[] = [
       const end = new Date()
       const start = new Date(end.getTime() - 24 * 60 * 60 * 1000)
       return {
-        start: formatDateToString(start),
-        end: formatDateToString(end)
+        start: formatLocalDate(start),
+        end: formatLocalDate(end)
       }
     }
   },
@@ -171,7 +172,7 @@ const presets: DatePreset[] = [
       const end = today.value
       const d = new Date()
       d.setDate(d.getDate() - 6)
-      const start = formatDateToString(d)
+      const start = formatLocalDate(d)
       return { start, end }
     }
   },
@@ -182,7 +183,7 @@ const presets: DatePreset[] = [
       const end = today.value
       const d = new Date()
       d.setDate(d.getDate() - 13)
-      const start = formatDateToString(d)
+      const start = formatLocalDate(d)
       return { start, end }
     }
   },
@@ -193,7 +194,7 @@ const presets: DatePreset[] = [
       const end = today.value
       const d = new Date()
       d.setDate(d.getDate() - 29)
-      const start = formatDateToString(d)
+      const start = formatLocalDate(d)
       return { start, end }
     }
   },
@@ -202,7 +203,7 @@ const presets: DatePreset[] = [
     value: 'thisMonth',
     getRange: () => {
       const now = new Date()
-      const start = formatDateToString(new Date(now.getFullYear(), now.getMonth(), 1))
+      const start = formatLocalDate(new Date(now.getFullYear(), now.getMonth(), 1))
       return { start, end: today.value }
     }
   },
@@ -211,8 +212,8 @@ const presets: DatePreset[] = [
     value: 'lastMonth',
     getRange: () => {
       const now = new Date()
-      const start = formatDateToString(new Date(now.getFullYear(), now.getMonth() - 1, 1))
-      const end = formatDateToString(new Date(now.getFullYear(), now.getMonth(), 0))
+      const start = formatLocalDate(new Date(now.getFullYear(), now.getMonth() - 1, 1))
+      const end = formatLocalDate(new Date(now.getFullYear(), now.getMonth(), 0))
       return { start, end }
     }
   }

@@ -317,6 +317,8 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		OpenAIAdvancedSchedulerEnabled:                         settings.OpenAIAdvancedSchedulerEnabled,
 		OpenAIPrioritySaturationEnabled:                        settings.OpenAIPrioritySaturationEnabled,
 		OpenAIPrioritySaturationAffinityReservePercent:         settings.OpenAIPrioritySaturationAffinityReservePercent,
+		OpenAIPrioritySaturationPoolBalanceEnabled:             settings.OpenAIPrioritySaturationPoolBalanceEnabled,
+		OpenAIPrioritySaturationAPIKeySharePercent:             settings.OpenAIPrioritySaturationAPIKeySharePercent,
 		OpenAIAdvancedSchedulerStickyWeightedEnabled:           settings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
 		OpenAIAdvancedSchedulerSubscriptionPriorityEnabled:     settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
 		OpenAIAdvancedSchedulerLBTopK:                          settings.OpenAIAdvancedSchedulerLBTopK,

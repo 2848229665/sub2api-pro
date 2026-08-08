@@ -196,6 +196,11 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.openaiPrioritySaturation.description": "独立于实验加权调度。按 Priority 升序、账号 ID 升序逐个填满普通容量。",
     "admin.settings.openaiPrioritySaturation.enable": "启用优先级饱和调度",
     "admin.settings.openaiPrioritySaturation.enableHint": "新会话使用普通容量；已有粘性会话可使用完整容量。",
+    "admin.settings.openaiPrioritySaturation.poolBalanceEnabled": "启用账号 / Key 池平衡",
+    "admin.settings.openaiPrioritySaturation.poolBalanceEnabledHint": "新会话按账号约三分之二、Key 约三分之一分配。",
+    "admin.settings.openaiPrioritySaturation.apiKeySharePercentLabel": "Key 初始并发比例",
+    "admin.settings.openaiPrioritySaturation.apiKeySharePercentHint": "默认 33%。",
+    "admin.settings.openaiPrioritySaturation.apiKeySharePercentError": "Key 初始并发比例必须是 1 到 99 之间的整数。",
     "admin.settings.openaiPrioritySaturation.reservePercentLabel": "亲和会话预留百分比",
     "admin.settings.openaiPrioritySaturation.reservePercentHint": "全局应用于所有 OpenAI 账号。",
     "admin.settings.openaiPrioritySaturation.reservePercentError": "亲和会话预留百分比必须是 0 到 99 之间的整数。",
@@ -511,6 +516,8 @@ const baseSettingsResponse = {
   openai_advanced_scheduler_enabled: false,
   openai_priority_saturation_enabled: false,
   openai_priority_saturation_affinity_reserve_percent: 20,
+  openai_priority_saturation_pool_balance_enabled: false,
+  openai_priority_saturation_api_key_share_percent: 33,
   openai_advanced_scheduler_sticky_weighted_enabled: false,
   openai_advanced_scheduler_subscription_priority_enabled: false,
   openai_advanced_scheduler_lb_top_k: "",
@@ -1335,6 +1342,47 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(updateSettings).not.toHaveBeenCalled();
     expect(showError).toHaveBeenCalledWith(
       "亲和会话预留百分比必须是 0 到 99 之间的整数。",
+    );
+  });
+
+  it("enables account/key pool balancing and saves the configured Key share", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper
+      .get('[data-testid="openai-priority-saturation-pool-balance-toggle"]')
+      .setValue(true);
+    const shareInput = wrapper.get(
+      '[data-testid="openai-priority-saturation-api-key-share-percent"]',
+    );
+    await shareInput.setValue("40");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        openai_priority_saturation_pool_balance_enabled: true,
+        openai_priority_saturation_api_key_share_percent: 40,
+      }),
+    );
+  });
+
+  it("rejects an invalid Key share percentage", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper
+      .get('[data-testid="openai-priority-saturation-pool-balance-toggle"]')
+      .setValue(true);
+    await wrapper
+      .get('[data-testid="openai-priority-saturation-api-key-share-percent"]')
+      .setValue("0");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(showError).toHaveBeenCalledWith(
+      "Key 初始并发比例必须是 1 到 99 之间的整数。",
     );
   });
 

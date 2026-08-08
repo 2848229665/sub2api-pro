@@ -1402,9 +1402,16 @@ func (h *OpenAIGatewayHandler) acquireResponsesUserSlot(
 	reqLog *zap.Logger,
 ) (func(), bool) {
 	ctx := c.Request.Context()
-	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, userID, userConcurrency, reqStream, streamStarted)
+	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWaitObserved(
+		c,
+		userID,
+		userConcurrency,
+		reqStream,
+		streamStarted,
+		reqLog,
+		"openai",
+	)
 	if err != nil {
-		reqLog.Warn("openai.user_slot_acquire_failed", zap.Error(err))
 		h.handleConcurrencyError(c, err, "user", *streamStarted)
 		return nil, false
 	}
@@ -1511,24 +1518,67 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 			waitPlan := selection.WaitPlan
 			fastReleaseFunc, fastAcquired, err := h.concurrencyHelper.TryAcquireAccountSlot(ctx, account.ID, waitPlan.MaxConcurrency)
 			if err != nil {
-				reqLog.Warn("openai.account_slot_quick_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+				fields := openAIAccountWaitLogFields(groupID, selection, "quick_acquire", false, 0, h.concurrencyHelper.accountLoadSnapshot(ctx, account.ID, waitPlan.MaxConcurrency))
+				fields = append(fields,
+					zap.String("failure_reason", concurrencyWaitFailureReason(err)),
+					zap.Bool("stream_started", *streamStarted),
+				)
+				fields = append(fields, concurrencyResponseLogFields(err, "account")...)
+				fields = append(fields, zap.Error(err))
+				reqLog.Warn("openai.account_slot_quick_acquire_failed", fields...)
 				h.handleConcurrencyError(c, err, "account", *streamStarted)
 				return nil, openAISlotAcquireFailed, sessionHash
 			}
 			if fastAcquired {
 				selection.Acquired = true
 				selection.ReleaseFunc = fastReleaseFunc
+				reqLog.Info(
+					"openai.account_wait_avoided",
+					openAIAccountWaitLogFields(
+						groupID,
+						selection,
+						"handler_recheck_acquired",
+						false,
+						0,
+						h.concurrencyHelper.accountLoadSnapshot(ctx, account.ID, waitPlan.MaxConcurrency),
+					)...,
+				)
 			} else {
+				waitStartedAt := time.Now()
 				canWait, waitErr := h.concurrencyHelper.IncrementAccountWaitCount(ctx, account.ID, waitPlan.MaxWaiting)
 				if waitErr != nil {
-					reqLog.Warn("openai.account_wait_counter_increment_failed", zap.Int64("account_id", account.ID), zap.Error(waitErr))
+					fields := openAIAccountWaitLogFields(groupID, selection, "queue_increment", false, time.Since(waitStartedAt), h.concurrencyHelper.accountLoadSnapshot(ctx, account.ID, waitPlan.MaxConcurrency))
+					fields = append(fields, zap.Error(waitErr))
+					reqLog.Warn("openai.account_wait_counter_increment_failed", fields...)
 				} else if !canWait {
-					reqLog.Info("openai.account_wait_queue_full", zap.Int64("account_id", account.ID), zap.Int("max_waiting", waitPlan.MaxWaiting))
+					queueErr := &WaitQueueFullError{SlotType: "account"}
+					fields := openAIAccountWaitLogFields(
+						groupID,
+						selection,
+						"queue_full",
+						false,
+						time.Since(waitStartedAt),
+						h.concurrencyHelper.accountLoadSnapshot(ctx, account.ID, waitPlan.MaxConcurrency),
+					)
+					fields = append(fields, concurrencyResponseLogFields(queueErr, "account")...)
+					fields = append(fields, zap.Bool("stream_started", *streamStarted))
+					reqLog.Warn("openai.account_wait_queue_full", fields...)
 					h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later", *streamStarted)
 					return nil, openAISlotAcquireFailed, sessionHash
 				}
 
 				accountWaitCounted := waitErr == nil && canWait
+				reqLog.Info(
+					"openai.account_wait_started",
+					openAIAccountWaitLogFields(
+						groupID,
+						selection,
+						"waiting",
+						accountWaitCounted,
+						0,
+						h.concurrencyHelper.accountLoadSnapshot(ctx, account.ID, waitPlan.MaxConcurrency),
+					)...,
+				)
 				accountReleaseFunc, acquireErr := h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(
 					c,
 					account.ID,
@@ -1539,14 +1589,28 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 				)
 				if accountWaitCounted {
 					h.concurrencyHelper.DecrementAccountWaitCount(ctx, account.ID)
+					accountWaitCounted = false
 				}
+				waitDuration := time.Since(waitStartedAt)
+				finalSnapshot := h.concurrencyHelper.accountLoadSnapshot(ctx, account.ID, waitPlan.MaxConcurrency)
 				if acquireErr != nil {
-					reqLog.Warn("openai.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(acquireErr))
+					fields := openAIAccountWaitLogFields(groupID, selection, "wait", false, waitDuration, finalSnapshot)
+					fields = append(fields,
+						zap.String("failure_reason", concurrencyWaitFailureReason(acquireErr)),
+						zap.Bool("stream_started", *streamStarted),
+					)
+					fields = append(fields, concurrencyResponseLogFields(acquireErr, "account")...)
+					fields = append(fields, zap.Error(acquireErr))
+					reqLog.Warn("openai.account_slot_acquire_failed", fields...)
 					h.handleConcurrencyError(c, acquireErr, "account", *streamStarted)
 					return nil, openAISlotAcquireFailed, sessionHash
 				}
 				selection.Acquired = true
 				selection.ReleaseFunc = accountReleaseFunc
+				reqLog.Info(
+					"openai.account_wait_acquired",
+					openAIAccountWaitLogFields(groupID, selection, "acquired", false, waitDuration, finalSnapshot)...,
+				)
 			}
 		}
 
@@ -1632,6 +1696,60 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 	reqLog.Warn("openai.sticky_owner_reconcile_exhausted")
 	h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts", *streamStarted)
 	return nil, openAISlotAcquireFailed, sessionHash
+}
+
+func openAIAccountWaitLogFields(
+	groupID *int64,
+	selection *service.AccountSelectionResult,
+	phase string,
+	queueCounted bool,
+	waitDuration time.Duration,
+	snapshot slotLoadSnapshot,
+) []zap.Field {
+	fields := []zap.Field{
+		zap.String("phase", phase),
+		zap.Bool("queue_counted", queueCounted),
+	}
+	if groupID != nil {
+		fields = append(fields, zap.Int64("group_id", *groupID))
+	}
+	if selection != nil && selection.Account != nil {
+		account := selection.Account
+		reservePercent := selection.OpenAIAffinityReservePercent()
+		fields = append(fields,
+			zap.Int64("account_id", account.ID),
+			zap.String("account_type", account.Type),
+			zap.Int("account_priority", account.Priority),
+			zap.Int("general_concurrency_limit", account.GeneralConcurrencyLimit(reservePercent)),
+			zap.Int("hard_concurrency_limit", account.Concurrency),
+			zap.Int("affinity_reserve_percent", reservePercent),
+		)
+	}
+	if selection != nil && selection.WaitPlan != nil {
+		waitPlan := selection.WaitPlan
+		waitReason := waitPlan.Reason
+		if waitReason == "" {
+			waitReason = "scheduler_fallback"
+		}
+		waitCandidateCount := waitPlan.CandidateCount
+		if waitCandidateCount <= 0 {
+			waitCandidateCount = len(waitPlan.Candidates)
+		}
+		fields = append(fields,
+			zap.Int("effective_concurrency_limit", waitPlan.MaxConcurrency),
+			zap.Int64("timeout_ms", waitPlan.Timeout.Milliseconds()),
+			zap.Int("max_waiting", waitPlan.MaxWaiting),
+			zap.String("wait_reason", waitReason),
+			zap.Int("wait_candidate_count", waitCandidateCount),
+			zap.Int("logged_wait_candidate_count", len(waitPlan.Candidates)),
+			zap.Bool("wait_candidates_truncated", waitPlan.CandidatesTruncated),
+			zap.Any("wait_candidates", waitPlan.Candidates),
+		)
+	}
+	if waitDuration > 0 {
+		fields = append(fields, zap.Int64("wait_ms", waitDuration.Milliseconds()))
+	}
+	return append(fields, snapshot.zapFields()...)
 }
 
 func (h *OpenAIGatewayHandler) finalizeOpenAIResponseAffinity(

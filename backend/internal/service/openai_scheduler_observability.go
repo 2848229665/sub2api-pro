@@ -56,8 +56,61 @@ func (s *OpenAIGatewayService) observeOpenAIAccountSchedule(
 		"temporary_overflow", decision.TemporaryOverflow,
 		"affinity_wait", decision.AffinityWait,
 		"affinity_rejected", decision.AffinityRejected,
+		"preferred_pool", decision.PreferredPool,
+		"selected_pool", decision.SelectedPool,
+		"account_active", decision.AccountActive,
+		"key_active", decision.KeyActive,
+		"account_capacity", decision.AccountCapacity,
+		"key_capacity", decision.KeyCapacity,
+		"key_budget", decision.KeyBudget,
+		"fallback_reason", decision.FallbackReason,
+		"budget_reason", decision.BudgetReason,
 		"error", scheduleErr,
 	)
+
+	if selection != nil && selection.WaitPlan != nil {
+		waitReason := selection.WaitPlan.Reason
+		if waitReason == "" {
+			if decision.AffinityWait {
+				waitReason = "affinity_owner_busy"
+			} else {
+				waitReason = "scheduler_fallback"
+			}
+		}
+		selectedPriority := 0
+		if selection.Account != nil {
+			selectedPriority = selection.Account.Priority
+		}
+		waitCandidateCount := selection.WaitPlan.CandidateCount
+		if waitCandidateCount <= 0 {
+			waitCandidateCount = len(selection.WaitPlan.Candidates)
+		}
+		slog.Info(
+			"openai_account_schedule_wait_plan",
+			"policy", policy,
+			"group_id", derefGroupID(groupID),
+			"platform", normalizeOpenAICompatiblePlatform(platform),
+			"requested_model", requestedModel,
+			"layer", decision.Layer,
+			"reason", waitReason,
+			"selected_account_id", selectedAccountID,
+			"selected_account_type", decision.SelectedAccountType,
+			"selected_priority", selectedPriority,
+			"candidate_count", decision.CandidateCount,
+			"excluded_account_count", excludedAccountCount,
+			"general_reject_count", decision.GeneralRejectCount,
+			"general_limit", decision.GeneralLimit,
+			"hard_limit", decision.HardLimit,
+			"affinity_reserve", decision.AffinityReserve,
+			"affinity_wait", decision.AffinityWait,
+			"wait_timeout_ms", selection.WaitPlan.Timeout.Milliseconds(),
+			"max_waiting", selection.WaitPlan.MaxWaiting,
+			"wait_candidate_count", waitCandidateCount,
+			"logged_wait_candidate_count", len(selection.WaitPlan.Candidates),
+			"wait_candidates_truncated", selection.WaitPlan.CandidatesTruncated,
+			"wait_candidates", selection.WaitPlan.Candidates,
+		)
+	}
 
 	if s.openaiSchedulerMetricsLogCounter.Add(1)%openAIAccountSchedulerMetricsLogInterval != 0 {
 		return

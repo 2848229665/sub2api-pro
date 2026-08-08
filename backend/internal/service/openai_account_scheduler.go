@@ -49,6 +49,8 @@ type cachedOpenAIAdvancedSchedulerSetting struct {
 	enabled                        bool
 	prioritySaturationEnabled      bool
 	affinityReservePercent         int
+	poolBalanceEnabled             bool
+	apiKeySharePercent             int
 	stickyWeightedEnabled          bool
 	subscriptionPriorityEnabled    bool
 	lbTopKOverride                 int
@@ -62,6 +64,8 @@ type openAIAdvancedSchedulerRuntimeSettings struct {
 	enabled                        bool
 	prioritySaturationEnabled      bool
 	affinityReservePercent         int
+	poolBalanceEnabled             bool
+	apiKeySharePercent             int
 	stickyWeightedEnabled          bool
 	subscriptionPriorityEnabled    bool
 	lbTopKOverride                 int
@@ -224,6 +228,15 @@ type OpenAIAccountScheduleDecision struct {
 	TemporaryOverflow   bool
 	AffinityWait        bool
 	AffinityRejected    bool
+	PreferredPool       string
+	SelectedPool        string
+	AccountActive       int
+	KeyActive           int
+	AccountCapacity     int
+	KeyCapacity         int
+	KeyBudget           int
+	FallbackReason      string
+	BudgetReason        string
 }
 
 type OpenAIAccountSchedulerMetricsSnapshot struct {
@@ -1909,6 +1922,8 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 				enabled:                        cached.enabled,
 				prioritySaturationEnabled:      cached.prioritySaturationEnabled,
 				affinityReservePercent:         normalizeOpenAIPrioritySaturationAffinityReservePercent(cached.affinityReservePercent),
+				poolBalanceEnabled:             cached.poolBalanceEnabled,
+				apiKeySharePercent:             normalizeOpenAIPrioritySaturationAPIKeySharePercent(cached.apiKeySharePercent),
 				stickyWeightedEnabled:          cached.stickyWeightedEnabled,
 				subscriptionPriorityEnabled:    cached.subscriptionPriorityEnabled,
 				lbTopKOverride:                 cached.lbTopKOverride,
@@ -1926,6 +1941,8 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 					enabled:                        cached.enabled,
 					prioritySaturationEnabled:      cached.prioritySaturationEnabled,
 					affinityReservePercent:         normalizeOpenAIPrioritySaturationAffinityReservePercent(cached.affinityReservePercent),
+					poolBalanceEnabled:             cached.poolBalanceEnabled,
+					apiKeySharePercent:             normalizeOpenAIPrioritySaturationAPIKeySharePercent(cached.apiKeySharePercent),
 					stickyWeightedEnabled:          cached.stickyWeightedEnabled,
 					subscriptionPriorityEnabled:    cached.subscriptionPriorityEnabled,
 					lbTopKOverride:                 cached.lbTopKOverride,
@@ -1939,6 +1956,8 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 		enabled := false
 		prioritySaturationEnabled := false
 		affinityReservePercent := DefaultOpenAIPrioritySaturationAffinityReservePercent
+		poolBalanceEnabled := false
+		apiKeySharePercent := DefaultOpenAIPrioritySaturationAPIKeySharePercent
 		stickyWeightedEnabled := false
 		subscriptionPriorityEnabled := false
 		lbTopKOverride := 0
@@ -1953,6 +1972,8 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 				enabled = strings.EqualFold(strings.TrimSpace(values[openAIAdvancedSchedulerSettingKey]), "true")
 				prioritySaturationEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAIPrioritySaturationEnabled]), "true")
 				affinityReservePercent = parseOpenAIPrioritySaturationAffinityReservePercent(values[SettingKeyOpenAIPrioritySaturationAffinityReservePercent])
+				poolBalanceEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAIPrioritySaturationPoolBalanceEnabled]), "true")
+				apiKeySharePercent = parseOpenAIPrioritySaturationAPIKeySharePercent(values[SettingKeyOpenAIPrioritySaturationAPIKeySharePercent])
 				stickyWeightedEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled]), "true")
 				subscriptionPriorityEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled]), "true")
 				lbTopKOverride = parsePositiveIntOverride(values[SettingKeyOpenAIAdvancedSchedulerLBTopK])
@@ -1972,6 +1993,8 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 				enabled = strings.EqualFold(strings.TrimSpace(fallbackValues[openAIAdvancedSchedulerSettingKey]), "true")
 				prioritySaturationEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAIPrioritySaturationEnabled]), "true")
 				affinityReservePercent = parseOpenAIPrioritySaturationAffinityReservePercent(fallbackValues[SettingKeyOpenAIPrioritySaturationAffinityReservePercent])
+				poolBalanceEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAIPrioritySaturationPoolBalanceEnabled]), "true")
+				apiKeySharePercent = parseOpenAIPrioritySaturationAPIKeySharePercent(fallbackValues[SettingKeyOpenAIPrioritySaturationAPIKeySharePercent])
 				stickyWeightedEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled]), "true")
 				subscriptionPriorityEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled]), "true")
 				lbTopKOverride = parsePositiveIntOverride(fallbackValues[SettingKeyOpenAIAdvancedSchedulerLBTopK])
@@ -1985,6 +2008,8 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 			enabled:                        enabled,
 			prioritySaturationEnabled:      prioritySaturationEnabled,
 			affinityReservePercent:         affinityReservePercent,
+			poolBalanceEnabled:             poolBalanceEnabled,
+			apiKeySharePercent:             apiKeySharePercent,
 			stickyWeightedEnabled:          stickyWeightedEnabled,
 			subscriptionPriorityEnabled:    subscriptionPriorityEnabled,
 			lbTopKOverride:                 lbTopKOverride,
@@ -1997,6 +2022,8 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 			enabled:                        enabled,
 			prioritySaturationEnabled:      prioritySaturationEnabled,
 			affinityReservePercent:         affinityReservePercent,
+			poolBalanceEnabled:             poolBalanceEnabled,
+			apiKeySharePercent:             apiKeySharePercent,
 			stickyWeightedEnabled:          stickyWeightedEnabled,
 			subscriptionPriorityEnabled:    subscriptionPriorityEnabled,
 			lbTopKOverride:                 lbTopKOverride,
@@ -2015,6 +2042,17 @@ func (s *OpenAIGatewayService) isOpenAIAdvancedSchedulerEnabled(ctx context.Cont
 
 func (s *OpenAIGatewayService) isOpenAIPrioritySaturationEnabled(ctx context.Context) bool {
 	return s.openAIAdvancedSchedulerRuntimeSettings(ctx).prioritySaturationEnabled
+}
+
+func (s *OpenAIGatewayService) isOpenAIPrioritySaturationPoolBalanceEnabled(ctx context.Context) bool {
+	settings := s.openAIAdvancedSchedulerRuntimeSettings(ctx)
+	return settings.prioritySaturationEnabled && settings.poolBalanceEnabled
+}
+
+func (s *OpenAIGatewayService) openAIPrioritySaturationAPIKeySharePercent(ctx context.Context) int {
+	return normalizeOpenAIPrioritySaturationAPIKeySharePercent(
+		s.openAIAdvancedSchedulerRuntimeSettings(ctx).apiKeySharePercent,
+	)
 }
 
 func (s *OpenAIGatewayService) isOpenAILowUpstreamRatePriorityEnabled(ctx context.Context) bool {
@@ -2043,6 +2081,8 @@ func openAIAdvancedSchedulerRuntimeSettingKeys() []string {
 		openAIAdvancedSchedulerSettingKey,
 		SettingKeyOpenAIPrioritySaturationEnabled,
 		SettingKeyOpenAIPrioritySaturationAffinityReservePercent,
+		SettingKeyOpenAIPrioritySaturationPoolBalanceEnabled,
+		SettingKeyOpenAIPrioritySaturationAPIKeySharePercent,
 		SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled,
 		SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
 		SettingKeyOpenAIAdvancedSchedulerLBTopK,

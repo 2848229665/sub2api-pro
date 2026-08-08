@@ -37,6 +37,8 @@ func TestInitializeDefaultSettingsEnablesPrioritySaturation(t *testing.T) {
 	require.NoError(t, svc.InitializeDefaultSettings(context.Background()))
 	require.Equal(t, "true", repo.values[SettingKeyOpenAIPrioritySaturationEnabled])
 	require.Equal(t, "20", repo.values[SettingKeyOpenAIPrioritySaturationAffinityReservePercent])
+	require.Equal(t, "false", repo.values[SettingKeyOpenAIPrioritySaturationPoolBalanceEnabled])
+	require.Equal(t, "33", repo.values[SettingKeyOpenAIPrioritySaturationAPIKeySharePercent])
 	require.Equal(t, "false", repo.values[openAIAdvancedSchedulerSettingKey])
 }
 
@@ -52,6 +54,19 @@ func TestValidateOpenAIPrioritySaturationAffinityReservePercent(t *testing.T) {
 	require.Equal(t, 0, parseOpenAIPrioritySaturationAffinityReservePercent("0"))
 }
 
+func TestValidateOpenAIPrioritySaturationAPIKeySharePercent(t *testing.T) {
+	for _, percent := range []int{1, 33, 99} {
+		require.NoError(t, validateOpenAIPrioritySaturationAPIKeySharePercent(percent))
+	}
+	require.Error(t, validateOpenAIPrioritySaturationAPIKeySharePercent(0))
+	require.Error(t, validateOpenAIPrioritySaturationAPIKeySharePercent(100))
+	require.Equal(t, 33, parseOpenAIPrioritySaturationAPIKeySharePercent(""))
+	require.Equal(t, 33, parseOpenAIPrioritySaturationAPIKeySharePercent("invalid"))
+	require.Equal(t, 33, parseOpenAIPrioritySaturationAPIKeySharePercent("100"))
+	require.Equal(t, 33, parseOpenAIPrioritySaturationAPIKeySharePercent("0"))
+	require.Equal(t, 25, parseOpenAIPrioritySaturationAPIKeySharePercent("25"))
+}
+
 func TestRefreshCachedSettingsPreservesPrioritySaturationSwitch(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
@@ -60,6 +75,8 @@ func TestRefreshCachedSettingsPreservesPrioritySaturationSwitch(t *testing.T) {
 	service.refreshCachedSettings(&SystemSettings{
 		OpenAIPrioritySaturationEnabled:                true,
 		OpenAIPrioritySaturationAffinityReservePercent: 35,
+		OpenAIPrioritySaturationPoolBalanceEnabled:     true,
+		OpenAIPrioritySaturationAPIKeySharePercent:     25,
 	})
 
 	cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting)
@@ -67,6 +84,8 @@ func TestRefreshCachedSettingsPreservesPrioritySaturationSwitch(t *testing.T) {
 	require.NotNil(t, cached)
 	require.True(t, cached.prioritySaturationEnabled)
 	require.Equal(t, 35, cached.affinityReservePercent)
+	require.True(t, cached.poolBalanceEnabled)
+	require.Equal(t, 25, cached.apiKeySharePercent)
 	require.False(t, cached.enabled)
 }
 

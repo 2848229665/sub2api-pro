@@ -254,6 +254,8 @@ type SystemSettings struct {
 	OpenAIAdvancedSchedulerEnabled                         bool
 	OpenAIPrioritySaturationEnabled                        bool
 	OpenAIPrioritySaturationAffinityReservePercent         int
+	OpenAIPrioritySaturationPoolBalanceEnabled             bool
+	OpenAIPrioritySaturationAPIKeySharePercent             int
 	OpenAIAdvancedSchedulerStickyWeightedEnabled           bool
 	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled     bool
 	OpenAIAdvancedSchedulerLBTopK                          string

@@ -276,6 +276,8 @@ type UpdateSettingsRequest struct {
 	OpenAIAdvancedSchedulerEnabled                     *bool    `json:"openai_advanced_scheduler_enabled"`
 	OpenAIPrioritySaturationEnabled                    *bool    `json:"openai_priority_saturation_enabled"`
 	OpenAIPrioritySaturationAffinityReservePercent     *int     `json:"openai_priority_saturation_affinity_reserve_percent"`
+	OpenAIPrioritySaturationPoolBalanceEnabled         *bool    `json:"openai_priority_saturation_pool_balance_enabled"`
+	OpenAIPrioritySaturationAPIKeySharePercent         *int     `json:"openai_priority_saturation_api_key_share_percent"`
 	OpenAIAdvancedSchedulerStickyWeightedEnabled       *bool    `json:"openai_advanced_scheduler_sticky_weighted_enabled"`
 	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled *bool    `json:"openai_advanced_scheduler_subscription_priority_enabled"`
 	OpenAIAdvancedSchedulerLBTopK                      *string  `json:"openai_advanced_scheduler_lb_top_k"`
@@ -1801,6 +1803,18 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAIPrioritySaturationAffinityReservePercent
 		}(),
+		OpenAIPrioritySaturationPoolBalanceEnabled: func() bool {
+			if req.OpenAIPrioritySaturationPoolBalanceEnabled != nil {
+				return *req.OpenAIPrioritySaturationPoolBalanceEnabled
+			}
+			return previousSettings.OpenAIPrioritySaturationPoolBalanceEnabled
+		}(),
+		OpenAIPrioritySaturationAPIKeySharePercent: func() int {
+			if req.OpenAIPrioritySaturationAPIKeySharePercent != nil {
+				return *req.OpenAIPrioritySaturationAPIKeySharePercent
+			}
+			return previousSettings.OpenAIPrioritySaturationAPIKeySharePercent
+		}(),
 		OpenAIAdvancedSchedulerStickyWeightedEnabled: func() bool {
 			if req.OpenAIAdvancedSchedulerStickyWeightedEnabled != nil {
 				return *req.OpenAIAdvancedSchedulerStickyWeightedEnabled
@@ -2250,6 +2264,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpenAIAdvancedSchedulerEnabled:                         updatedSettings.OpenAIAdvancedSchedulerEnabled,
 		OpenAIPrioritySaturationEnabled:                        updatedSettings.OpenAIPrioritySaturationEnabled,
 		OpenAIPrioritySaturationAffinityReservePercent:         updatedSettings.OpenAIPrioritySaturationAffinityReservePercent,
+		OpenAIPrioritySaturationPoolBalanceEnabled:             updatedSettings.OpenAIPrioritySaturationPoolBalanceEnabled,
+		OpenAIPrioritySaturationAPIKeySharePercent:             updatedSettings.OpenAIPrioritySaturationAPIKeySharePercent,
 		OpenAIAdvancedSchedulerStickyWeightedEnabled:           updatedSettings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
 		OpenAIAdvancedSchedulerSubscriptionPriorityEnabled:     updatedSettings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
 		OpenAIAdvancedSchedulerLBTopK:                          updatedSettings.OpenAIAdvancedSchedulerLBTopK,

@@ -274,6 +274,74 @@
                 class="space-y-4 border-t border-gray-100 pt-4 dark:border-dark-700"
               >
                 <div
+                  class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6"
+                >
+                  <div class="min-w-0">
+                    <label
+                      class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.poolBalanceEnabled",
+                        )
+                      }}
+                    </label>
+                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.poolBalanceEnabledHint",
+                        )
+                      }}
+                    </p>
+                  </div>
+                  <Toggle
+                    v-model="form.openai_priority_saturation_pool_balance_enabled"
+                    class="self-end sm:self-auto"
+                    data-testid="openai-priority-saturation-pool-balance-toggle"
+                  />
+                </div>
+                <div
+                  v-if="form.openai_priority_saturation_pool_balance_enabled"
+                  class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6"
+                >
+                  <div class="min-w-0">
+                    <label
+                      class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                      for="openai-priority-saturation-api-key-share-percent"
+                    >
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.apiKeySharePercentLabel",
+                        )
+                      }}
+                    </label>
+                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.apiKeySharePercentHint",
+                        )
+                      }}
+                    </p>
+                  </div>
+                  <div class="relative w-full shrink-0 sm:w-32">
+                    <input
+                      id="openai-priority-saturation-api-key-share-percent"
+                      v-model.number="form.openai_priority_saturation_api_key_share_percent"
+                      class="input pr-8"
+                      data-testid="openai-priority-saturation-api-key-share-percent"
+                      min="1"
+                      max="99"
+                      required
+                      step="1"
+                      type="number"
+                    />
+                    <span
+                      class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400"
+                      >%</span
+                    >
+                  </div>
+                </div>
+                <div
                   class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6"
                 >
                   <div class="min-w-0">
@@ -9326,6 +9394,8 @@ type SettingsForm = Omit<
   openai_advanced_scheduler_enabled: boolean;
   openai_priority_saturation_enabled: boolean;
   openai_priority_saturation_affinity_reserve_percent: number;
+  openai_priority_saturation_pool_balance_enabled: boolean;
+  openai_priority_saturation_api_key_share_percent: number;
   openai_advanced_scheduler_sticky_weighted_enabled: boolean;
   openai_advanced_scheduler_subscription_priority_enabled: boolean;
   openai_advanced_scheduler_lb_top_k: string;
@@ -9561,6 +9631,8 @@ const form = reactive<SettingsForm>({
   openai_advanced_scheduler_enabled: false,
   openai_priority_saturation_enabled: true,
   openai_priority_saturation_affinity_reserve_percent: 20,
+  openai_priority_saturation_pool_balance_enabled: false,
+  openai_priority_saturation_api_key_share_percent: 33,
   openai_advanced_scheduler_sticky_weighted_enabled: false,
   openai_advanced_scheduler_subscription_priority_enabled: false,
   openai_advanced_scheduler_lb_top_k: "",
@@ -10567,6 +10639,12 @@ async function loadSettings() {
     if (settings.openai_priority_saturation_affinity_reserve_percent == null) {
       form.openai_priority_saturation_affinity_reserve_percent = 20;
     }
+    if (settings.openai_priority_saturation_pool_balance_enabled == null) {
+      form.openai_priority_saturation_pool_balance_enabled = false;
+    }
+    if (settings.openai_priority_saturation_api_key_share_percent == null) {
+      form.openai_priority_saturation_api_key_share_percent = 33;
+    }
     // Only assign non-null values from backend (null means unconfigured, keep defaults)
     for (const [key, value] of Object.entries(settings)) {
       if (value !== null && value !== undefined) {
@@ -10802,6 +10880,19 @@ async function saveSettings() {
   ) {
     appStore.showError(
       t("admin.settings.openaiPrioritySaturation.reservePercentError"),
+    );
+    return;
+  }
+  const apiKeySharePercent =
+    form.openai_priority_saturation_api_key_share_percent;
+  if (
+    typeof apiKeySharePercent !== "number" ||
+    !Number.isInteger(apiKeySharePercent) ||
+    apiKeySharePercent < 1 ||
+    apiKeySharePercent > 99
+  ) {
+    appStore.showError(
+      t("admin.settings.openaiPrioritySaturation.apiKeySharePercentError"),
     );
     return;
   }
@@ -11210,6 +11301,9 @@ async function saveSettings() {
         form.openai_priority_saturation_enabled,
       openai_priority_saturation_affinity_reserve_percent:
         affinityReservePercent,
+      openai_priority_saturation_pool_balance_enabled:
+        form.openai_priority_saturation_pool_balance_enabled,
+      openai_priority_saturation_api_key_share_percent: apiKeySharePercent,
       openai_advanced_scheduler_sticky_weighted_enabled:
         form.openai_advanced_scheduler_sticky_weighted_enabled,
       openai_advanced_scheduler_subscription_priority_enabled:

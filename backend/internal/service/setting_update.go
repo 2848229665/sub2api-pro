@@ -129,6 +129,9 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	if err := validateOpenAIPrioritySaturationAffinityReservePercent(settings.OpenAIPrioritySaturationAffinityReservePercent); err != nil {
 		return nil, err
 	}
+	if err := validateOpenAIPrioritySaturationAPIKeySharePercent(settings.OpenAIPrioritySaturationAPIKeySharePercent); err != nil {
+		return nil, err
+	}
 	settings.PaymentVisibleMethodAlipaySource = alipaySource
 	settings.PaymentVisibleMethodWxpaySource = wxpaySource
 	settings.WeChatConnectAppID = strings.TrimSpace(settings.WeChatConnectAppID)
@@ -483,6 +486,8 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[openAIAdvancedSchedulerSettingKey] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerEnabled)
 	updates[SettingKeyOpenAIPrioritySaturationEnabled] = strconv.FormatBool(settings.OpenAIPrioritySaturationEnabled)
 	updates[SettingKeyOpenAIPrioritySaturationAffinityReservePercent] = strconv.Itoa(settings.OpenAIPrioritySaturationAffinityReservePercent)
+	updates[SettingKeyOpenAIPrioritySaturationPoolBalanceEnabled] = strconv.FormatBool(settings.OpenAIPrioritySaturationPoolBalanceEnabled)
+	updates[SettingKeyOpenAIPrioritySaturationAPIKeySharePercent] = strconv.Itoa(settings.OpenAIPrioritySaturationAPIKeySharePercent)
 	updates[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerStickyWeightedEnabled)
 	updates[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled)
 	updates[SettingKeyOpenAIAdvancedSchedulerLBTopK] = settings.OpenAIAdvancedSchedulerLBTopK
@@ -652,6 +657,8 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		enabled:                        settings.OpenAIAdvancedSchedulerEnabled,
 		prioritySaturationEnabled:      settings.OpenAIPrioritySaturationEnabled,
 		affinityReservePercent:         settings.OpenAIPrioritySaturationAffinityReservePercent,
+		poolBalanceEnabled:             settings.OpenAIPrioritySaturationPoolBalanceEnabled,
+		apiKeySharePercent:             settings.OpenAIPrioritySaturationAPIKeySharePercent,
 		stickyWeightedEnabled:          settings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
 		subscriptionPriorityEnabled:    settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
 		lbTopKOverride:                 parsePositiveIntOverride(settings.OpenAIAdvancedSchedulerLBTopK),

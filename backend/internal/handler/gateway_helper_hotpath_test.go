@@ -13,6 +13,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type helperConcurrencyCacheStub struct {
@@ -33,6 +35,10 @@ type helperConcurrencyCacheStub struct {
 	apiKeyTrackCalls    int
 	apiKeyReleaseCalls  int
 	apiKeyTrackIDs      []int64
+	accountLoadCurrent  int
+	accountLoadWaiting  int
+	userLoadCurrent     int
+	userLoadWaiting     int
 }
 
 func (s *helperConcurrencyCacheStub) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
@@ -150,7 +156,11 @@ func (s *helperConcurrencyCacheStub) DecrementWaitCount(ctx context.Context, use
 func (s *helperConcurrencyCacheStub) GetAccountsLoadBatch(ctx context.Context, accounts []service.AccountWithConcurrency) (map[int64]*service.AccountLoadInfo, error) {
 	out := make(map[int64]*service.AccountLoadInfo, len(accounts))
 	for _, acc := range accounts {
-		out[acc.ID] = &service.AccountLoadInfo{AccountID: acc.ID}
+		out[acc.ID] = &service.AccountLoadInfo{
+			AccountID:          acc.ID,
+			CurrentConcurrency: s.accountLoadCurrent,
+			WaitingCount:       s.accountLoadWaiting,
+		}
 	}
 	return out, nil
 }
@@ -158,7 +168,11 @@ func (s *helperConcurrencyCacheStub) GetAccountsLoadBatch(ctx context.Context, a
 func (s *helperConcurrencyCacheStub) GetUsersLoadBatch(ctx context.Context, users []service.UserWithConcurrency) (map[int64]*service.UserLoadInfo, error) {
 	out := make(map[int64]*service.UserLoadInfo, len(users))
 	for _, user := range users {
-		out[user.ID] = &service.UserLoadInfo{UserID: user.ID}
+		out[user.ID] = &service.UserLoadInfo{
+			UserID:             user.ID,
+			CurrentConcurrency: s.userLoadCurrent,
+			WaitingCount:       s.userLoadWaiting,
+		}
 	}
 	return out, nil
 }
@@ -409,6 +423,87 @@ func TestAcquireUserSlotWithWait_RequestCancelDecrementsWaitQueue(t *testing.T) 
 	require.Equal(t, 1, cache.waitIncrementCalls)
 	require.Equal(t, 1, cache.waitDecrementCalls)
 	require.Equal(t, 0, cache.userReleaseCalls)
+}
+
+func TestAcquireUserSlotWithWaitObserved_QueueFullLogsCapacity(t *testing.T) {
+	cache := &helperConcurrencyCacheStub{
+		userSeq:         []bool{false},
+		waitAllowed:     false,
+		userLoadCurrent: 3,
+		userLoadWaiting: 20,
+	}
+	helper := NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, 5*time.Millisecond)
+	c, _ := newHelperTestContext(http.MethodPost, "/v1/responses")
+	streamStarted := false
+	core, observedLogs := observer.New(zap.InfoLevel)
+
+	release, err := helper.acquireUserSlotWithWaitTimeoutObserved(
+		c,
+		202,
+		3,
+		30*time.Second,
+		false,
+		&streamStarted,
+		zap.New(core),
+		"openai",
+	)
+
+	require.Nil(t, release)
+	var queueErr *WaitQueueFullError
+	require.ErrorAs(t, err, &queueErr)
+	queueLogs := observedLogs.FilterMessage("openai.user_wait_queue_full").All()
+	require.Len(t, queueLogs, 1)
+	fields := queueLogs[0].ContextMap()
+	require.EqualValues(t, 202, fields["user_id"])
+	require.EqualValues(t, 3, fields["max_concurrency"])
+	require.EqualValues(t, 20, fields["queue_limit"])
+	require.EqualValues(t, 3, fields["active_count"])
+	require.EqualValues(t, 20, fields["waiting_count"])
+	require.Equal(t, true, fields["load_snapshot_available"])
+	require.Equal(t, false, fields["terminal_event"])
+
+	failureLogs := observedLogs.FilterMessage("openai.user_slot_acquire_failed").All()
+	require.Len(t, failureLogs, 1)
+	failureFields := failureLogs[0].ContextMap()
+	require.Equal(t, "wait_queue_full", failureFields["failure_reason"])
+	require.Equal(t, true, failureFields["terminal_event"])
+	require.EqualValues(t, http.StatusTooManyRequests, failureFields["mapped_status_code"])
+}
+
+func TestAcquireUserSlotWithWaitObserved_LogsWaitLifecycle(t *testing.T) {
+	cache := &helperConcurrencyCacheStub{
+		userSeq:         []bool{false, true},
+		waitAllowed:     true,
+		userLoadCurrent: 3,
+		userLoadWaiting: 1,
+	}
+	helper := NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, 5*time.Millisecond)
+	c, _ := newHelperTestContext(http.MethodPost, "/v1/responses")
+	streamStarted := false
+	core, observedLogs := observer.New(zap.InfoLevel)
+
+	release, err := helper.acquireUserSlotWithWaitTimeoutObserved(
+		c,
+		202,
+		3,
+		time.Second,
+		false,
+		&streamStarted,
+		zap.New(core),
+		"openai",
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, release)
+	release()
+	require.Len(t, observedLogs.FilterMessage("openai.user_wait_started").All(), 1)
+	acquiredLogs := observedLogs.FilterMessage("openai.user_wait_acquired").All()
+	require.Len(t, acquiredLogs, 1)
+	fields := acquiredLogs[0].ContextMap()
+	require.Equal(t, "acquired", fields["phase"])
+	require.GreaterOrEqual(t, fields["wait_ms"].(int64), int64(100))
+	require.Empty(t, observedLogs.FilterMessage("openai.user_slot_acquire_failed").All())
+	require.Equal(t, 1, cache.waitDecrementCalls)
 }
 
 func TestWaitForSlotWithPingTimeout_TimeoutAndStreamPing(t *testing.T) {

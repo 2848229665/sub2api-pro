@@ -512,6 +512,12 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.OpenAIPrioritySaturationAffinityReservePercent != after.OpenAIPrioritySaturationAffinityReservePercent {
 		changed = append(changed, service.SettingKeyOpenAIPrioritySaturationAffinityReservePercent)
 	}
+	if before.OpenAIPrioritySaturationPoolBalanceEnabled != after.OpenAIPrioritySaturationPoolBalanceEnabled {
+		changed = append(changed, service.SettingKeyOpenAIPrioritySaturationPoolBalanceEnabled)
+	}
+	if before.OpenAIPrioritySaturationAPIKeySharePercent != after.OpenAIPrioritySaturationAPIKeySharePercent {
+		changed = append(changed, service.SettingKeyOpenAIPrioritySaturationAPIKeySharePercent)
+	}
 	if before.OpenAIAdvancedSchedulerStickyWeightedEnabled != after.OpenAIAdvancedSchedulerStickyWeightedEnabled {
 		changed = append(changed, "openai_advanced_scheduler_sticky_weighted_enabled")
 	}
