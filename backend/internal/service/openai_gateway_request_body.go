@@ -299,9 +299,8 @@ func normalizeOpenAICompactRequestBody(body []byte) ([]byte, bool, error) {
 	}
 
 	normalized := []byte(`{}`)
-	// Keep the current Codex /compact schema and its stable prompt_cache_key while
-	// still dropping request-scoped fields such as store and stream. Official
-	// Codex reuses the normal Responses key for ChatGPT-auth compact requests.
+	// Keep the current Codex /compact schema while still dropping request-scoped
+	// fields such as prompt_cache_key, store, and stream.
 	for _, field := range []string{
 		"model",
 		"input",
@@ -309,9 +308,9 @@ func normalizeOpenAICompactRequestBody(body []byte) ([]byte, bool, error) {
 		"tools",
 		"parallel_tool_calls",
 		"reasoning",
+		"service_tier",
 		"text",
 		"previous_response_id",
-		"prompt_cache_key",
 	} {
 		value := gjson.GetBytes(body, field)
 		if !value.Exists() {
