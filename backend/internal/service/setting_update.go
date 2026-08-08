@@ -30,8 +30,41 @@ func (o OmittedSettingKeys) dropFrom(updates map[string]string) {
 	}
 }
 
+// normalizeOpenAIPrioritySaturationDefaultsForWholeDocument preserves the
+// historical service-level UpdateSettings behavior for callers that construct
+// a partial SystemSettings value directly. The admin HTTP handler uses the
+// Omitting variants and supplies stored values for omitted fields, but older
+// internal callers commonly leave newly added scheduler fields at zero.
+func normalizeOpenAIPrioritySaturationDefaultsForWholeDocument(settings *SystemSettings) {
+	if settings == nil {
+		return
+	}
+
+	// A zero share pair is the zero value of the struct, not a usable pool
+	// configuration. If only one side is supplied, derive the complementary
+	// share so direct callers can update a single setting as before.
+	switch {
+	case settings.OpenAIPrioritySaturationAccountSharePercent == 0 && settings.OpenAIPrioritySaturationAPIKeySharePercent == 0:
+		settings.OpenAIPrioritySaturationAccountSharePercent = DefaultOpenAIPrioritySaturationAccountSharePercent
+		settings.OpenAIPrioritySaturationAPIKeySharePercent = DefaultOpenAIPrioritySaturationAPIKeySharePercent
+	case settings.OpenAIPrioritySaturationAccountSharePercent == 0 && settings.OpenAIPrioritySaturationAPIKeySharePercent > 0:
+		settings.OpenAIPrioritySaturationAccountSharePercent = 100 - settings.OpenAIPrioritySaturationAPIKeySharePercent
+	case settings.OpenAIPrioritySaturationAccountSharePercent > 0 && settings.OpenAIPrioritySaturationAPIKeySharePercent == 0:
+		settings.OpenAIPrioritySaturationAPIKeySharePercent = 100 - settings.OpenAIPrioritySaturationAccountSharePercent
+	}
+
+	// Both thresholds are zero only for an omitted zero-value pair. Exit=0 is
+	// otherwise a valid explicit hysteresis threshold, so do not normalize it
+	// when an enter threshold was supplied.
+	if settings.OpenAIPrioritySaturationEnterHighLoadPercent == 0 && settings.OpenAIPrioritySaturationExitHighLoadPercent == 0 {
+		settings.OpenAIPrioritySaturationEnterHighLoadPercent = DefaultOpenAIPrioritySaturationEnterHighLoadPercent
+		settings.OpenAIPrioritySaturationExitHighLoadPercent = DefaultOpenAIPrioritySaturationExitHighLoadPercent
+	}
+}
+
 // UpdateSettings 更新系统设置
 func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSettings) error {
+	normalizeOpenAIPrioritySaturationDefaultsForWholeDocument(settings)
 	return s.UpdateSettingsOmitting(ctx, settings, nil)
 }
 
@@ -53,6 +86,7 @@ func (s *SettingService) UpdateSettingsOmitting(ctx context.Context, settings *S
 
 // UpdateSettingsWithAuthSourceDefaults persists system settings and auth-source defaults in a single write.
 func (s *SettingService) UpdateSettingsWithAuthSourceDefaults(ctx context.Context, settings *SystemSettings, authDefaults *AuthSourceDefaultSettings) error {
+	normalizeOpenAIPrioritySaturationDefaultsForWholeDocument(settings)
 	return s.UpdateSettingsWithAuthSourceDefaultsOmitting(ctx, settings, authDefaults, nil)
 }
 
