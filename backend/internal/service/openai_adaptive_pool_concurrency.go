@@ -18,11 +18,14 @@ const (
 )
 
 // OpenAIAdaptivePoolCandidate is the complete Redis-visible scheduling input
-// for one eligible account. MaxConcurrency is the general-session limit after
-// the affinity reserve has been removed; a non-positive value is unlimited.
+// for one eligible account. Lower Priority values are selected first, with the
+// account ID as the tie-breaker. MaxConcurrency is the general-session limit
+// after the affinity reserve has been removed; a non-positive value is
+// unlimited.
 type OpenAIAdaptivePoolCandidate struct {
 	AccountID      int64
 	Pool           string
+	Priority       int
 	MaxConcurrency int
 }
 
@@ -70,10 +73,11 @@ type OpenAIAdaptivePoolSlotCache interface {
 	) (*OpenAIAdaptivePoolAcquireDecision, error)
 }
 
-// AcquireOpenAIAdaptivePoolSlot atomically selects a pool, selects its least
-// loaded eligible member, and acquires that member's account slot. supported is
-// false only when the configured cache has no distributed adaptive-pool
-// implementation, allowing the scheduler to use its compatibility path.
+// AcquireOpenAIAdaptivePoolSlot atomically selects a pool, selects its highest
+// priority eligible member with remaining capacity, and acquires that member's
+// account slot. supported is false only when the configured cache has no
+// distributed adaptive-pool implementation, allowing the scheduler to use its
+// compatibility path.
 func (s *ConcurrencyService) AcquireOpenAIAdaptivePoolSlot(
 	ctx context.Context,
 	req OpenAIAdaptivePoolAcquireRequest,

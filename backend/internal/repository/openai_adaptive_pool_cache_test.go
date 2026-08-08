@@ -181,26 +181,28 @@ func TestOpenAIAdaptivePoolTreatsEitherPoolQueueAsHighLoadPressure(t *testing.T)
 	require.Equal(t, service.OpenAIAdaptivePoolModeLow, low.Mode)
 }
 
-func TestOpenAIAdaptivePoolSelectsLowestLoadAndRoundRobinsTies(t *testing.T) {
+func TestOpenAIAdaptivePoolFillsMembersByPriorityThenID(t *testing.T) {
 	cache, _ := newOpenAIAdaptivePoolCacheTest(t)
 	req := openAIAdaptivePoolTestRequest(
-		service.OpenAIAdaptivePoolCandidate{AccountID: 30, Pool: service.OpenAIAdaptivePoolAccount, MaxConcurrency: 10},
-		service.OpenAIAdaptivePoolCandidate{AccountID: 10, Pool: service.OpenAIAdaptivePoolAccount, MaxConcurrency: 10},
+		service.OpenAIAdaptivePoolCandidate{AccountID: 30, Pool: service.OpenAIAdaptivePoolAccount, Priority: 1, MaxConcurrency: 2},
+		service.OpenAIAdaptivePoolCandidate{AccountID: 10, Pool: service.OpenAIAdaptivePoolAccount, Priority: 2, MaxConcurrency: 2},
+		service.OpenAIAdaptivePoolCandidate{AccountID: 20, Pool: service.OpenAIAdaptivePoolAccount, Priority: 1, MaxConcurrency: 2},
 	)
 
-	first, err := cache.AcquireOpenAIAdaptivePoolSlot(t.Context(), req, "tie-1")
-	require.NoError(t, err)
-	require.Equal(t, int64(10), first.AccountID)
-	require.NoError(t, cache.ReleaseAccountSlot(t.Context(), first.AccountID, "tie-1"))
-	second, err := cache.AcquireOpenAIAdaptivePoolSlot(t.Context(), req, "tie-2")
-	require.NoError(t, err)
-	require.Equal(t, int64(30), second.AccountID)
-	require.NoError(t, cache.ReleaseAccountSlot(t.Context(), second.AccountID, "tie-2"))
+	wantIDs := []int64{20, 20, 30, 30, 10}
+	for index, wantID := range wantIDs {
+		requestID := fmt.Sprintf("priority-fill-%d", index)
+		decision, err := cache.AcquireOpenAIAdaptivePoolSlot(t.Context(), req, requestID)
+		require.NoError(t, err)
+		require.True(t, decision.Acquired)
+		require.Equal(t, wantID, decision.AccountID)
+	}
 
-	require.True(t, mustAcquireAccountSlot(t, cache, 10, 10, "loaded"))
-	lowest, err := cache.AcquireOpenAIAdaptivePoolSlot(t.Context(), req, "lowest")
+	require.NoError(t, cache.ReleaseAccountSlot(t.Context(), 20, "priority-fill-0"))
+	refill, err := cache.AcquireOpenAIAdaptivePoolSlot(t.Context(), req, "priority-refill")
 	require.NoError(t, err)
-	require.Equal(t, int64(30), lowest.AccountID)
+	require.True(t, refill.Acquired)
+	require.Equal(t, int64(20), refill.AccountID)
 }
 
 func TestOpenAIAdaptivePoolAtomicAdmissionAcrossCacheInstances(t *testing.T) {

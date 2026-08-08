@@ -1264,7 +1264,7 @@ export default {
         reservePercentHint: 'Applies globally to all finite-concurrency OpenAI accounts. session_hash and previous_response_id share the reserved capacity.',
         reservePercentError: 'Affinity session reserve percentage must be an integer from 0 through 99.',
         orderLabel: 'Within-pool selection',
-        orderValue: 'Choose the lowest projected load; round-robin ties without using Priority',
+        orderValue: 'Select by ascending Priority, then account ID; fill the current account’s general concurrency before moving to the next account, without round-robin',
         generalLabel: 'New sessions and temporary overflow',
         generalValue: 'Use only general capacity G = C - R',
         affinityLabel: 'Requests with original-account affinity',

@@ -212,7 +212,7 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.openaiPrioritySaturation.reservePercentHint": "全局应用于所有 OpenAI 账号。",
     "admin.settings.openaiPrioritySaturation.reservePercentError": "亲和会话预留百分比必须是 0 到 99 之间的整数。",
     "admin.settings.openaiPrioritySaturation.orderLabel": "池内选择",
-    "admin.settings.openaiPrioritySaturation.orderValue": "选择预计负载率最低的成员；负载相同时轮询，不使用 Priority",
+    "admin.settings.openaiPrioritySaturation.orderValue": "按 Priority 从小到大选择，优先级相同按账号 ID；当前账号普通并发打满后才切换下一个账号，不轮询",
     "admin.settings.openaiPrioritySaturation.generalLabel": "新会话与临时溢出",
     "admin.settings.openaiPrioritySaturation.generalValue": "只使用普通容量 G = C - R",
     "admin.settings.openaiPrioritySaturation.affinityLabel": "原账号亲和请求",
@@ -1300,7 +1300,7 @@ describe("admin SettingsView payment visible method controls", () => {
       .get('[data-testid="openai-priority-saturation-affinity-reserve-percent"]')
       .setValue("35");
     expect(wrapper.find('[data-testid="openai-low-rate-priority-toggle"]').exists()).toBe(false);
-    expect(priorityCard.text()).toContain("负载相同时轮询，不使用 Priority");
+    expect(priorityCard.text()).toContain("当前账号普通并发打满后才切换下一个账号，不轮询");
     expect(wrapper.find('[data-testid="openai-scheduler-switch-confirm"]').exists()).toBe(false);
 
     await wrapper.find("form").trigger("submit.prevent");
