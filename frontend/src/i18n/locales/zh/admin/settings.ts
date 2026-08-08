@@ -1258,7 +1258,7 @@ export default {
         reservePercentHint: '全局应用于所有有限并发 OpenAI 账号；session_hash 与 previous_response_id 共用预留容量。',
         reservePercentError: '亲和会话预留百分比必须是 0 到 99 之间的整数。',
         orderLabel: '池内选择',
-        orderValue: '选择预计负载率最低的成员；负载相同时轮询，不使用 Priority',
+        orderValue: '按 Priority 从小到大选择，优先级相同按账号 ID；当前账号普通并发打满后才切换下一个账号，不轮询',
         generalLabel: '新会话与临时溢出',
         generalValue: '只使用普通容量 G = C - R',
         affinityLabel: '原账号亲和请求',

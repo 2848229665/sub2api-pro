@@ -46,13 +46,14 @@ var acquireOpenAIAdaptivePoolSlotScript = redis.NewScript(`
 
 	for i = 1, candidateCount do
 		local keyOffset = 2 + ((i - 1) * 3)
-		local argOffset = metadataOffset + ((i - 1) * 3)
+		local argOffset = metadataOffset + ((i - 1) * 4)
 		local regularKey = KEYS[keyOffset]
 		local liveKey = KEYS[keyOffset + 1]
 		local waitKey = KEYS[keyOffset + 2]
 		local accountID = ARGV[argOffset]
 		local pool = tonumber(ARGV[argOffset + 1])
-		local limit = tonumber(ARGV[argOffset + 2])
+		local priority = tonumber(ARGV[argOffset + 2])
+		local limit = tonumber(ARGV[argOffset + 3])
 
 		redis.call('ZREMRANGEBYSCORE', regularKey, '-inf', now - slotTTL)
 		redis.call('ZREMRANGEBYSCORE', liveKey, '-inf', now - liveTTL)
@@ -61,6 +62,7 @@ var acquireOpenAIAdaptivePoolSlotScript = redis.NewScript(`
 		candidates[i] = {
 			id = accountID,
 			pool = pool,
+			priority = priority,
 			limit = limit,
 			active = active,
 			regularKey = regularKey,
@@ -219,25 +221,15 @@ var acquireOpenAIAdaptivePoolSlotScript = redis.NewScript(`
 		fallbackReason = 'preferred_pool_empty'
 	end
 
-	local cursorField = 'account_cursor'
-	if selectedPool == 1 then cursorField = 'key_cursor' end
-	local cursor = tonumber(redis.call('HGET', stateKey, cursorField) or '0')
-	local start = 0
-	if #poolCandidates > 0 then start = cursor % #poolCandidates end
-
 	local function isBetter(candidate, selected)
 		if selected == nil then return true end
-		if candidate.limit <= 0 and selected.limit > 0 then return true end
-		if candidate.limit > 0 and selected.limit <= 0 then return false end
-		if candidate.limit <= 0 and selected.limit <= 0 then
-			return candidate.active < selected.active
-		end
-		return ((candidate.active + 1) * selected.limit) < ((selected.active + 1) * candidate.limit)
+		if candidate.priority < selected.priority then return true end
+		if candidate.priority > selected.priority then return false end
+		return tonumber(candidate.id) < tonumber(selected.id)
 	end
 
 	local selected = nil
-	for offset = 0, #poolCandidates - 1 do
-		local index = ((start + offset) % #poolCandidates) + 1
+	for index = 1, #poolCandidates do
 		local candidate = poolCandidates[index]
 		if (candidate.limit <= 0 or candidate.active < candidate.limit) and isBetter(candidate, selected) then
 			selected = candidate
@@ -250,14 +242,12 @@ var acquireOpenAIAdaptivePoolSlotScript = redis.NewScript(`
 		redis.call('EXPIRE', selected.regularKey, slotTTL)
 		acquired = 1
 	else
-		for offset = 0, #poolCandidates - 1 do
-			local index = ((start + offset) % #poolCandidates) + 1
+		for index = 1, #poolCandidates do
 			local candidate = poolCandidates[index]
 			if isBetter(candidate, selected) then selected = candidate end
 		end
 	end
 
-	if selected ~= nil then redis.call('HINCRBY', stateKey, cursorField, 1) end
 	redis.call('EXPIRE', stateKey, stateTTL)
 
 	local selectedID = ''
@@ -339,10 +329,15 @@ func (c *concurrencyCache) AcquireOpenAIAdaptivePoolSlot(
 	}
 
 	candidates := append([]service.OpenAIAdaptivePoolCandidate(nil), req.Candidates...)
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].AccountID < candidates[j].AccountID })
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].Priority != candidates[j].Priority {
+			return candidates[i].Priority < candidates[j].Priority
+		}
+		return candidates[i].AccountID < candidates[j].AccountID
+	})
 	keys := make([]string, 1, 1+(len(candidates)*3))
 	keys[0] = openAIAdaptivePoolStateKey(req.Scope)
-	args := make([]any, 0, 10+(len(candidates)*3))
+	args := make([]any, 0, 10+(len(candidates)*4))
 	exitStableSeconds := int(req.ExitHighLoadStableFor.Seconds())
 	if exitStableSeconds < 0 {
 		exitStableSeconds = 0
@@ -381,6 +376,7 @@ func (c *concurrencyCache) AcquireOpenAIAdaptivePoolSlot(
 		args = append(args,
 			strconv.FormatInt(candidate.AccountID, 10),
 			poolCode,
+			candidate.Priority,
 			candidate.MaxConcurrency,
 		)
 	}

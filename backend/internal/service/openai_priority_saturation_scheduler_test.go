@@ -31,12 +31,35 @@ type prioritySaturationAdaptiveFailureCache struct {
 	*prioritySaturationConcurrencyCache
 }
 
+type prioritySaturationAdaptiveCaptureCache struct {
+	*prioritySaturationConcurrencyCache
+	selectedAccountID int64
+	request           OpenAIAdaptivePoolAcquireRequest
+}
+
 func (c *prioritySaturationAdaptiveFailureCache) AcquireOpenAIAdaptivePoolSlot(
 	context.Context,
 	OpenAIAdaptivePoolAcquireRequest,
 	string,
 ) (*OpenAIAdaptivePoolAcquireDecision, error) {
 	return nil, errors.New("adaptive pool unavailable")
+}
+
+func (c *prioritySaturationAdaptiveCaptureCache) AcquireOpenAIAdaptivePoolSlot(
+	_ context.Context,
+	req OpenAIAdaptivePoolAcquireRequest,
+	_ string,
+) (*OpenAIAdaptivePoolAcquireDecision, error) {
+	c.mu.Lock()
+	c.request = req
+	c.mu.Unlock()
+	return &OpenAIAdaptivePoolAcquireDecision{
+		Acquired:      true,
+		AccountID:     c.selectedAccountID,
+		PreferredPool: OpenAIAdaptivePoolAccount,
+		SelectedPool:  OpenAIAdaptivePoolAccount,
+		Mode:          OpenAIAdaptivePoolModeLow,
+	}, nil
 }
 
 func (c *prioritySaturationConcurrencyCache) AcquireAccountSlot(_ context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
@@ -400,23 +423,62 @@ func TestPrioritySaturationPoolBalance_EstablishedAffinityDoesNotAdvanceSequence
 	}
 }
 
-func TestPrioritySaturationPoolBalance_PriorityDoesNotOrderMembersWithinPool(t *testing.T) {
+func TestPrioritySaturationPoolBalance_FillsMembersByPriorityThenID(t *testing.T) {
 	enablePrioritySaturationPoolBalanceForTest(t, 33)
 	accounts := []Account{
-		prioritySaturationOAuthTestAccount(10, 999, 10),
-		prioritySaturationOAuthTestAccount(20, 1, 10),
+		prioritySaturationOAuthTestAccount(10, 999, 2),
+		prioritySaturationOAuthTestAccount(20, 1, 2),
 	}
 	scheduler, _, _ := newPrioritySaturationTestScheduler(accounts, nil, nil)
 
 	first, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 0))
 	require.NoError(t, err)
-	require.Equal(t, int64(10), first.Account.ID)
-	first.ReleaseFunc()
+	require.Equal(t, int64(20), first.Account.ID)
 
 	second, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 0))
 	require.NoError(t, err)
 	require.Equal(t, int64(20), second.Account.ID)
+
+	third, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 0))
+	require.NoError(t, err)
+	require.Equal(t, int64(10), third.Account.ID)
+
+	first.ReleaseFunc()
 	second.ReleaseFunc()
+	third.ReleaseFunc()
+}
+
+func TestPrioritySaturationPoolBalance_AtomicCandidatesCarryPriority(t *testing.T) {
+	enablePrioritySaturationPoolBalanceForTest(t, 33)
+	accounts := []Account{
+		prioritySaturationOAuthTestAccount(10, 999, 2),
+		prioritySaturationOAuthTestAccount(20, 1, 2),
+	}
+	baseCache := &prioritySaturationConcurrencyCache{}
+	cache := &prioritySaturationAdaptiveCaptureCache{
+		prioritySaturationConcurrencyCache: baseCache,
+		selectedAccountID:                  20,
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
+		cache:              &prioritySaturationSessionCache{},
+		cfg:                &config.Config{},
+		concurrencyService: NewConcurrencyService(cache),
+	}
+	scheduler := newPrioritySaturationOpenAIAccountScheduler(svc, nil)
+
+	selection, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 0))
+	require.NoError(t, err)
+	require.Equal(t, int64(20), selection.Account.ID)
+
+	cache.mu.Lock()
+	candidates := append([]OpenAIAdaptivePoolCandidate(nil), cache.request.Candidates...)
+	cache.mu.Unlock()
+	require.Equal(t, []OpenAIAdaptivePoolCandidate{
+		{AccountID: 20, Pool: OpenAIAdaptivePoolAccount, Priority: 1, MaxConcurrency: 2},
+		{AccountID: 10, Pool: OpenAIAdaptivePoolAccount, Priority: 999, MaxConcurrency: 2},
+	}, candidates)
+	selection.ReleaseFunc()
 }
 
 func TestPrioritySaturationPoolBalance_AtomicFailureKeepsPoolAwareFallback(t *testing.T) {

@@ -24,9 +24,10 @@ const (
 
 // prioritySaturationOpenAIAccountScheduler preserves the original
 // priority-saturation behavior when pool balancing is disabled. With pool
-// balancing enabled, general requests use adaptive account/API-key pools and
-// least-projected-load member selection; established affinity still uses the
-// full account concurrency so unrelated sessions cannot consume its reserve.
+// balancing enabled, general requests use adaptive account/API-key pools, then
+// fill members in Priority/ID order before moving to the next member;
+// established affinity still uses the full account concurrency so unrelated
+// sessions cannot consume its reserve.
 type prioritySaturationOpenAIAccountScheduler struct {
 	base *defaultOpenAIAccountScheduler
 
@@ -307,6 +308,7 @@ func (s *prioritySaturationOpenAIAccountScheduler) selectGeneralAccountBalancedA
 		candidates = append(candidates, OpenAIAdaptivePoolCandidate{
 			AccountID:      account.ID,
 			Pool:           pool,
+			Priority:       account.Priority,
 			MaxConcurrency: limit,
 		})
 		accountByID[account.ID] = account
@@ -587,8 +589,8 @@ func (s *prioritySaturationOpenAIAccountScheduler) buildBalancedPoolPlan(
 	if len(accountPool) == 0 && len(keyPool) == 0 {
 		return plan, true
 	}
-	plan.accountPool.accounts = s.orderPrioritySaturationPoolAccounts(req, prioritySaturationPoolAccount, plan.accountPool)
-	plan.keyPool.accounts = s.orderPrioritySaturationPoolAccounts(req, prioritySaturationPoolAPIKey, plan.keyPool)
+	plan.accountPool.accounts = orderPrioritySaturationPoolAccounts(plan.accountPool.accounts)
+	plan.keyPool.accounts = orderPrioritySaturationPoolAccounts(plan.keyPool.accounts)
 
 	demand := saturatingPrioritySaturationAdd(plan.accountPool.activeTotal, plan.keyPool.activeTotal)
 	demand = saturatingPrioritySaturationAdd(demand, 1)
@@ -830,97 +832,20 @@ func prioritySaturationGroupKey(req OpenAIAccountScheduleRequest) string {
 	return groupKey + ":" + normalizeOpenAICompatiblePlatform(req.Platform)
 }
 
-func comparePrioritySaturationProjectedAccountLoad(
-	left, right *Account,
-	active map[int64]int,
-	reservePercent int,
-) int {
-	if left == nil && right == nil {
-		return 0
-	}
-	if left == nil {
-		return 1
-	}
-	if right == nil {
-		return -1
-	}
-	leftLimit := left.GeneralConcurrencyLimit(reservePercent)
-	rightLimit := right.GeneralConcurrencyLimit(reservePercent)
-	leftActive := active[left.ID]
-	rightActive := active[right.ID]
-	if leftLimit <= 0 && rightLimit > 0 {
-		return -1
-	}
-	if leftLimit > 0 && rightLimit <= 0 {
-		return 1
-	}
-	if leftLimit <= 0 && rightLimit <= 0 {
-		if leftActive < rightActive {
-			return -1
-		}
-		if leftActive > rightActive {
-			return 1
-		}
-		return 0
-	}
-	leftScore := float64(leftActive+1) / float64(leftLimit)
-	rightScore := float64(rightActive+1) / float64(rightLimit)
-	if leftScore < rightScore {
-		return -1
-	}
-	if leftScore > rightScore {
-		return 1
-	}
-	return 0
-}
-
-func (s *prioritySaturationOpenAIAccountScheduler) orderPrioritySaturationPoolAccounts(
-	req OpenAIAccountScheduleRequest,
-	pool string,
-	stats prioritySaturationPoolStats,
-) []*Account {
-	ordered := append([]*Account(nil), stats.accounts...)
+func orderPrioritySaturationPoolAccounts(accounts []*Account) []*Account {
+	ordered := append([]*Account(nil), accounts...)
 	sort.SliceStable(ordered, func(i, j int) bool {
-		comparison := comparePrioritySaturationProjectedAccountLoad(
-			ordered[i],
-			ordered[j],
-			stats.active,
-			req.affinityReservePercent(),
-		)
-		if comparison != 0 {
-			return comparison < 0
+		if ordered[i] == nil {
+			return false
 		}
-		if ordered[i] == nil || ordered[j] == nil {
-			return ordered[j] == nil
+		if ordered[j] == nil {
+			return true
+		}
+		if ordered[i].Priority != ordered[j].Priority {
+			return ordered[i].Priority < ordered[j].Priority
 		}
 		return ordered[i].ID < ordered[j].ID
 	})
-	if len(ordered) < 2 {
-		return ordered
-	}
-
-	leadingTieEnd := 1
-	for leadingTieEnd < len(ordered) && comparePrioritySaturationProjectedAccountLoad(
-		ordered[0],
-		ordered[leadingTieEnd],
-		stats.active,
-		req.affinityReservePercent(),
-	) == 0 {
-		leadingTieEnd++
-	}
-	if leadingTieEnd < 2 {
-		return ordered
-	}
-
-	cursorKey := prioritySaturationGroupKey(req) + ":member:" + pool
-	cursorValue, _ := s.poolCursors.LoadOrStore(cursorKey, &atomic.Uint64{})
-	cursor, _ := cursorValue.(*atomic.Uint64)
-	rotation := int((cursor.Add(1) - 1) % uint64(leadingTieEnd))
-	if rotation == 0 {
-		return ordered
-	}
-	leading := append([]*Account(nil), ordered[:leadingTieEnd]...)
-	copy(ordered[:leadingTieEnd], append(leading[rotation:], leading[:rotation]...))
 	return ordered
 }
 
