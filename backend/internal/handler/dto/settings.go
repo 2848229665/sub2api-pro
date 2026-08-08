@@ -240,7 +240,10 @@ type SystemSettings struct {
 	OpenAIPrioritySaturationEnabled                        bool    `json:"openai_priority_saturation_enabled"`
 	OpenAIPrioritySaturationAffinityReservePercent         int     `json:"openai_priority_saturation_affinity_reserve_percent"`
 	OpenAIPrioritySaturationPoolBalanceEnabled             bool    `json:"openai_priority_saturation_pool_balance_enabled"`
+	OpenAIPrioritySaturationAccountSharePercent            int     `json:"openai_priority_saturation_account_share_percent"`
 	OpenAIPrioritySaturationAPIKeySharePercent             int     `json:"openai_priority_saturation_api_key_share_percent"`
+	OpenAIPrioritySaturationEnterHighLoadPercent           int     `json:"openai_priority_saturation_enter_high_load_percent"`
+	OpenAIPrioritySaturationExitHighLoadPercent            int     `json:"openai_priority_saturation_exit_high_load_percent"`
 	OpenAIAdvancedSchedulerStickyWeightedEnabled           bool    `json:"openai_advanced_scheduler_sticky_weighted_enabled"`
 	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled     bool    `json:"openai_advanced_scheduler_subscription_priority_enabled"`
 	OpenAIAdvancedSchedulerLBTopK                          string  `json:"openai_advanced_scheduler_lb_top_k"`

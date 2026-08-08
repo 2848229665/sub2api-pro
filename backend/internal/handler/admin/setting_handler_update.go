@@ -278,7 +278,10 @@ type UpdateSettingsRequest struct {
 	OpenAIPrioritySaturationEnabled                    *bool    `json:"openai_priority_saturation_enabled"`
 	OpenAIPrioritySaturationAffinityReservePercent     *int     `json:"openai_priority_saturation_affinity_reserve_percent"`
 	OpenAIPrioritySaturationPoolBalanceEnabled         *bool    `json:"openai_priority_saturation_pool_balance_enabled"`
+	OpenAIPrioritySaturationAccountSharePercent        *int     `json:"openai_priority_saturation_account_share_percent"`
 	OpenAIPrioritySaturationAPIKeySharePercent         *int     `json:"openai_priority_saturation_api_key_share_percent"`
+	OpenAIPrioritySaturationEnterHighLoadPercent       *int     `json:"openai_priority_saturation_enter_high_load_percent"`
+	OpenAIPrioritySaturationExitHighLoadPercent        *int     `json:"openai_priority_saturation_exit_high_load_percent"`
 	OpenAIAdvancedSchedulerStickyWeightedEnabled       *bool    `json:"openai_advanced_scheduler_sticky_weighted_enabled"`
 	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled *bool    `json:"openai_advanced_scheduler_subscription_priority_enabled"`
 	OpenAIAdvancedSchedulerLBTopK                      *string  `json:"openai_advanced_scheduler_lb_top_k"`
@@ -1818,11 +1821,29 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAIPrioritySaturationPoolBalanceEnabled
 		}(),
+		OpenAIPrioritySaturationAccountSharePercent: func() int {
+			if req.OpenAIPrioritySaturationAccountSharePercent != nil {
+				return *req.OpenAIPrioritySaturationAccountSharePercent
+			}
+			return previousSettings.OpenAIPrioritySaturationAccountSharePercent
+		}(),
 		OpenAIPrioritySaturationAPIKeySharePercent: func() int {
 			if req.OpenAIPrioritySaturationAPIKeySharePercent != nil {
 				return *req.OpenAIPrioritySaturationAPIKeySharePercent
 			}
 			return previousSettings.OpenAIPrioritySaturationAPIKeySharePercent
+		}(),
+		OpenAIPrioritySaturationEnterHighLoadPercent: func() int {
+			if req.OpenAIPrioritySaturationEnterHighLoadPercent != nil {
+				return *req.OpenAIPrioritySaturationEnterHighLoadPercent
+			}
+			return previousSettings.OpenAIPrioritySaturationEnterHighLoadPercent
+		}(),
+		OpenAIPrioritySaturationExitHighLoadPercent: func() int {
+			if req.OpenAIPrioritySaturationExitHighLoadPercent != nil {
+				return *req.OpenAIPrioritySaturationExitHighLoadPercent
+			}
+			return previousSettings.OpenAIPrioritySaturationExitHighLoadPercent
 		}(),
 		OpenAIAdvancedSchedulerStickyWeightedEnabled: func() bool {
 			if req.OpenAIAdvancedSchedulerStickyWeightedEnabled != nil {
@@ -2275,7 +2296,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpenAIPrioritySaturationEnabled:                        updatedSettings.OpenAIPrioritySaturationEnabled,
 		OpenAIPrioritySaturationAffinityReservePercent:         updatedSettings.OpenAIPrioritySaturationAffinityReservePercent,
 		OpenAIPrioritySaturationPoolBalanceEnabled:             updatedSettings.OpenAIPrioritySaturationPoolBalanceEnabled,
+		OpenAIPrioritySaturationAccountSharePercent:            updatedSettings.OpenAIPrioritySaturationAccountSharePercent,
 		OpenAIPrioritySaturationAPIKeySharePercent:             updatedSettings.OpenAIPrioritySaturationAPIKeySharePercent,
+		OpenAIPrioritySaturationEnterHighLoadPercent:           updatedSettings.OpenAIPrioritySaturationEnterHighLoadPercent,
+		OpenAIPrioritySaturationExitHighLoadPercent:            updatedSettings.OpenAIPrioritySaturationExitHighLoadPercent,
 		OpenAIAdvancedSchedulerStickyWeightedEnabled:           updatedSettings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
 		OpenAIAdvancedSchedulerSubscriptionPriorityEnabled:     updatedSettings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
 		OpenAIAdvancedSchedulerLBTopK:                          updatedSettings.OpenAIAdvancedSchedulerLBTopK,

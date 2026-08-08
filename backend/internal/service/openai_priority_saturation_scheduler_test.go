@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -24,6 +25,18 @@ type prioritySaturationConcurrencyCache struct {
 	requests map[string]int64
 	attempts []prioritySaturationAcquireAttempt
 	released []int64
+}
+
+type prioritySaturationAdaptiveFailureCache struct {
+	*prioritySaturationConcurrencyCache
+}
+
+func (c *prioritySaturationAdaptiveFailureCache) AcquireOpenAIAdaptivePoolSlot(
+	context.Context,
+	OpenAIAdaptivePoolAcquireRequest,
+	string,
+) (*OpenAIAdaptivePoolAcquireDecision, error) {
+	return nil, errors.New("adaptive pool unavailable")
 }
 
 func (c *prioritySaturationConcurrencyCache) AcquireAccountSlot(_ context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
@@ -200,7 +213,10 @@ func enablePrioritySaturationPoolBalanceForTest(t *testing.T, share int) {
 	openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
 		prioritySaturationEnabled: true,
 		poolBalanceEnabled:        true,
+		accountSharePercent:       100 - share,
 		apiKeySharePercent:        share,
+		enterHighLoadPercent:      DefaultOpenAIPrioritySaturationEnterHighLoadPercent,
+		exitHighLoadPercent:       DefaultOpenAIPrioritySaturationExitHighLoadPercent,
 		affinityReservePercent:    0,
 		expiresAt:                 time.Now().Add(time.Minute).UnixNano(),
 	})
@@ -284,7 +300,7 @@ func TestPrioritySaturationPoolBalance_ConfiguredShareControlsWeightedSequence(t
 	require.True(t, prioritySaturationIndexPrefersKey(2, 33))
 }
 
-func TestPrioritySaturationPoolBalance_KeyBudgetExpandsWhenAccountPoolIsFull(t *testing.T) {
+func TestPrioritySaturationPoolBalance_HighLoadPrefersPoolWithMoreHeadroom(t *testing.T) {
 	enablePrioritySaturationPoolBalanceForTest(t, 33)
 	accounts := []Account{
 		prioritySaturationOAuthTestAccount(1, 100, 3),
@@ -304,21 +320,23 @@ func TestPrioritySaturationPoolBalance_KeyBudgetExpandsWhenAccountPoolIsFull(t *
 	require.NotNil(t, selection)
 	require.True(t, selection.Acquired)
 	require.Equal(t, int64(2), selection.Account.ID)
-	require.Equal(t, prioritySaturationPoolAccount, decision.PreferredPool)
+	require.Equal(t, prioritySaturationPoolAPIKey, decision.PreferredPool)
 	require.Equal(t, prioritySaturationPoolAPIKey, decision.SelectedPool)
-	require.Equal(t, "preferred_pool_unavailable", decision.FallbackReason)
+	require.Empty(t, decision.FallbackReason)
+	require.Equal(t, OpenAIAdaptivePoolModeHigh, decision.PoolMode)
+	require.Equal(t, "high_concurrency_headroom", decision.BudgetReason)
 	require.Equal(t, 3, decision.AccountActive)
 	require.Equal(t, 2, decision.KeyActive)
 	require.Equal(t, 3, decision.AccountCapacity)
 	require.Equal(t, 10, decision.KeyCapacity)
-	require.Equal(t, 3, decision.KeyBudget)
+	require.Equal(t, 10, decision.KeyBudget)
 	cache.mu.Lock()
 	require.Equal(t, 3, cache.active[2])
 	cache.mu.Unlock()
 	selection.ReleaseFunc()
 }
 
-func TestPrioritySaturationPoolBalance_FailoverKeepsTheSamePoolAssignment(t *testing.T) {
+func TestPrioritySaturationPoolBalance_FailoverReplansUsingCurrentPoolState(t *testing.T) {
 	enablePrioritySaturationPoolBalanceForTest(t, 33)
 	accounts := []Account{
 		prioritySaturationOAuthTestAccount(1, 100, 10),
@@ -346,12 +364,12 @@ func TestPrioritySaturationPoolBalance_FailoverKeepsTheSamePoolAssignment(t *tes
 
 	next, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 0))
 	require.NoError(t, err)
-	require.Equal(t, AccountTypeOAuth, next.Account.Type)
+	require.Equal(t, AccountTypeAPIKey, next.Account.Type)
 	next.ReleaseFunc()
-	key, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 0))
+	account, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 0))
 	require.NoError(t, err)
-	require.Equal(t, AccountTypeAPIKey, key.Account.Type)
-	key.ReleaseFunc()
+	require.Equal(t, AccountTypeOAuth, account.Account.Type)
+	account.ReleaseFunc()
 }
 
 func TestPrioritySaturationPoolBalance_EstablishedAffinityDoesNotAdvanceSequence(t *testing.T) {
@@ -380,6 +398,50 @@ func TestPrioritySaturationPoolBalance_EstablishedAffinityDoesNotAdvanceSequence
 		require.Equal(t, wantType, selection.Account.Type)
 		selection.ReleaseFunc()
 	}
+}
+
+func TestPrioritySaturationPoolBalance_PriorityDoesNotOrderMembersWithinPool(t *testing.T) {
+	enablePrioritySaturationPoolBalanceForTest(t, 33)
+	accounts := []Account{
+		prioritySaturationOAuthTestAccount(10, 999, 10),
+		prioritySaturationOAuthTestAccount(20, 1, 10),
+	}
+	scheduler, _, _ := newPrioritySaturationTestScheduler(accounts, nil, nil)
+
+	first, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 0))
+	require.NoError(t, err)
+	require.Equal(t, int64(10), first.Account.ID)
+	first.ReleaseFunc()
+
+	second, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 0))
+	require.NoError(t, err)
+	require.Equal(t, int64(20), second.Account.ID)
+	second.ReleaseFunc()
+}
+
+func TestPrioritySaturationPoolBalance_AtomicFailureKeepsPoolAwareFallback(t *testing.T) {
+	enablePrioritySaturationPoolBalanceForTest(t, 33)
+	accounts := []Account{
+		prioritySaturationTestAccount(10, 1, 10),
+		prioritySaturationOAuthTestAccount(20, 999, 10),
+	}
+	baseCache := &prioritySaturationConcurrencyCache{}
+	cache := &prioritySaturationAdaptiveFailureCache{prioritySaturationConcurrencyCache: baseCache}
+	sessionCache := &prioritySaturationSessionCache{}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
+		cache:              sessionCache,
+		cfg:                &config.Config{},
+		concurrencyService: NewConcurrencyService(cache),
+	}
+	scheduler := newPrioritySaturationOpenAIAccountScheduler(svc, nil)
+
+	selection, decision, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 0))
+	require.NoError(t, err)
+	require.True(t, selection.Acquired)
+	require.Equal(t, AccountTypeOAuth, selection.Account.Type)
+	require.Equal(t, prioritySaturationPoolAccount, decision.SelectedPool)
+	selection.ReleaseFunc()
 }
 
 func TestAllocatePrioritySaturationKeyLimitsKeepsTotalWithinBudget(t *testing.T) {

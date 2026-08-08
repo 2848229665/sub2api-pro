@@ -6,12 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 )
 
 var prioritySaturationUnlimitedLeadingWarnings sync.Map
@@ -19,27 +16,21 @@ var prioritySaturationUnlimitedLeadingWarnings sync.Map
 const prioritySaturationWaitDiagnosticCandidateLimit = 32
 
 const (
-	prioritySaturationPoolAccount   = "account"
-	prioritySaturationPoolAPIKey    = "key"
-	prioritySaturationAssignmentTTL = 5 * time.Minute
+	prioritySaturationPoolAccount = OpenAIAdaptivePoolAccount
+	prioritySaturationPoolAPIKey  = OpenAIAdaptivePoolAPIKey
+
+	prioritySaturationExitHighLoadStableFor = 5 * time.Second
 )
 
-// prioritySaturationOpenAIAccountScheduler deterministically fills lower
-// numeric priorities before moving to the next account. New and overflow
-// requests use GeneralConcurrencyLimit; established affinity uses the full
-// account concurrency so the configured reserve cannot be consumed by
-// unrelated sessions.
+// prioritySaturationOpenAIAccountScheduler preserves the original
+// priority-saturation behavior when pool balancing is disabled. With pool
+// balancing enabled, general requests use adaptive account/API-key pools and
+// least-projected-load member selection; established affinity still uses the
+// full account concurrency so unrelated sessions cannot consume its reserve.
 type prioritySaturationOpenAIAccountScheduler struct {
 	base *defaultOpenAIAccountScheduler
 
-	poolCursors              sync.Map // map[group/platform] *atomic.Uint64
-	assignments              sync.Map // map[request/group/platform] prioritySaturationPoolAssignment
-	assignmentCleanupCounter atomic.Uint64
-}
-
-type prioritySaturationPoolAssignment struct {
-	pool      string
-	createdAt time.Time
+	poolCursors sync.Map // compatibility path: map[group/platform] *atomic.Uint64
 }
 
 func newPrioritySaturationOpenAIAccountScheduler(service *OpenAIGatewayService, stats *openAIAccountRuntimeStats) OpenAIAccountScheduler {
@@ -113,11 +104,14 @@ func applyPrioritySaturationPoolDecision(
 	decision.SelectedPool = poolDecision.selectedPool
 	decision.AccountActive = poolDecision.accountActive
 	decision.KeyActive = poolDecision.keyActive
+	decision.AccountWaiting = poolDecision.accountWaiting
+	decision.KeyWaiting = poolDecision.keyWaiting
 	decision.AccountCapacity = poolDecision.accountCapacity
 	decision.KeyCapacity = poolDecision.keyCapacity
 	decision.KeyBudget = poolDecision.keyBudget
 	decision.FallbackReason = poolDecision.fallbackReason
 	decision.BudgetReason = poolDecision.budgetReason
+	decision.PoolMode = poolDecision.mode
 }
 
 func (s *prioritySaturationOpenAIAccountScheduler) selectGeneralAccount(
@@ -221,6 +215,7 @@ type prioritySaturationPoolPlan struct {
 	keyPool      prioritySaturationPoolStats
 	keyLimits    map[int64]int
 	preferred    string
+	mode         string
 	keyBudget    int
 	budgetReason string
 }
@@ -236,13 +231,179 @@ type prioritySaturationPoolAttempt struct {
 type prioritySaturationPoolDecision struct {
 	preferredPool   string
 	selectedPool    string
+	mode            string
 	fallbackReason  string
 	budgetReason    string
 	accountActive   int
 	keyActive       int
+	accountWaiting  int
+	keyWaiting      int
 	accountCapacity int
 	keyCapacity     int
 	keyBudget       int
+}
+
+func prioritySaturationAdaptivePoolScope(req OpenAIAccountScheduleRequest) string {
+	group := "ungrouped"
+	if req.GroupID != nil {
+		group = fmt.Sprintf("group:%d", *req.GroupID)
+	}
+	return fmt.Sprintf(
+		"%s|platform:%s|model:%s|transport:%v|capability:%v|image:%v|compact:%t|privacy:%t",
+		group,
+		normalizeOpenAICompatiblePlatform(req.Platform),
+		req.RequestedModel,
+		req.RequiredTransport,
+		req.RequiredCapability,
+		req.RequiredImageCapability,
+		req.RequireCompact,
+		req.RequirePrivacySet,
+	)
+}
+
+func prioritySaturationPoolDecisionFromAdaptive(
+	decision *OpenAIAdaptivePoolAcquireDecision,
+) *prioritySaturationPoolDecision {
+	if decision == nil {
+		return nil
+	}
+	return &prioritySaturationPoolDecision{
+		preferredPool:   decision.PreferredPool,
+		selectedPool:    decision.SelectedPool,
+		mode:            decision.Mode,
+		fallbackReason:  decision.FallbackReason,
+		budgetReason:    decision.BudgetReason,
+		accountActive:   decision.AccountActive,
+		keyActive:       decision.APIKeyActive,
+		accountWaiting:  decision.AccountWaiting,
+		keyWaiting:      decision.APIKeyWaiting,
+		accountCapacity: decision.AccountCapacity,
+		keyCapacity:     decision.APIKeyCapacity,
+		keyBudget:       decision.APIKeyBudget,
+	}
+}
+
+func (s *prioritySaturationOpenAIAccountScheduler) selectGeneralAccountBalancedAtomic(
+	ctx context.Context,
+	req OpenAIAccountScheduleRequest,
+	accounts []*Account,
+) (*AccountSelectionResult, int, int, bool, error) {
+	if s == nil || s.base == nil || s.base.service == nil || s.base.service.concurrencyService == nil {
+		return nil, len(accounts), 0, false, nil
+	}
+
+	candidates := make([]OpenAIAdaptivePoolCandidate, 0, len(accounts))
+	accountByID := make(map[int64]*Account, len(accounts))
+	limitByID := make(map[int64]int, len(accounts))
+	for _, account := range accounts {
+		if account == nil {
+			continue
+		}
+		pool := prioritySaturationPoolAccount
+		if isPrioritySaturationAPIKeyAccount(account) {
+			pool = prioritySaturationPoolAPIKey
+		}
+		limit := account.GeneralConcurrencyLimit(req.affinityReservePercent())
+		candidates = append(candidates, OpenAIAdaptivePoolCandidate{
+			AccountID:      account.ID,
+			Pool:           pool,
+			MaxConcurrency: limit,
+		})
+		accountByID[account.ID] = account
+		limitByID[account.ID] = limit
+	}
+
+	enterHighLoadPercent, exitHighLoadPercent := s.base.service.openAIPrioritySaturationLoadThresholds(ctx)
+	distributed, supported, err := s.base.service.concurrencyService.AcquireOpenAIAdaptivePoolSlot(
+		ctx,
+		OpenAIAdaptivePoolAcquireRequest{
+			Scope:                 prioritySaturationAdaptivePoolScope(req),
+			Candidates:            candidates,
+			AccountSharePercent:   s.base.service.openAIPrioritySaturationAccountSharePercent(ctx),
+			APIKeySharePercent:    s.base.service.openAIPrioritySaturationAPIKeySharePercent(ctx),
+			EnterHighLoadPercent:  enterHighLoadPercent,
+			ExitHighLoadPercent:   exitHighLoadPercent,
+			ExitHighLoadStableFor: prioritySaturationExitHighLoadStableFor,
+		},
+	)
+	if !supported || err != nil {
+		return nil, len(accounts), 0, supported, err
+	}
+	poolDecision := prioritySaturationPoolDecisionFromAdaptive(distributed)
+	if distributed == nil || distributed.AccountID <= 0 {
+		return nil, len(accounts), len(accounts), true, noAvailableOpenAISelectionError(
+			req.RequestedModel,
+			false,
+			"adaptive_pool_no_wait_candidate",
+		)
+	}
+
+	selected := accountByID[distributed.AccountID]
+	if selected == nil {
+		if distributed.ReleaseFunc != nil {
+			distributed.ReleaseFunc()
+		}
+		return nil, len(accounts), 1, true, fmt.Errorf(
+			"OpenAI adaptive pool selected unknown account %d",
+			distributed.AccountID,
+		)
+	}
+	fresh := s.freshEligibleAccount(ctx, req, selected.ID)
+	if fresh == nil {
+		if distributed.ReleaseFunc != nil {
+			distributed.ReleaseFunc()
+		}
+		return nil, len(accounts), 1, true, fmt.Errorf(
+			"OpenAI adaptive pool account %d became ineligible",
+			selected.ID,
+		)
+	}
+	freshLimit := fresh.GeneralConcurrencyLimit(req.affinityReservePercent())
+	if distributed.Acquired && freshLimit != limitByID[selected.ID] {
+		if distributed.ReleaseFunc != nil {
+			distributed.ReleaseFunc()
+		}
+		return nil, len(accounts), 1, true, fmt.Errorf(
+			"OpenAI adaptive pool account %d concurrency changed from %d to %d",
+			selected.ID,
+			limitByID[selected.ID],
+			freshLimit,
+		)
+	}
+
+	if distributed.Acquired {
+		selection := &AccountSelectionResult{
+			Account:                        fresh,
+			Acquired:                       true,
+			ReleaseFunc:                    distributed.ReleaseFunc,
+			PreserveStickyBinding:          req.PreserveStickyBinding,
+			prioritySaturationPoolDecision: poolDecision,
+		}
+		selection, settleErr := s.base.service.settleAcquiredOpenAISelection(ctx, req, selection)
+		return selection, len(accounts), 0, true, settleErr
+	}
+
+	waitCandidates := make([]AccountWaitCandidateDiagnostic, 0, len(accounts))
+	for _, account := range accounts {
+		result := "busy"
+		if account != nil && account.ID == fresh.ID {
+			result = "selected_for_wait"
+		}
+		waitCandidates = append(waitCandidates, prioritySaturationWaitCandidate(
+			account,
+			req.affinityReservePercent(),
+			result,
+		))
+	}
+	selection := attachOpenAISelectionRequest(s.waitPlan(fresh, freshLimit, false), req)
+	selection.WaitPlan.Reason = "adaptive_pools_busy"
+	selection.WaitPlan.CandidateCount = len(waitCandidates)
+	selection.WaitPlan.Candidates, selection.WaitPlan.CandidatesTruncated = boundedPrioritySaturationWaitCandidates(
+		waitCandidates,
+		fresh.ID,
+	)
+	selection.prioritySaturationPoolDecision = poolDecision
+	return selection, len(accounts), len(accounts), true, nil
 }
 
 func (s *prioritySaturationOpenAIAccountScheduler) selectGeneralAccountBalanced(
@@ -251,16 +412,38 @@ func (s *prioritySaturationOpenAIAccountScheduler) selectGeneralAccountBalanced(
 	accounts []*Account,
 	filterStats openAISelectionFilterStats,
 ) (*AccountSelectionResult, int, int, error) {
+	selection, candidateCount, generalRejectCount, supported, err := s.selectGeneralAccountBalancedAtomic(ctx, req, accounts)
+	if supported && err == nil {
+		return selection, candidateCount, generalRejectCount, nil
+	}
+	if err != nil {
+		slog.Warn("openai_adaptive_pool_atomic_acquire_failed", "error", err)
+	}
+
+	// Compatibility/failure path: remain pool- and load-aware. Falling back to
+	// the legacy Priority order here would let a transient Redis feature failure
+	// silently bypass the account/Key policy that the administrator enabled.
+	return s.selectGeneralAccountBalancedSnapshot(ctx, req, accounts, filterStats)
+}
+
+func (s *prioritySaturationOpenAIAccountScheduler) selectGeneralAccountBalancedSnapshot(
+	ctx context.Context,
+	req OpenAIAccountScheduleRequest,
+	accounts []*Account,
+	filterStats openAISelectionFilterStats,
+) (*AccountSelectionResult, int, int, error) {
 	plan, ok := s.buildBalancedPoolPlan(ctx, req, accounts)
 	if !ok {
-		// A load snapshot is advisory. If Redis is temporarily unavailable, keep
-		// the established priority scheduler as the fail-safe behavior rather than
-		// turning a scheduling telemetry failure into a gateway outage.
-		return s.selectGeneralAccountPriority(ctx, req, accounts, filterStats)
+		return nil, len(accounts), 0, noAvailableOpenAISelectionError(
+			req.RequestedModel,
+			false,
+			filterStats.summary("adaptive_pool_load_unavailable"),
+		)
 	}
 
 	decision := &prioritySaturationPoolDecision{
 		preferredPool:   plan.preferred,
+		mode:            plan.mode,
 		budgetReason:    plan.budgetReason,
 		accountActive:   plan.accountPool.activeTotal,
 		keyActive:       plan.keyPool.activeTotal,
@@ -399,14 +582,22 @@ func (s *prioritySaturationOpenAIAccountScheduler) buildBalancedPoolPlan(
 		accountPool: buildPrioritySaturationPoolStats(accountPool, active, req.affinityReservePercent()),
 		keyPool:     buildPrioritySaturationPoolStats(keyPool, active, req.affinityReservePercent()),
 		keyLimits:   make(map[int64]int, len(keyPool)),
+		mode:        OpenAIAdaptivePoolModeLow,
 	}
 	if len(accountPool) == 0 && len(keyPool) == 0 {
 		return plan, true
 	}
+	plan.accountPool.accounts = s.orderPrioritySaturationPoolAccounts(req, prioritySaturationPoolAccount, plan.accountPool)
+	plan.keyPool.accounts = s.orderPrioritySaturationPoolAccounts(req, prioritySaturationPoolAPIKey, plan.keyPool)
 
 	demand := saturatingPrioritySaturationAdd(plan.accountPool.activeTotal, plan.keyPool.activeTotal)
 	demand = saturatingPrioritySaturationAdd(demand, 1)
 	share := s.base.service.openAIPrioritySaturationAPIKeySharePercent(ctx)
+	enterHighLoadPercent, _ := s.base.service.openAIPrioritySaturationLoadThresholds(ctx)
+	if prioritySaturationPoolUsagePercent(plan.accountPool) >= enterHighLoadPercent ||
+		(!plan.accountPool.unlimited && plan.accountPool.capacity > 0 && plan.accountPool.activeTotal >= plan.accountPool.capacity) {
+		plan.mode = OpenAIAdaptivePoolModeHigh
+	}
 	baseBudget := prioritySaturationPercentCeil(demand, share)
 	overflowBudget := 0
 	if !plan.accountPool.unlimited && demand > plan.accountPool.capacity {
@@ -421,14 +612,34 @@ func (s *prioritySaturationOpenAIAccountScheduler) buildBalancedPoolPlan(
 	if plan.keyBudget > plan.keyPool.effectiveCapacity() {
 		plan.keyBudget = plan.keyPool.effectiveCapacity()
 	}
-	if len(keyPool) > 0 {
+	if plan.mode == OpenAIAdaptivePoolModeHigh {
+		plan.budgetReason = "high_concurrency_headroom"
+		plan.keyBudget = plan.keyPool.observedCapacity()
+		for _, account := range plan.keyPool.accounts {
+			if account == nil {
+				continue
+			}
+			limit := account.GeneralConcurrencyLimit(req.affinityReservePercent())
+			if limit <= 0 {
+				limit = prioritySaturationMaxInt()
+			}
+			plan.keyLimits[account.ID] = limit
+		}
+	} else if len(keyPool) > 0 {
 		plan.keyLimits = allocatePrioritySaturationKeyLimits(plan.keyPool, plan.keyBudget, req.affinityReservePercent())
 	}
 
 	hasAccount := len(accountPool) > 0
 	hasKey := len(keyPool) > 0
-	plan.preferred = s.prioritySaturationPreferredPool(ctx, req, hasAccount, hasKey, share)
+	plan.preferred = s.prioritySaturationPreferredPool(req, plan, hasAccount, hasKey, share)
 	return plan, true
+}
+
+func prioritySaturationPoolUsagePercent(pool prioritySaturationPoolStats) int {
+	if pool.unlimited || pool.capacity <= 0 || pool.activeTotal <= 0 {
+		return 0
+	}
+	return pool.activeTotal * 100 / pool.capacity
 }
 
 func prioritySaturationPercentCeil(value, percent int) int {
@@ -611,9 +822,122 @@ func (s *prioritySaturationOpenAIAccountScheduler) tryBalancedPool(
 	return attempt, nil, nil
 }
 
-func (s *prioritySaturationOpenAIAccountScheduler) prioritySaturationPreferredPool(
-	ctx context.Context,
+func prioritySaturationGroupKey(req OpenAIAccountScheduleRequest) string {
+	groupKey := "ungrouped"
+	if req.GroupID != nil {
+		groupKey = fmt.Sprintf("%d", *req.GroupID)
+	}
+	return groupKey + ":" + normalizeOpenAICompatiblePlatform(req.Platform)
+}
+
+func comparePrioritySaturationProjectedAccountLoad(
+	left, right *Account,
+	active map[int64]int,
+	reservePercent int,
+) int {
+	if left == nil && right == nil {
+		return 0
+	}
+	if left == nil {
+		return 1
+	}
+	if right == nil {
+		return -1
+	}
+	leftLimit := left.GeneralConcurrencyLimit(reservePercent)
+	rightLimit := right.GeneralConcurrencyLimit(reservePercent)
+	leftActive := active[left.ID]
+	rightActive := active[right.ID]
+	if leftLimit <= 0 && rightLimit > 0 {
+		return -1
+	}
+	if leftLimit > 0 && rightLimit <= 0 {
+		return 1
+	}
+	if leftLimit <= 0 && rightLimit <= 0 {
+		if leftActive < rightActive {
+			return -1
+		}
+		if leftActive > rightActive {
+			return 1
+		}
+		return 0
+	}
+	leftScore := float64(leftActive+1) / float64(leftLimit)
+	rightScore := float64(rightActive+1) / float64(rightLimit)
+	if leftScore < rightScore {
+		return -1
+	}
+	if leftScore > rightScore {
+		return 1
+	}
+	return 0
+}
+
+func (s *prioritySaturationOpenAIAccountScheduler) orderPrioritySaturationPoolAccounts(
 	req OpenAIAccountScheduleRequest,
+	pool string,
+	stats prioritySaturationPoolStats,
+) []*Account {
+	ordered := append([]*Account(nil), stats.accounts...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		comparison := comparePrioritySaturationProjectedAccountLoad(
+			ordered[i],
+			ordered[j],
+			stats.active,
+			req.affinityReservePercent(),
+		)
+		if comparison != 0 {
+			return comparison < 0
+		}
+		if ordered[i] == nil || ordered[j] == nil {
+			return ordered[j] == nil
+		}
+		return ordered[i].ID < ordered[j].ID
+	})
+	if len(ordered) < 2 {
+		return ordered
+	}
+
+	leadingTieEnd := 1
+	for leadingTieEnd < len(ordered) && comparePrioritySaturationProjectedAccountLoad(
+		ordered[0],
+		ordered[leadingTieEnd],
+		stats.active,
+		req.affinityReservePercent(),
+	) == 0 {
+		leadingTieEnd++
+	}
+	if leadingTieEnd < 2 {
+		return ordered
+	}
+
+	cursorKey := prioritySaturationGroupKey(req) + ":member:" + pool
+	cursorValue, _ := s.poolCursors.LoadOrStore(cursorKey, &atomic.Uint64{})
+	cursor, _ := cursorValue.(*atomic.Uint64)
+	rotation := int((cursor.Add(1) - 1) % uint64(leadingTieEnd))
+	if rotation == 0 {
+		return ordered
+	}
+	leading := append([]*Account(nil), ordered[:leadingTieEnd]...)
+	copy(ordered[:leadingTieEnd], append(leading[rotation:], leading[:rotation]...))
+	return ordered
+}
+
+func prioritySaturationProjectedPoolScore(pool prioritySaturationPoolStats) float64 {
+	capacity := pool.capacity
+	if pool.unlimited {
+		capacity = pool.activeTotal + (len(pool.accounts) * 1000)
+	}
+	if capacity <= 0 {
+		capacity = 1
+	}
+	return float64(pool.activeTotal+1) / float64(capacity)
+}
+
+func (s *prioritySaturationOpenAIAccountScheduler) prioritySaturationPreferredPool(
+	req OpenAIAccountScheduleRequest,
+	plan prioritySaturationPoolPlan,
 	hasAccount, hasKey bool,
 	keySharePercent int,
 ) string {
@@ -624,40 +948,41 @@ func (s *prioritySaturationOpenAIAccountScheduler) prioritySaturationPreferredPo
 		return prioritySaturationPoolAccount
 	}
 
-	groupKey := "ungrouped"
-	if req.GroupID != nil {
-		groupKey = fmt.Sprintf("%d", *req.GroupID)
-	}
-	groupKey += ":" + normalizeOpenAICompatiblePlatform(req.Platform)
-	requestKey := prioritySaturationRequestAssignmentKey(ctx, groupKey)
-	if requestKey != "" {
-		if value, ok := s.assignments.Load(requestKey); ok {
-			if assignment, ok := value.(prioritySaturationPoolAssignment); ok && time.Since(assignment.createdAt) < prioritySaturationAssignmentTTL {
-				return assignment.pool
-			}
-			s.assignments.Delete(requestKey)
+	groupKey := prioritySaturationGroupKey(req)
+	if plan.mode == OpenAIAdaptivePoolModeHigh {
+		accountScore := prioritySaturationProjectedPoolScore(plan.accountPool)
+		keyScore := prioritySaturationProjectedPoolScore(plan.keyPool)
+		if keyScore < accountScore {
+			return prioritySaturationPoolAPIKey
 		}
-	}
-
-	// Requests that are already carrying exclusions are failover attempts. If
-	// no request identity is available, do not advance the global cursor again;
-	// prefer the account pool and let normal fallback rules pick a Key if needed.
-	if requestKey == "" && len(req.ExcludedIDs) > 0 {
+		if accountScore < keyScore {
+			return prioritySaturationPoolAccount
+		}
+		cursorValue, _ := s.poolCursors.LoadOrStore(groupKey+":high_pool", &atomic.Uint64{})
+		cursor, _ := cursorValue.(*atomic.Uint64)
+		if (cursor.Add(1)-1)%2 == 1 {
+			return prioritySaturationPoolAPIKey
+		}
 		return prioritySaturationPoolAccount
 	}
 
-	cursorValue, _ := s.poolCursors.LoadOrStore(groupKey, &atomic.Uint64{})
+	totalActive := plan.accountPool.activeTotal + plan.keyPool.activeTotal
+	normalizedShare := normalizeOpenAIPrioritySaturationAPIKeySharePercent(keySharePercent)
+	if totalActive > 0 && plan.keyPool.activeTotal*100 >= totalActive*normalizedShare {
+		return prioritySaturationPoolAccount
+	}
+	if totalActive >= 2 &&
+		(plan.keyPool.activeTotal+1)*100 <= (totalActive+1)*min(normalizedShare+1, 100) {
+		return prioritySaturationPoolAPIKey
+	}
+
+	cursorValue, _ := s.poolCursors.LoadOrStore(groupKey+":low_pool", &atomic.Uint64{})
 	cursor, _ := cursorValue.(*atomic.Uint64)
 	index := cursor.Add(1) - 1
-	preferred := prioritySaturationPoolAccount
 	if prioritySaturationIndexPrefersKey(index, keySharePercent) {
-		preferred = prioritySaturationPoolAPIKey
+		return prioritySaturationPoolAPIKey
 	}
-	if requestKey != "" {
-		s.assignments.Store(requestKey, prioritySaturationPoolAssignment{pool: preferred, createdAt: time.Now()})
-		s.cleanupPrioritySaturationAssignments()
-	}
-	return preferred
+	return prioritySaturationPoolAccount
 }
 
 func prioritySaturationIndexPrefersKey(index uint64, keySharePercent int) bool {
@@ -673,29 +998,6 @@ func prioritySaturationIndexPrefersKey(index uint64, keySharePercent int) bool {
 	before := (position*share + 1) / 100
 	after := ((position+1)*share + 1) / 100
 	return after > before
-}
-
-func prioritySaturationRequestAssignmentKey(ctx context.Context, groupKey string) string {
-	if ctx != nil {
-		if requestID, _ := ctx.Value(ctxkey.RequestID).(string); strings.TrimSpace(requestID) != "" {
-			return groupKey + ":request:" + strings.TrimSpace(requestID)
-		}
-	}
-	return ""
-}
-
-func (s *prioritySaturationOpenAIAccountScheduler) cleanupPrioritySaturationAssignments() {
-	if s.assignmentCleanupCounter.Add(1)%1024 != 0 {
-		return
-	}
-	cutoff := time.Now().Add(-prioritySaturationAssignmentTTL)
-	s.assignments.Range(func(key, value any) bool {
-		assignment, ok := value.(prioritySaturationPoolAssignment)
-		if ok && assignment.createdAt.Before(cutoff) {
-			s.assignments.Delete(key)
-		}
-		return true
-	})
 }
 
 func boundedPrioritySaturationWaitCandidates(

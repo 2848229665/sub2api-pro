@@ -284,6 +284,11 @@ func TestSettingHandler_UpdateSettings_PersistsPrioritySaturationScheduler(t *te
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "true", repo.values[service.SettingKeyOpenAIPrioritySaturationEnabled])
 	require.Equal(t, "20", repo.values[service.SettingKeyOpenAIPrioritySaturationAffinityReservePercent])
+	require.Equal(t, "false", repo.values[service.SettingKeyOpenAIPrioritySaturationPoolBalanceEnabled])
+	require.Equal(t, "67", repo.values[service.SettingKeyOpenAIPrioritySaturationAccountSharePercent])
+	require.Equal(t, "33", repo.values[service.SettingKeyOpenAIPrioritySaturationAPIKeySharePercent])
+	require.Equal(t, "70", repo.values[service.SettingKeyOpenAIPrioritySaturationEnterHighLoadPercent])
+	require.Equal(t, "50", repo.values[service.SettingKeyOpenAIPrioritySaturationExitHighLoadPercent])
 	require.Equal(t, "false", repo.values["openai_advanced_scheduler_enabled"])
 
 	var resp response.Response
@@ -292,6 +297,11 @@ func TestSettingHandler_UpdateSettings_PersistsPrioritySaturationScheduler(t *te
 	require.True(t, ok)
 	require.Equal(t, true, data["openai_priority_saturation_enabled"])
 	require.Equal(t, float64(20), data["openai_priority_saturation_affinity_reserve_percent"])
+	require.Equal(t, false, data["openai_priority_saturation_pool_balance_enabled"])
+	require.Equal(t, float64(67), data["openai_priority_saturation_account_share_percent"])
+	require.Equal(t, float64(33), data["openai_priority_saturation_api_key_share_percent"])
+	require.Equal(t, float64(70), data["openai_priority_saturation_enter_high_load_percent"])
+	require.Equal(t, float64(50), data["openai_priority_saturation_exit_high_load_percent"])
 	require.Equal(t, false, data["openai_advanced_scheduler_enabled"])
 }
 
@@ -311,6 +321,11 @@ func TestSettingHandler_UpdateSettings_AllowsCoexistingOpenAISchedulers(t *testi
 		"promo_code_enabled":                                  true,
 		"openai_priority_saturation_enabled":                  true,
 		"openai_priority_saturation_affinity_reserve_percent": 35,
+		"openai_priority_saturation_pool_balance_enabled":     true,
+		"openai_priority_saturation_account_share_percent":    60,
+		"openai_priority_saturation_api_key_share_percent":    40,
+		"openai_priority_saturation_enter_high_load_percent":  75,
+		"openai_priority_saturation_exit_high_load_percent":   45,
 	})
 	require.NoError(t, err)
 
@@ -325,6 +340,10 @@ func TestSettingHandler_UpdateSettings_AllowsCoexistingOpenAISchedulers(t *testi
 	require.Equal(t, "true", repo.values["openai_advanced_scheduler_enabled"])
 	require.Equal(t, "true", repo.values[service.SettingKeyOpenAIPrioritySaturationEnabled])
 	require.Equal(t, "35", repo.values[service.SettingKeyOpenAIPrioritySaturationAffinityReservePercent])
+	require.Equal(t, "60", repo.values[service.SettingKeyOpenAIPrioritySaturationAccountSharePercent])
+	require.Equal(t, "40", repo.values[service.SettingKeyOpenAIPrioritySaturationAPIKeySharePercent])
+	require.Equal(t, "75", repo.values[service.SettingKeyOpenAIPrioritySaturationEnterHighLoadPercent])
+	require.Equal(t, "45", repo.values[service.SettingKeyOpenAIPrioritySaturationExitHighLoadPercent])
 
 	var resp response.Response
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
@@ -333,6 +352,61 @@ func TestSettingHandler_UpdateSettings_AllowsCoexistingOpenAISchedulers(t *testi
 	require.Equal(t, true, data["openai_advanced_scheduler_enabled"])
 	require.Equal(t, true, data["openai_priority_saturation_enabled"])
 	require.Equal(t, float64(35), data["openai_priority_saturation_affinity_reserve_percent"])
+	require.Equal(t, float64(60), data["openai_priority_saturation_account_share_percent"])
+	require.Equal(t, float64(40), data["openai_priority_saturation_api_key_share_percent"])
+	require.Equal(t, float64(75), data["openai_priority_saturation_enter_high_load_percent"])
+	require.Equal(t, float64(45), data["openai_priority_saturation_exit_high_load_percent"])
+}
+
+func TestSettingHandler_UpdateSettings_RejectsInvalidAdaptivePoolConfiguration(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name    string
+		updates map[string]any
+	}{
+		{
+			name: "pool shares do not add up to 100",
+			updates: map[string]any{
+				"openai_priority_saturation_account_share_percent": 60,
+				"openai_priority_saturation_api_key_share_percent": 30,
+			},
+		},
+		{
+			name: "exit threshold is not below enter threshold",
+			updates: map[string]any{
+				"openai_priority_saturation_enter_high_load_percent": 50,
+				"openai_priority_saturation_exit_high_load_percent":  50,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &settingHandlerRepoStub{
+				values: map[string]string{
+					service.SettingKeyPromoCodeEnabled: "true",
+				},
+			}
+			svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+			handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+			body := map[string]any{"promo_code_enabled": true}
+			for key, value := range test.updates {
+				body[key] = value
+			}
+			rawBody, err := json.Marshal(body)
+			require.NoError(t, err)
+
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+			c.Request.Header.Set("Content-Type", "application/json")
+
+			handler.UpdateSettings(c)
+
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Nil(t, repo.lastUpdates)
+		})
+	}
 }
 
 func TestSettingHandler_UpdateSettings_PreservesLegacyBlankPaymentVisibleMethodSource(t *testing.T) {

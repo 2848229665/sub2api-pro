@@ -307,6 +307,47 @@
                   <div class="min-w-0">
                     <label
                       class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                      for="openai-priority-saturation-account-share-percent"
+                    >
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.accountSharePercentLabel",
+                        )
+                      }}
+                    </label>
+                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.accountSharePercentHint",
+                        )
+                      }}
+                    </p>
+                  </div>
+                  <div class="relative w-full shrink-0 sm:w-32">
+                    <input
+                      id="openai-priority-saturation-account-share-percent"
+                      v-model.number="form.openai_priority_saturation_account_share_percent"
+                      class="input pr-8"
+                      data-testid="openai-priority-saturation-account-share-percent"
+                      min="1"
+                      max="99"
+                      required
+                      step="1"
+                      type="number"
+                    />
+                    <span
+                      class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400"
+                      >%</span
+                    >
+                  </div>
+                </div>
+                <div
+                  v-if="form.openai_priority_saturation_pool_balance_enabled"
+                  class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6"
+                >
+                  <div class="min-w-0">
+                    <label
+                      class="text-sm font-medium text-gray-700 dark:text-gray-300"
                       for="openai-priority-saturation-api-key-share-percent"
                     >
                       {{
@@ -330,6 +371,88 @@
                       class="input pr-8"
                       data-testid="openai-priority-saturation-api-key-share-percent"
                       min="1"
+                      max="99"
+                      required
+                      step="1"
+                      type="number"
+                    />
+                    <span
+                      class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400"
+                      >%</span
+                    >
+                  </div>
+                </div>
+                <div
+                  v-if="form.openai_priority_saturation_pool_balance_enabled"
+                  class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6"
+                >
+                  <div class="min-w-0">
+                    <label
+                      class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                      for="openai-priority-saturation-enter-high-load-percent"
+                    >
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.enterHighLoadPercentLabel",
+                        )
+                      }}
+                    </label>
+                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.enterHighLoadPercentHint",
+                        )
+                      }}
+                    </p>
+                  </div>
+                  <div class="relative w-full shrink-0 sm:w-32">
+                    <input
+                      id="openai-priority-saturation-enter-high-load-percent"
+                      v-model.number="form.openai_priority_saturation_enter_high_load_percent"
+                      class="input pr-8"
+                      data-testid="openai-priority-saturation-enter-high-load-percent"
+                      min="1"
+                      max="100"
+                      required
+                      step="1"
+                      type="number"
+                    />
+                    <span
+                      class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400"
+                      >%</span
+                    >
+                  </div>
+                </div>
+                <div
+                  v-if="form.openai_priority_saturation_pool_balance_enabled"
+                  class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6"
+                >
+                  <div class="min-w-0">
+                    <label
+                      class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                      for="openai-priority-saturation-exit-high-load-percent"
+                    >
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.exitHighLoadPercentLabel",
+                        )
+                      }}
+                    </label>
+                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.exitHighLoadPercentHint",
+                        )
+                      }}
+                    </p>
+                  </div>
+                  <div class="relative w-full shrink-0 sm:w-32">
+                    <input
+                      id="openai-priority-saturation-exit-high-load-percent"
+                      v-model.number="form.openai_priority_saturation_exit_high_load_percent"
+                      class="input pr-8"
+                      data-testid="openai-priority-saturation-exit-high-load-percent"
+                      min="0"
                       max="99"
                       required
                       step="1"
@@ -9431,7 +9554,10 @@ type SettingsForm = Omit<
   openai_priority_saturation_enabled: boolean;
   openai_priority_saturation_affinity_reserve_percent: number;
   openai_priority_saturation_pool_balance_enabled: boolean;
+  openai_priority_saturation_account_share_percent: number;
   openai_priority_saturation_api_key_share_percent: number;
+  openai_priority_saturation_enter_high_load_percent: number;
+  openai_priority_saturation_exit_high_load_percent: number;
   openai_advanced_scheduler_sticky_weighted_enabled: boolean;
   openai_advanced_scheduler_subscription_priority_enabled: boolean;
   openai_advanced_scheduler_lb_top_k: string;
@@ -9668,8 +9794,11 @@ const form = reactive<SettingsForm>({
   openai_advanced_scheduler_enabled: false,
   openai_priority_saturation_enabled: true,
   openai_priority_saturation_affinity_reserve_percent: 20,
-  openai_priority_saturation_pool_balance_enabled: false,
+  openai_priority_saturation_pool_balance_enabled: true,
+  openai_priority_saturation_account_share_percent: 67,
   openai_priority_saturation_api_key_share_percent: 33,
+  openai_priority_saturation_enter_high_load_percent: 70,
+  openai_priority_saturation_exit_high_load_percent: 50,
   openai_advanced_scheduler_sticky_weighted_enabled: false,
   openai_advanced_scheduler_subscription_priority_enabled: false,
   openai_advanced_scheduler_lb_top_k: "",
@@ -10693,10 +10822,35 @@ async function loadSettings() {
       form.openai_priority_saturation_affinity_reserve_percent = 20;
     }
     if (settings.openai_priority_saturation_pool_balance_enabled == null) {
-      form.openai_priority_saturation_pool_balance_enabled = false;
+      form.openai_priority_saturation_pool_balance_enabled = true;
     }
-    if (settings.openai_priority_saturation_api_key_share_percent == null) {
-      form.openai_priority_saturation_api_key_share_percent = 33;
+    const configuredAccountShare =
+      settings.openai_priority_saturation_account_share_percent;
+    const configuredAPIKeyShare =
+      settings.openai_priority_saturation_api_key_share_percent;
+    if (configuredAccountShare == null) {
+      form.openai_priority_saturation_account_share_percent =
+        typeof configuredAPIKeyShare === "number" &&
+        Number.isInteger(configuredAPIKeyShare) &&
+        configuredAPIKeyShare >= 1 &&
+        configuredAPIKeyShare <= 99
+          ? 100 - configuredAPIKeyShare
+          : 67;
+    }
+    if (configuredAPIKeyShare == null) {
+      form.openai_priority_saturation_api_key_share_percent =
+        typeof configuredAccountShare === "number" &&
+        Number.isInteger(configuredAccountShare) &&
+        configuredAccountShare >= 1 &&
+        configuredAccountShare <= 99
+          ? 100 - configuredAccountShare
+          : 33;
+    }
+    if (settings.openai_priority_saturation_enter_high_load_percent == null) {
+      form.openai_priority_saturation_enter_high_load_percent = 70;
+    }
+    if (settings.openai_priority_saturation_exit_high_load_percent == null) {
+      form.openai_priority_saturation_exit_high_load_percent = 50;
     }
     // Only assign non-null values from backend (null means unconfigured, keep defaults)
     for (const [key, value] of Object.entries(settings)) {
@@ -10938,14 +11092,41 @@ async function saveSettings() {
   }
   const apiKeySharePercent =
     form.openai_priority_saturation_api_key_share_percent;
+  const accountSharePercent =
+    form.openai_priority_saturation_account_share_percent;
   if (
+    typeof accountSharePercent !== "number" ||
+    !Number.isInteger(accountSharePercent) ||
+    accountSharePercent < 1 ||
+    accountSharePercent > 99 ||
     typeof apiKeySharePercent !== "number" ||
     !Number.isInteger(apiKeySharePercent) ||
     apiKeySharePercent < 1 ||
-    apiKeySharePercent > 99
+    apiKeySharePercent > 99 ||
+    accountSharePercent + apiKeySharePercent !== 100
   ) {
     appStore.showError(
-      t("admin.settings.openaiPrioritySaturation.apiKeySharePercentError"),
+      t("admin.settings.openaiPrioritySaturation.poolSharePercentError"),
+    );
+    return;
+  }
+  const enterHighLoadPercent =
+    form.openai_priority_saturation_enter_high_load_percent;
+  const exitHighLoadPercent =
+    form.openai_priority_saturation_exit_high_load_percent;
+  if (
+    typeof enterHighLoadPercent !== "number" ||
+    !Number.isInteger(enterHighLoadPercent) ||
+    enterHighLoadPercent < 1 ||
+    enterHighLoadPercent > 100 ||
+    typeof exitHighLoadPercent !== "number" ||
+    !Number.isInteger(exitHighLoadPercent) ||
+    exitHighLoadPercent < 0 ||
+    exitHighLoadPercent > 99 ||
+    exitHighLoadPercent >= enterHighLoadPercent
+  ) {
+    appStore.showError(
+      t("admin.settings.openaiPrioritySaturation.loadThresholdPercentError"),
     );
     return;
   }
@@ -11357,7 +11538,11 @@ async function saveSettings() {
         affinityReservePercent,
       openai_priority_saturation_pool_balance_enabled:
         form.openai_priority_saturation_pool_balance_enabled,
+      openai_priority_saturation_account_share_percent: accountSharePercent,
       openai_priority_saturation_api_key_share_percent: apiKeySharePercent,
+      openai_priority_saturation_enter_high_load_percent:
+        enterHighLoadPercent,
+      openai_priority_saturation_exit_high_load_percent: exitHighLoadPercent,
       openai_advanced_scheduler_sticky_weighted_enabled:
         form.openai_advanced_scheduler_sticky_weighted_enabled,
       openai_advanced_scheduler_subscription_priority_enabled:

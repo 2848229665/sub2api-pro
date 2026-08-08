@@ -238,8 +238,11 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		openAIAdvancedSchedulerSettingKey:                            "false",
 		SettingKeyOpenAIPrioritySaturationEnabled:                    "true",
 		SettingKeyOpenAIPrioritySaturationAffinityReservePercent:     strconv.Itoa(DefaultOpenAIPrioritySaturationAffinityReservePercent),
-		SettingKeyOpenAIPrioritySaturationPoolBalanceEnabled:         "false",
+		SettingKeyOpenAIPrioritySaturationPoolBalanceEnabled:         strconv.FormatBool(DefaultOpenAIPrioritySaturationPoolBalanceEnabled),
+		SettingKeyOpenAIPrioritySaturationAccountSharePercent:        strconv.Itoa(DefaultOpenAIPrioritySaturationAccountSharePercent),
 		SettingKeyOpenAIPrioritySaturationAPIKeySharePercent:         strconv.Itoa(DefaultOpenAIPrioritySaturationAPIKeySharePercent),
+		SettingKeyOpenAIPrioritySaturationEnterHighLoadPercent:       strconv.Itoa(DefaultOpenAIPrioritySaturationEnterHighLoadPercent),
+		SettingKeyOpenAIPrioritySaturationExitHighLoadPercent:        strconv.Itoa(DefaultOpenAIPrioritySaturationExitHighLoadPercent),
 		SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled:       "false",
 		SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled: "false",
 		SettingKeyOpenAIAdvancedSchedulerLBTopK:                      "",
@@ -887,14 +890,33 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.OpenAILowUpstreamRatePriorityEnabled = settings[SettingKeyOpenAILowUpstreamRatePriorityEnabled] == "true"
 	result.OpenAIOAuthSchedulingRateMultiplier = parseOpenAIOAuthSchedulingRateMultiplier(settings[SettingKeyOpenAIOAuthSchedulingRateMultiplier])
 	result.OpenAIAdvancedSchedulerEnabled = settings[openAIAdvancedSchedulerSettingKey] == "true"
-	result.OpenAIPrioritySaturationEnabled = settings[SettingKeyOpenAIPrioritySaturationEnabled] == "true"
+	result.OpenAIPrioritySaturationEnabled = parseOpenAIPrioritySaturationEnabled(
+		settings[SettingKeyOpenAIPrioritySaturationEnabled],
+	)
 	result.OpenAIPrioritySaturationAffinityReservePercent = parseOpenAIPrioritySaturationAffinityReservePercent(
 		settings[SettingKeyOpenAIPrioritySaturationAffinityReservePercent],
 	)
-	result.OpenAIPrioritySaturationPoolBalanceEnabled = settings[SettingKeyOpenAIPrioritySaturationPoolBalanceEnabled] == "true"
-	result.OpenAIPrioritySaturationAPIKeySharePercent = parseOpenAIPrioritySaturationAPIKeySharePercent(
+	result.OpenAIPrioritySaturationPoolBalanceEnabled = parseOpenAIPrioritySaturationPoolBalanceEnabled(
+		settings[SettingKeyOpenAIPrioritySaturationPoolBalanceEnabled],
+	)
+	result.OpenAIPrioritySaturationAccountSharePercent,
+		result.OpenAIPrioritySaturationAPIKeySharePercent = parseOpenAIPrioritySaturationPoolShares(
+		settings[SettingKeyOpenAIPrioritySaturationAccountSharePercent],
 		settings[SettingKeyOpenAIPrioritySaturationAPIKeySharePercent],
 	)
+	result.OpenAIPrioritySaturationEnterHighLoadPercent = parseOpenAIPrioritySaturationEnterHighLoadPercent(
+		settings[SettingKeyOpenAIPrioritySaturationEnterHighLoadPercent],
+	)
+	result.OpenAIPrioritySaturationExitHighLoadPercent = parseOpenAIPrioritySaturationExitHighLoadPercent(
+		settings[SettingKeyOpenAIPrioritySaturationExitHighLoadPercent],
+	)
+	if validateOpenAIPrioritySaturationLoadThresholds(
+		result.OpenAIPrioritySaturationEnterHighLoadPercent,
+		result.OpenAIPrioritySaturationExitHighLoadPercent,
+	) != nil {
+		result.OpenAIPrioritySaturationEnterHighLoadPercent = DefaultOpenAIPrioritySaturationEnterHighLoadPercent
+		result.OpenAIPrioritySaturationExitHighLoadPercent = DefaultOpenAIPrioritySaturationExitHighLoadPercent
+	}
 	result.OpenAIAdvancedSchedulerStickyWeightedEnabled = settings[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled] == "true"
 	result.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled = settings[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled] == "true"
 	result.OpenAIAdvancedSchedulerLBTopK = strings.TrimSpace(settings[SettingKeyOpenAIAdvancedSchedulerLBTopK])

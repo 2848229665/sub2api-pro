@@ -129,7 +129,16 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	if err := validateOpenAIPrioritySaturationAffinityReservePercent(settings.OpenAIPrioritySaturationAffinityReservePercent); err != nil {
 		return nil, err
 	}
-	if err := validateOpenAIPrioritySaturationAPIKeySharePercent(settings.OpenAIPrioritySaturationAPIKeySharePercent); err != nil {
+	if err := validateOpenAIPrioritySaturationPoolShares(
+		settings.OpenAIPrioritySaturationAccountSharePercent,
+		settings.OpenAIPrioritySaturationAPIKeySharePercent,
+	); err != nil {
+		return nil, err
+	}
+	if err := validateOpenAIPrioritySaturationLoadThresholds(
+		settings.OpenAIPrioritySaturationEnterHighLoadPercent,
+		settings.OpenAIPrioritySaturationExitHighLoadPercent,
+	); err != nil {
 		return nil, err
 	}
 	settings.PaymentVisibleMethodAlipaySource = alipaySource
@@ -488,7 +497,10 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyOpenAIPrioritySaturationEnabled] = strconv.FormatBool(settings.OpenAIPrioritySaturationEnabled)
 	updates[SettingKeyOpenAIPrioritySaturationAffinityReservePercent] = strconv.Itoa(settings.OpenAIPrioritySaturationAffinityReservePercent)
 	updates[SettingKeyOpenAIPrioritySaturationPoolBalanceEnabled] = strconv.FormatBool(settings.OpenAIPrioritySaturationPoolBalanceEnabled)
+	updates[SettingKeyOpenAIPrioritySaturationAccountSharePercent] = strconv.Itoa(settings.OpenAIPrioritySaturationAccountSharePercent)
 	updates[SettingKeyOpenAIPrioritySaturationAPIKeySharePercent] = strconv.Itoa(settings.OpenAIPrioritySaturationAPIKeySharePercent)
+	updates[SettingKeyOpenAIPrioritySaturationEnterHighLoadPercent] = strconv.Itoa(settings.OpenAIPrioritySaturationEnterHighLoadPercent)
+	updates[SettingKeyOpenAIPrioritySaturationExitHighLoadPercent] = strconv.Itoa(settings.OpenAIPrioritySaturationExitHighLoadPercent)
 	updates[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerStickyWeightedEnabled)
 	updates[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled)
 	updates[SettingKeyOpenAIAdvancedSchedulerLBTopK] = settings.OpenAIAdvancedSchedulerLBTopK
@@ -659,7 +671,10 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		prioritySaturationEnabled:      settings.OpenAIPrioritySaturationEnabled,
 		affinityReservePercent:         settings.OpenAIPrioritySaturationAffinityReservePercent,
 		poolBalanceEnabled:             settings.OpenAIPrioritySaturationPoolBalanceEnabled,
+		accountSharePercent:            settings.OpenAIPrioritySaturationAccountSharePercent,
 		apiKeySharePercent:             settings.OpenAIPrioritySaturationAPIKeySharePercent,
+		enterHighLoadPercent:           settings.OpenAIPrioritySaturationEnterHighLoadPercent,
+		exitHighLoadPercent:            settings.OpenAIPrioritySaturationExitHighLoadPercent,
 		stickyWeightedEnabled:          settings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
 		subscriptionPriorityEnabled:    settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
 		lbTopKOverride:                 parsePositiveIntOverride(settings.OpenAIAdvancedSchedulerLBTopK),

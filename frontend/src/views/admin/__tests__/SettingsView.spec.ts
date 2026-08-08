@@ -192,20 +192,27 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.paymentVisibleMethods.sourceRequiredError": "{title} 已启用，请先选择支付来源。",
     "admin.settings.payment.configGuide": "查看支付配置说明",
     "admin.settings.payment.findProvider": "查看支持的支付方式",
-    "admin.settings.openaiPrioritySaturation.title": "OpenAI 优先级饱和调度",
-    "admin.settings.openaiPrioritySaturation.description": "独立于实验加权调度。按 Priority 升序、账号 ID 升序逐个填满普通容量。",
-    "admin.settings.openaiPrioritySaturation.enable": "启用优先级饱和调度",
-    "admin.settings.openaiPrioritySaturation.enableHint": "新会话使用普通容量；已有粘性会话可使用完整容量。",
+    "admin.settings.openaiPrioritySaturation.title": "OpenAI 自适应双池调度",
+    "admin.settings.openaiPrioritySaturation.description": "低并发时以账号池为主，高并发时账号池与 API Key 池按实时容量共同调度。",
+    "admin.settings.openaiPrioritySaturation.enable": "启用自适应双池调度",
+    "admin.settings.openaiPrioritySaturation.enableHint": "该策略优先级最高。",
     "admin.settings.openaiPrioritySaturation.poolBalanceEnabled": "启用账号 / Key 池平衡",
-    "admin.settings.openaiPrioritySaturation.poolBalanceEnabledHint": "新会话按账号约三分之二、Key 约三分之一分配。",
-    "admin.settings.openaiPrioritySaturation.apiKeySharePercentLabel": "Key 初始并发比例",
-    "admin.settings.openaiPrioritySaturation.apiKeySharePercentHint": "默认 33%。",
-    "admin.settings.openaiPrioritySaturation.apiKeySharePercentError": "Key 初始并发比例必须是 1 到 99 之间的整数。",
+    "admin.settings.openaiPrioritySaturation.poolBalanceEnabledHint": "默认开启。低并发按配置比例分配；高并发按实时剩余容量分配。",
+    "admin.settings.openaiPrioritySaturation.accountSharePercentLabel": "低并发账号池占比",
+    "admin.settings.openaiPrioritySaturation.accountSharePercentHint": "默认 2:1 中的账号侧，即 67%。",
+    "admin.settings.openaiPrioritySaturation.apiKeySharePercentLabel": "低并发 Key 池占比",
+    "admin.settings.openaiPrioritySaturation.apiKeySharePercentHint": "默认 2:1 中的 Key 侧，即 33%。",
+    "admin.settings.openaiPrioritySaturation.poolSharePercentError": "账号池与 Key 池占比都必须是 1 到 99 的整数，且合计为 100%。",
+    "admin.settings.openaiPrioritySaturation.enterHighLoadPercentLabel": "进入高并发阈值",
+    "admin.settings.openaiPrioritySaturation.enterHighLoadPercentHint": "默认 70%。",
+    "admin.settings.openaiPrioritySaturation.exitHighLoadPercentLabel": "退出高并发阈值",
+    "admin.settings.openaiPrioritySaturation.exitHighLoadPercentHint": "默认 50%。",
+    "admin.settings.openaiPrioritySaturation.loadThresholdPercentError": "进入阈值必须为 1 到 100，退出阈值必须为 0 到 99，且退出阈值小于进入阈值。",
     "admin.settings.openaiPrioritySaturation.reservePercentLabel": "亲和会话预留百分比",
     "admin.settings.openaiPrioritySaturation.reservePercentHint": "全局应用于所有 OpenAI 账号。",
     "admin.settings.openaiPrioritySaturation.reservePercentError": "亲和会话预留百分比必须是 0 到 99 之间的整数。",
-    "admin.settings.openaiPrioritySaturation.orderLabel": "账号顺序",
-    "admin.settings.openaiPrioritySaturation.orderValue": "Priority 升序，Priority 相同时按账号 ID 升序",
+    "admin.settings.openaiPrioritySaturation.orderLabel": "池内选择",
+    "admin.settings.openaiPrioritySaturation.orderValue": "选择预计负载率最低的成员；负载相同时轮询，不使用 Priority",
     "admin.settings.openaiPrioritySaturation.generalLabel": "新会话与临时溢出",
     "admin.settings.openaiPrioritySaturation.generalValue": "只使用普通容量 G = C - R",
     "admin.settings.openaiPrioritySaturation.affinityLabel": "原账号亲和请求",
@@ -516,8 +523,11 @@ const baseSettingsResponse = {
   openai_advanced_scheduler_enabled: false,
   openai_priority_saturation_enabled: false,
   openai_priority_saturation_affinity_reserve_percent: 20,
-  openai_priority_saturation_pool_balance_enabled: false,
+  openai_priority_saturation_pool_balance_enabled: true,
+  openai_priority_saturation_account_share_percent: 67,
   openai_priority_saturation_api_key_share_percent: 33,
+  openai_priority_saturation_enter_high_load_percent: 70,
+  openai_priority_saturation_exit_high_load_percent: 50,
   openai_advanced_scheduler_sticky_weighted_enabled: false,
   openai_advanced_scheduler_subscription_priority_enabled: false,
   openai_advanced_scheduler_lb_top_k: "",
@@ -1270,14 +1280,14 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(wrapper.text()).not.toContain("OpenAI 高级调度器");
   });
 
-  it("lets priority saturation coexist with the weighted selector and saves the global reserve", async () => {
+  it("lets adaptive dual-pool scheduling coexist with the weighted selector and saves its settings", async () => {
     const wrapper = mountView();
 
     await flushPromises();
 
     const priorityCard = wrapper.get('[data-testid="openai-priority-saturation-settings"]');
-    expect(priorityCard.text()).toContain("OpenAI 优先级饱和调度");
-    expect(priorityCard.text()).toContain("按 Priority 升序、账号 ID 升序");
+    expect(priorityCard.text()).toContain("OpenAI 自适应双池调度");
+    expect(priorityCard.text()).toContain("低并发时以账号池为主");
     expect(
       priorityCard
         .find('[data-testid="openai-priority-saturation-affinity-reserve-percent"]')
@@ -1290,7 +1300,7 @@ describe("admin SettingsView payment visible method controls", () => {
       .get('[data-testid="openai-priority-saturation-affinity-reserve-percent"]')
       .setValue("35");
     expect(wrapper.find('[data-testid="openai-low-rate-priority-toggle"]').exists()).toBe(false);
-    expect(priorityCard.text()).toContain("Priority 升序，Priority 相同时按账号 ID 升序");
+    expect(priorityCard.text()).toContain("负载相同时轮询，不使用 Priority");
     expect(wrapper.find('[data-testid="openai-scheduler-switch-confirm"]').exists()).toBe(false);
 
     await wrapper.find("form").trigger("submit.prevent");
@@ -1299,6 +1309,11 @@ describe("admin SettingsView payment visible method controls", () => {
       expect.objectContaining({
         openai_priority_saturation_enabled: true,
         openai_priority_saturation_affinity_reserve_percent: 35,
+        openai_priority_saturation_pool_balance_enabled: true,
+        openai_priority_saturation_account_share_percent: 67,
+        openai_priority_saturation_api_key_share_percent: 33,
+        openai_priority_saturation_enter_high_load_percent: 70,
+        openai_priority_saturation_exit_high_load_percent: 50,
         openai_advanced_scheduler_enabled: true,
       }),
     );
@@ -1333,6 +1348,78 @@ describe("admin SettingsView payment visible method controls", () => {
         openai_advanced_scheduler_enabled: false,
       }),
     );
+  });
+
+  it("defaults legacy responses to enabled low-concurrency 2:1 balancing with 70/50 thresholds", async () => {
+    const {
+      openai_priority_saturation_pool_balance_enabled: _poolBalanceOmitted,
+      openai_priority_saturation_account_share_percent: _accountShareOmitted,
+      openai_priority_saturation_api_key_share_percent: _keyShareOmitted,
+      openai_priority_saturation_enter_high_load_percent: _enterOmitted,
+      openai_priority_saturation_exit_high_load_percent: _exitOmitted,
+      ...legacySettingsResponse
+    } = baseSettingsResponse;
+    getSettings.mockResolvedValueOnce(legacySettingsResponse);
+    const wrapper = mountView();
+
+    await flushPromises();
+
+    const poolToggle = wrapper
+      .findAllComponents(ToggleStub)
+      .find(
+        (toggle) =>
+          toggle.attributes("data-testid") ===
+          "openai-priority-saturation-pool-balance-toggle",
+      );
+    expect(poolToggle?.props("modelValue")).toBe(true);
+    expect(
+      (
+        wrapper.get(
+          '[data-testid="openai-priority-saturation-account-share-percent"]',
+        ).element as HTMLInputElement
+      ).value,
+    ).toBe("67");
+    expect(
+      (
+        wrapper.get(
+          '[data-testid="openai-priority-saturation-api-key-share-percent"]',
+        ).element as HTMLInputElement
+      ).value,
+    ).toBe("33");
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        openai_priority_saturation_pool_balance_enabled: true,
+        openai_priority_saturation_account_share_percent: 67,
+        openai_priority_saturation_api_key_share_percent: 33,
+        openai_priority_saturation_enter_high_load_percent: 70,
+        openai_priority_saturation_exit_high_load_percent: 50,
+      }),
+    );
+  });
+
+  it("derives the account share from a legacy API-key-only share", async () => {
+    const {
+      openai_priority_saturation_account_share_percent: _accountShareOmitted,
+      ...legacySettingsResponse
+    } = baseSettingsResponse;
+    getSettings.mockResolvedValueOnce({
+      ...legacySettingsResponse,
+      openai_priority_saturation_api_key_share_percent: 40,
+    });
+    const wrapper = mountView();
+
+    await flushPromises();
+
+    expect(
+      (
+        wrapper.get(
+          '[data-testid="openai-priority-saturation-account-share-percent"]',
+        ).element as HTMLInputElement
+      ).value,
+    ).toBe("60");
   });
 
   it("enables priority saturation above an enabled advanced scheduler for legacy responses", async () => {
@@ -1375,29 +1462,42 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
-  it("enables account/key pool balancing and saves the configured Key share", async () => {
+  it("saves the configured low-concurrency 2:1 pool split and load thresholds", async () => {
     const wrapper = mountView();
     await flushPromises();
 
     await wrapper
       .get('[data-testid="openai-priority-saturation-pool-balance-toggle"]')
       .setValue(true);
-    const shareInput = wrapper.get(
+    const accountShareInput = wrapper.get(
+      '[data-testid="openai-priority-saturation-account-share-percent"]',
+    );
+    const keyShareInput = wrapper.get(
       '[data-testid="openai-priority-saturation-api-key-share-percent"]',
     );
-    await shareInput.setValue("40");
+    await accountShareInput.setValue("60");
+    await keyShareInput.setValue("40");
+    await wrapper
+      .get('[data-testid="openai-priority-saturation-enter-high-load-percent"]')
+      .setValue("75");
+    await wrapper
+      .get('[data-testid="openai-priority-saturation-exit-high-load-percent"]')
+      .setValue("45");
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
     expect(updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
         openai_priority_saturation_pool_balance_enabled: true,
+        openai_priority_saturation_account_share_percent: 60,
         openai_priority_saturation_api_key_share_percent: 40,
+        openai_priority_saturation_enter_high_load_percent: 75,
+        openai_priority_saturation_exit_high_load_percent: 45,
       }),
     );
   });
 
-  it("rejects an invalid Key share percentage", async () => {
+  it("rejects low-concurrency pool shares that do not add up to 100", async () => {
     const wrapper = mountView();
     await flushPromises();
 
@@ -1406,13 +1506,32 @@ describe("admin SettingsView payment visible method controls", () => {
       .setValue(true);
     await wrapper
       .get('[data-testid="openai-priority-saturation-api-key-share-percent"]')
-      .setValue("0");
+      .setValue("40");
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
     expect(updateSettings).not.toHaveBeenCalled();
     expect(showError).toHaveBeenCalledWith(
-      "Key 初始并发比例必须是 1 到 99 之间的整数。",
+      "账号池与 Key 池占比都必须是 1 到 99 的整数，且合计为 100%。",
+    );
+  });
+
+  it("rejects high-concurrency thresholds without hysteresis", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper
+      .get('[data-testid="openai-priority-saturation-enter-high-load-percent"]')
+      .setValue("50");
+    await wrapper
+      .get('[data-testid="openai-priority-saturation-exit-high-load-percent"]')
+      .setValue("50");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(showError).toHaveBeenCalledWith(
+      "进入阈值必须为 1 到 100，退出阈值必须为 0 到 99，且退出阈值小于进入阈值。",
     );
   });
 
