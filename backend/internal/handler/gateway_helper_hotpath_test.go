@@ -501,7 +501,9 @@ func TestAcquireUserSlotWithWaitObserved_LogsWaitLifecycle(t *testing.T) {
 	require.Len(t, acquiredLogs, 1)
 	fields := acquiredLogs[0].ContextMap()
 	require.Equal(t, "acquired", fields["phase"])
-	require.GreaterOrEqual(t, fields["wait_ms"].(int64), int64(100))
+	waitMs, ok := fields["wait_ms"].(int64)
+	require.True(t, ok)
+	require.GreaterOrEqual(t, waitMs, int64(100))
 	require.Empty(t, observedLogs.FilterMessage("openai.user_slot_acquire_failed").All())
 	require.Equal(t, 1, cache.waitDecrementCalls)
 }

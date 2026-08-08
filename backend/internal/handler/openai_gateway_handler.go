@@ -1589,7 +1589,6 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 				)
 				if accountWaitCounted {
 					h.concurrencyHelper.DecrementAccountWaitCount(ctx, account.ID)
-					accountWaitCounted = false
 				}
 				waitDuration := time.Since(waitStartedAt)
 				finalSnapshot := h.concurrencyHelper.accountLoadSnapshot(ctx, account.ID, waitPlan.MaxConcurrency)
