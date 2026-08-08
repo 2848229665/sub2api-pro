@@ -177,7 +177,10 @@ func TestNormalizeOpenAIResponsesCompactRequest_PathBasedNoDoubleSuffix(t *testi
 	normalized, ok := h.normalizeOpenAIResponsesCompactRequest(c, zap.NewNop(), body)
 	require.True(t, ok)
 	require.Equal(t, "/v1/responses/compact", c.Request.URL.Path)
-	require.Equal(t, "compact-session", gjson.GetBytes(normalized, "prompt_cache_key").String())
+	seed, seedExists := c.Get(service.OpenAICompactSessionSeedKeyForTest())
+	require.True(t, seedExists)
+	require.Equal(t, "compact-session", seed)
+	require.False(t, gjson.GetBytes(normalized, "prompt_cache_key").Exists())
 	require.False(t, gjson.GetBytes(normalized, "stream").Exists())
 	require.False(t, gjson.GetBytes(normalized, "store").Exists())
 }

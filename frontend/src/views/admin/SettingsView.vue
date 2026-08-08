@@ -274,6 +274,197 @@
                 class="space-y-4 border-t border-gray-100 pt-4 dark:border-dark-700"
               >
                 <div
+                  class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6"
+                >
+                  <div class="min-w-0">
+                    <label
+                      class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.poolBalanceEnabled",
+                        )
+                      }}
+                    </label>
+                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.poolBalanceEnabledHint",
+                        )
+                      }}
+                    </p>
+                  </div>
+                  <Toggle
+                    v-model="form.openai_priority_saturation_pool_balance_enabled"
+                    class="self-end sm:self-auto"
+                    data-testid="openai-priority-saturation-pool-balance-toggle"
+                  />
+                </div>
+                <div
+                  v-if="form.openai_priority_saturation_pool_balance_enabled"
+                  class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6"
+                >
+                  <div class="min-w-0">
+                    <label
+                      class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                      for="openai-priority-saturation-account-share-percent"
+                    >
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.accountSharePercentLabel",
+                        )
+                      }}
+                    </label>
+                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.accountSharePercentHint",
+                        )
+                      }}
+                    </p>
+                  </div>
+                  <div class="relative w-full shrink-0 sm:w-32">
+                    <input
+                      id="openai-priority-saturation-account-share-percent"
+                      v-model.number="form.openai_priority_saturation_account_share_percent"
+                      class="input pr-8"
+                      data-testid="openai-priority-saturation-account-share-percent"
+                      min="1"
+                      max="99"
+                      required
+                      step="1"
+                      type="number"
+                    />
+                    <span
+                      class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400"
+                      >%</span
+                    >
+                  </div>
+                </div>
+                <div
+                  v-if="form.openai_priority_saturation_pool_balance_enabled"
+                  class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6"
+                >
+                  <div class="min-w-0">
+                    <label
+                      class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                      for="openai-priority-saturation-api-key-share-percent"
+                    >
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.apiKeySharePercentLabel",
+                        )
+                      }}
+                    </label>
+                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.apiKeySharePercentHint",
+                        )
+                      }}
+                    </p>
+                  </div>
+                  <div class="relative w-full shrink-0 sm:w-32">
+                    <input
+                      id="openai-priority-saturation-api-key-share-percent"
+                      v-model.number="form.openai_priority_saturation_api_key_share_percent"
+                      class="input pr-8"
+                      data-testid="openai-priority-saturation-api-key-share-percent"
+                      min="1"
+                      max="99"
+                      required
+                      step="1"
+                      type="number"
+                    />
+                    <span
+                      class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400"
+                      >%</span
+                    >
+                  </div>
+                </div>
+                <div
+                  v-if="form.openai_priority_saturation_pool_balance_enabled"
+                  class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6"
+                >
+                  <div class="min-w-0">
+                    <label
+                      class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                      for="openai-priority-saturation-enter-high-load-percent"
+                    >
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.enterHighLoadPercentLabel",
+                        )
+                      }}
+                    </label>
+                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.enterHighLoadPercentHint",
+                        )
+                      }}
+                    </p>
+                  </div>
+                  <div class="relative w-full shrink-0 sm:w-32">
+                    <input
+                      id="openai-priority-saturation-enter-high-load-percent"
+                      v-model.number="form.openai_priority_saturation_enter_high_load_percent"
+                      class="input pr-8"
+                      data-testid="openai-priority-saturation-enter-high-load-percent"
+                      min="1"
+                      max="100"
+                      required
+                      step="1"
+                      type="number"
+                    />
+                    <span
+                      class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400"
+                      >%</span
+                    >
+                  </div>
+                </div>
+                <div
+                  v-if="form.openai_priority_saturation_pool_balance_enabled"
+                  class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6"
+                >
+                  <div class="min-w-0">
+                    <label
+                      class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                      for="openai-priority-saturation-exit-high-load-percent"
+                    >
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.exitHighLoadPercentLabel",
+                        )
+                      }}
+                    </label>
+                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{
+                        t(
+                          "admin.settings.openaiPrioritySaturation.exitHighLoadPercentHint",
+                        )
+                      }}
+                    </p>
+                  </div>
+                  <div class="relative w-full shrink-0 sm:w-32">
+                    <input
+                      id="openai-priority-saturation-exit-high-load-percent"
+                      v-model.number="form.openai_priority_saturation_exit_high_load_percent"
+                      class="input pr-8"
+                      data-testid="openai-priority-saturation-exit-high-load-percent"
+                      min="0"
+                      max="99"
+                      required
+                      step="1"
+                      type="number"
+                    />
+                    <span
+                      class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400"
+                      >%</span
+                    >
+                  </div>
+                </div>
+                <div
                   class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6"
                 >
                   <div class="min-w-0">
@@ -2287,6 +2478,42 @@
 
                 <!-- Tencent Captcha fields -->
                 <div v-else-if="captchaProviderSelection === 'tencent'">
+                  <div class="mb-6 max-w-sm">
+                    <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.tencentCaptcha.region") }}
+                    </label>
+                    <div class="grid grid-cols-2 gap-2 rounded-lg bg-gray-100 p-1 dark:bg-dark-700">
+                      <button
+                        type="button"
+                        data-testid="tencent-captcha-region-cn"
+                        class="inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium transition"
+                        :class="
+                          form.tencent_captcha_region !== 'intl'
+                            ? 'bg-white text-primary-700 shadow-sm dark:bg-dark-800 dark:text-primary-300'
+                            : 'text-gray-600 hover:text-gray-900 dark:text-dark-300 dark:hover:text-white'
+                        "
+                        @click="form.tencent_captcha_region = 'cn'"
+                      >
+                        {{ t("admin.settings.tencentCaptcha.regionCn") }}
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="tencent-captcha-region-intl"
+                        class="inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium transition"
+                        :class="
+                          form.tencent_captcha_region === 'intl'
+                            ? 'bg-white text-primary-700 shadow-sm dark:bg-dark-800 dark:text-primary-300'
+                            : 'text-gray-600 hover:text-gray-900 dark:text-dark-300 dark:hover:text-white'
+                        "
+                        @click="form.tencent_captcha_region = 'intl'"
+                      >
+                        {{ t("admin.settings.tencentCaptcha.regionIntl") }}
+                      </button>
+                    </div>
+                    <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.tencentCaptcha.regionHint") }}
+                    </p>
+                  </div>
                   <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
                     <div class="md:col-span-2">
                       <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
@@ -2370,7 +2597,7 @@
                   </p>
                   <div class="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm">
                     <a
-                      href="https://console.cloud.tencent.com/captcha"
+                      :href="tencentCaptchaLinks.console"
                       target="_blank"
                       rel="noopener noreferrer"
                       class="text-primary-600 hover:text-primary-500"
@@ -2378,7 +2605,7 @@
                       {{ t("admin.settings.tencentCaptcha.openCaptchaConsole") }}
                     </a>
                     <a
-                      href="https://console.cloud.tencent.com/cam/capi"
+                      :href="tencentCaptchaLinks.cloudKeys"
                       target="_blank"
                       rel="noopener noreferrer"
                       class="text-primary-600 hover:text-primary-500"
@@ -2386,7 +2613,7 @@
                       {{ t("admin.settings.tencentCaptcha.createCloudKeys") }}
                     </a>
                     <a
-                      href="https://cloud.tencent.com/document/product/1110/36841"
+                      :href="tencentCaptchaLinks.webDocs"
                       target="_blank"
                       rel="noopener noreferrer"
                       class="text-primary-600 hover:text-primary-500"
@@ -9326,6 +9553,11 @@ type SettingsForm = Omit<
   openai_advanced_scheduler_enabled: boolean;
   openai_priority_saturation_enabled: boolean;
   openai_priority_saturation_affinity_reserve_percent: number;
+  openai_priority_saturation_pool_balance_enabled: boolean;
+  openai_priority_saturation_account_share_percent: number;
+  openai_priority_saturation_api_key_share_percent: number;
+  openai_priority_saturation_enter_high_load_percent: number;
+  openai_priority_saturation_exit_high_load_percent: number;
   openai_advanced_scheduler_sticky_weighted_enabled: boolean;
   openai_advanced_scheduler_subscription_priority_enabled: boolean;
   openai_advanced_scheduler_lb_top_k: string;
@@ -9447,6 +9679,7 @@ const form = reactive<SettingsForm>({
   tencent_captcha_cloud_secret_id_configured: false,
   tencent_captcha_cloud_secret_key: "",
   tencent_captcha_cloud_secret_key_configured: false,
+  tencent_captcha_region: "cn",
   aliyun_captcha_enabled: false,
   aliyun_captcha_access_key_id: "",
   aliyun_captcha_access_key_secret: "",
@@ -9561,6 +9794,11 @@ const form = reactive<SettingsForm>({
   openai_advanced_scheduler_enabled: false,
   openai_priority_saturation_enabled: true,
   openai_priority_saturation_affinity_reserve_percent: 20,
+  openai_priority_saturation_pool_balance_enabled: true,
+  openai_priority_saturation_account_share_percent: 67,
+  openai_priority_saturation_api_key_share_percent: 33,
+  openai_priority_saturation_enter_high_load_percent: 70,
+  openai_priority_saturation_exit_high_load_percent: 50,
   openai_advanced_scheduler_sticky_weighted_enabled: false,
   openai_advanced_scheduler_subscription_priority_enabled: false,
   openai_advanced_scheduler_lb_top_k: "",
@@ -9645,6 +9883,22 @@ function selectCaptchaProvider(provider: CaptchaProviderSelection): void {
   captchaProviderSelection.value = provider;
   applyCaptchaSelection(provider);
 }
+
+// 天御中国站与国际站是两套独立账号体系，控制台与文档入口不通用，
+// 按当前选择的站点给出对应链接，避免管理员在错误的控制台里找不到 CaptchaAppId。
+const tencentCaptchaLinks = computed(() =>
+  form.tencent_captcha_region === "intl"
+    ? {
+        console: "https://console.tencentcloud.com/captcha/graphical",
+        cloudKeys: "https://console.tencentcloud.com/cam/capi",
+        webDocs: "https://www.tencentcloud.com/document/product/1159/49680",
+      }
+    : {
+        console: "https://console.cloud.tencent.com/captcha",
+        cloudKeys: "https://console.cloud.tencent.com/cam/capi",
+        webDocs: "https://cloud.tencent.com/document/product/1110/36841",
+      },
+);
 
 function syncCaptchaProviderSelection(): void {
   if (form.tencent_captcha_enabled) {
@@ -10567,6 +10821,37 @@ async function loadSettings() {
     if (settings.openai_priority_saturation_affinity_reserve_percent == null) {
       form.openai_priority_saturation_affinity_reserve_percent = 20;
     }
+    if (settings.openai_priority_saturation_pool_balance_enabled == null) {
+      form.openai_priority_saturation_pool_balance_enabled = true;
+    }
+    const configuredAccountShare =
+      settings.openai_priority_saturation_account_share_percent;
+    const configuredAPIKeyShare =
+      settings.openai_priority_saturation_api_key_share_percent;
+    if (configuredAccountShare == null) {
+      form.openai_priority_saturation_account_share_percent =
+        typeof configuredAPIKeyShare === "number" &&
+        Number.isInteger(configuredAPIKeyShare) &&
+        configuredAPIKeyShare >= 1 &&
+        configuredAPIKeyShare <= 99
+          ? 100 - configuredAPIKeyShare
+          : 67;
+    }
+    if (configuredAPIKeyShare == null) {
+      form.openai_priority_saturation_api_key_share_percent =
+        typeof configuredAccountShare === "number" &&
+        Number.isInteger(configuredAccountShare) &&
+        configuredAccountShare >= 1 &&
+        configuredAccountShare <= 99
+          ? 100 - configuredAccountShare
+          : 33;
+    }
+    if (settings.openai_priority_saturation_enter_high_load_percent == null) {
+      form.openai_priority_saturation_enter_high_load_percent = 70;
+    }
+    if (settings.openai_priority_saturation_exit_high_load_percent == null) {
+      form.openai_priority_saturation_exit_high_load_percent = 50;
+    }
     // Only assign non-null values from backend (null means unconfigured, keep defaults)
     for (const [key, value] of Object.entries(settings)) {
       if (value !== null && value !== undefined) {
@@ -10805,6 +11090,46 @@ async function saveSettings() {
     );
     return;
   }
+  const apiKeySharePercent =
+    form.openai_priority_saturation_api_key_share_percent;
+  const accountSharePercent =
+    form.openai_priority_saturation_account_share_percent;
+  if (
+    typeof accountSharePercent !== "number" ||
+    !Number.isInteger(accountSharePercent) ||
+    accountSharePercent < 1 ||
+    accountSharePercent > 99 ||
+    typeof apiKeySharePercent !== "number" ||
+    !Number.isInteger(apiKeySharePercent) ||
+    apiKeySharePercent < 1 ||
+    apiKeySharePercent > 99 ||
+    accountSharePercent + apiKeySharePercent !== 100
+  ) {
+    appStore.showError(
+      t("admin.settings.openaiPrioritySaturation.poolSharePercentError"),
+    );
+    return;
+  }
+  const enterHighLoadPercent =
+    form.openai_priority_saturation_enter_high_load_percent;
+  const exitHighLoadPercent =
+    form.openai_priority_saturation_exit_high_load_percent;
+  if (
+    typeof enterHighLoadPercent !== "number" ||
+    !Number.isInteger(enterHighLoadPercent) ||
+    enterHighLoadPercent < 1 ||
+    enterHighLoadPercent > 100 ||
+    typeof exitHighLoadPercent !== "number" ||
+    !Number.isInteger(exitHighLoadPercent) ||
+    exitHighLoadPercent < 0 ||
+    exitHighLoadPercent > 99 ||
+    exitHighLoadPercent >= enterHighLoadPercent
+  ) {
+    appStore.showError(
+      t("admin.settings.openaiPrioritySaturation.loadThresholdPercentError"),
+    );
+    return;
+  }
 
   saving.value = true;
   try {
@@ -11023,6 +11348,7 @@ async function saveSettings() {
         form.tencent_captcha_cloud_secret_id || undefined,
       tencent_captcha_cloud_secret_key:
         form.tencent_captcha_cloud_secret_key || undefined,
+      tencent_captcha_region: form.tencent_captcha_region,
       aliyun_captcha_enabled: form.aliyun_captcha_enabled,
       aliyun_captcha_access_key_id: form.aliyun_captcha_access_key_id,
       aliyun_captcha_access_key_secret:
@@ -11210,6 +11536,13 @@ async function saveSettings() {
         form.openai_priority_saturation_enabled,
       openai_priority_saturation_affinity_reserve_percent:
         affinityReservePercent,
+      openai_priority_saturation_pool_balance_enabled:
+        form.openai_priority_saturation_pool_balance_enabled,
+      openai_priority_saturation_account_share_percent: accountSharePercent,
+      openai_priority_saturation_api_key_share_percent: apiKeySharePercent,
+      openai_priority_saturation_enter_high_load_percent:
+        enterHighLoadPercent,
+      openai_priority_saturation_exit_high_load_percent: exitHighLoadPercent,
       openai_advanced_scheduler_sticky_weighted_enabled:
         form.openai_advanced_scheduler_sticky_weighted_enabled,
       openai_advanced_scheduler_subscription_priority_enabled:

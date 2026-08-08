@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,6 +25,18 @@ type prioritySaturationConcurrencyCache struct {
 	requests map[string]int64
 	attempts []prioritySaturationAcquireAttempt
 	released []int64
+}
+
+type prioritySaturationAdaptiveFailureCache struct {
+	*prioritySaturationConcurrencyCache
+}
+
+func (c *prioritySaturationAdaptiveFailureCache) AcquireOpenAIAdaptivePoolSlot(
+	context.Context,
+	OpenAIAdaptivePoolAcquireRequest,
+	string,
+) (*OpenAIAdaptivePoolAcquireDecision, error) {
+	return nil, errors.New("adaptive pool unavailable")
 }
 
 func (c *prioritySaturationConcurrencyCache) AcquireAccountSlot(_ context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
@@ -185,6 +199,29 @@ func prioritySaturationTestAccount(id int64, priority, concurrency int) Account 
 	}
 }
 
+func prioritySaturationOAuthTestAccount(id int64, priority, concurrency int) Account {
+	account := prioritySaturationTestAccount(id, priority, concurrency)
+	account.Type = AccountTypeOAuth
+	account.Credentials = map[string]any{"access_token": "test-token"}
+	return account
+}
+
+func enablePrioritySaturationPoolBalanceForTest(t *testing.T, share int) {
+	t.Helper()
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
+	openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
+		prioritySaturationEnabled: true,
+		poolBalanceEnabled:        true,
+		accountSharePercent:       100 - share,
+		apiKeySharePercent:        share,
+		enterHighLoadPercent:      DefaultOpenAIPrioritySaturationEnterHighLoadPercent,
+		exitHighLoadPercent:       DefaultOpenAIPrioritySaturationExitHighLoadPercent,
+		affinityReservePercent:    0,
+		expiresAt:                 time.Now().Add(time.Minute).UnixNano(),
+	})
+}
+
 func newPrioritySaturationTestScheduler(
 	accounts []Account,
 	active map[int64]int,
@@ -219,6 +256,209 @@ func prioritySaturationRequest(sessionHash string, stickyAccountID int64, reserv
 		req.AffinityReservePercent = &percent
 	}
 	return req
+}
+
+func TestPrioritySaturationPoolBalance_NewSessionsUseAccountAccountKeySequence(t *testing.T) {
+	enablePrioritySaturationPoolBalanceForTest(t, 33)
+	accounts := []Account{
+		prioritySaturationTestAccount(3, 1, 20), // Key has the highest priority on purpose.
+		prioritySaturationOAuthTestAccount(1, 100, 20),
+		prioritySaturationOAuthTestAccount(2, 101, 20),
+	}
+	scheduler, _, _ := newPrioritySaturationTestScheduler(accounts, nil, nil)
+
+	wantTypes := []string{
+		AccountTypeOAuth,
+		AccountTypeOAuth,
+		AccountTypeAPIKey,
+		AccountTypeOAuth,
+		AccountTypeOAuth,
+		AccountTypeAPIKey,
+	}
+	for _, wantType := range wantTypes {
+		selection, decision, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 0))
+		require.NoError(t, err)
+		require.NotNil(t, selection)
+		require.True(t, selection.Acquired)
+		require.Equal(t, wantType, selection.Account.Type)
+		require.Equal(t, wantType == AccountTypeAPIKey, decision.SelectedPool == prioritySaturationPoolAPIKey)
+		require.Equal(t, 1, decision.KeyBudget)
+		selection.ReleaseFunc()
+	}
+}
+
+func TestPrioritySaturationPoolBalance_ConfiguredShareControlsWeightedSequence(t *testing.T) {
+	keySelections := 0
+	for index := range uint64(100) {
+		if prioritySaturationIndexPrefersKey(index, 40) {
+			keySelections++
+		}
+	}
+	require.Equal(t, 40, keySelections)
+	require.False(t, prioritySaturationIndexPrefersKey(0, 33))
+	require.False(t, prioritySaturationIndexPrefersKey(1, 33))
+	require.True(t, prioritySaturationIndexPrefersKey(2, 33))
+}
+
+func TestPrioritySaturationPoolBalance_HighLoadPrefersPoolWithMoreHeadroom(t *testing.T) {
+	enablePrioritySaturationPoolBalanceForTest(t, 33)
+	accounts := []Account{
+		prioritySaturationOAuthTestAccount(1, 100, 3),
+		prioritySaturationTestAccount(2, 1, 10),
+	}
+	scheduler, cache, _ := newPrioritySaturationTestScheduler(
+		accounts,
+		map[int64]int{1: 3, 2: 2},
+		nil,
+	)
+
+	selection, decision, err := scheduler.Select(
+		context.Background(),
+		prioritySaturationRequest("", 0, 0),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.True(t, selection.Acquired)
+	require.Equal(t, int64(2), selection.Account.ID)
+	require.Equal(t, prioritySaturationPoolAPIKey, decision.PreferredPool)
+	require.Equal(t, prioritySaturationPoolAPIKey, decision.SelectedPool)
+	require.Empty(t, decision.FallbackReason)
+	require.Equal(t, OpenAIAdaptivePoolModeHigh, decision.PoolMode)
+	require.Equal(t, "high_concurrency_headroom", decision.BudgetReason)
+	require.Equal(t, 3, decision.AccountActive)
+	require.Equal(t, 2, decision.KeyActive)
+	require.Equal(t, 3, decision.AccountCapacity)
+	require.Equal(t, 10, decision.KeyCapacity)
+	require.Equal(t, 10, decision.KeyBudget)
+	cache.mu.Lock()
+	require.Equal(t, 3, cache.active[2])
+	cache.mu.Unlock()
+	selection.ReleaseFunc()
+}
+
+func TestPrioritySaturationPoolBalance_FailoverReplansUsingCurrentPoolState(t *testing.T) {
+	enablePrioritySaturationPoolBalanceForTest(t, 33)
+	accounts := []Account{
+		prioritySaturationOAuthTestAccount(1, 100, 10),
+		prioritySaturationOAuthTestAccount(2, 101, 10),
+		prioritySaturationTestAccount(3, 1, 10),
+	}
+	scheduler, _, _ := newPrioritySaturationTestScheduler(accounts, nil, nil)
+	ctx := context.WithValue(context.Background(), ctxkey.RequestID, "pool-failover-request")
+
+	first, firstDecision, err := scheduler.Select(ctx, prioritySaturationRequest("", 0, 0))
+	require.NoError(t, err)
+	require.Equal(t, AccountTypeOAuth, first.Account.Type)
+	require.Equal(t, prioritySaturationPoolAccount, firstDecision.SelectedPool)
+	failedID := first.Account.ID
+	first.ReleaseFunc()
+
+	retryReq := prioritySaturationRequest("", 0, 0)
+	retryReq.ExcludedIDs = map[int64]struct{}{failedID: {}}
+	retry, retryDecision, err := scheduler.Select(ctx, retryReq)
+	require.NoError(t, err)
+	require.NotNil(t, retry)
+	require.Equal(t, AccountTypeOAuth, retry.Account.Type)
+	require.Equal(t, prioritySaturationPoolAccount, retryDecision.PreferredPool)
+	retry.ReleaseFunc()
+
+	next, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 0))
+	require.NoError(t, err)
+	require.Equal(t, AccountTypeAPIKey, next.Account.Type)
+	next.ReleaseFunc()
+	account, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 0))
+	require.NoError(t, err)
+	require.Equal(t, AccountTypeOAuth, account.Account.Type)
+	account.ReleaseFunc()
+}
+
+func TestPrioritySaturationPoolBalance_EstablishedAffinityDoesNotAdvanceSequence(t *testing.T) {
+	enablePrioritySaturationPoolBalanceForTest(t, 33)
+	owner := prioritySaturationOAuthTestAccount(1, 100, 10)
+	keyAccount := prioritySaturationTestAccount(2, 1, 10)
+	scheduler, _, _ := newPrioritySaturationTestScheduler(
+		[]Account{owner, keyAccount},
+		nil,
+		map[string]int64{"openai:sticky": owner.ID},
+	)
+
+	sticky, stickyDecision, err := scheduler.Select(
+		context.Background(),
+		prioritySaturationRequest("sticky", owner.ID, 0),
+	)
+	require.NoError(t, err)
+	require.True(t, stickyDecision.StickySessionHit)
+	require.Equal(t, owner.ID, sticky.Account.ID)
+	sticky.ReleaseFunc()
+
+	wantTypes := []string{AccountTypeOAuth, AccountTypeOAuth, AccountTypeAPIKey}
+	for _, wantType := range wantTypes {
+		selection, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 0))
+		require.NoError(t, err)
+		require.Equal(t, wantType, selection.Account.Type)
+		selection.ReleaseFunc()
+	}
+}
+
+func TestPrioritySaturationPoolBalance_PriorityDoesNotOrderMembersWithinPool(t *testing.T) {
+	enablePrioritySaturationPoolBalanceForTest(t, 33)
+	accounts := []Account{
+		prioritySaturationOAuthTestAccount(10, 999, 10),
+		prioritySaturationOAuthTestAccount(20, 1, 10),
+	}
+	scheduler, _, _ := newPrioritySaturationTestScheduler(accounts, nil, nil)
+
+	first, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 0))
+	require.NoError(t, err)
+	require.Equal(t, int64(10), first.Account.ID)
+	first.ReleaseFunc()
+
+	second, _, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 0))
+	require.NoError(t, err)
+	require.Equal(t, int64(20), second.Account.ID)
+	second.ReleaseFunc()
+}
+
+func TestPrioritySaturationPoolBalance_AtomicFailureKeepsPoolAwareFallback(t *testing.T) {
+	enablePrioritySaturationPoolBalanceForTest(t, 33)
+	accounts := []Account{
+		prioritySaturationTestAccount(10, 1, 10),
+		prioritySaturationOAuthTestAccount(20, 999, 10),
+	}
+	baseCache := &prioritySaturationConcurrencyCache{}
+	cache := &prioritySaturationAdaptiveFailureCache{prioritySaturationConcurrencyCache: baseCache}
+	sessionCache := &prioritySaturationSessionCache{}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
+		cache:              sessionCache,
+		cfg:                &config.Config{},
+		concurrencyService: NewConcurrencyService(cache),
+	}
+	scheduler := newPrioritySaturationOpenAIAccountScheduler(svc, nil)
+
+	selection, decision, err := scheduler.Select(context.Background(), prioritySaturationRequest("", 0, 0))
+	require.NoError(t, err)
+	require.True(t, selection.Acquired)
+	require.Equal(t, AccountTypeOAuth, selection.Account.Type)
+	require.Equal(t, prioritySaturationPoolAccount, decision.SelectedPool)
+	selection.ReleaseFunc()
+}
+
+func TestAllocatePrioritySaturationKeyLimitsKeepsTotalWithinBudget(t *testing.T) {
+	first := prioritySaturationTestAccount(1, 1, 2)
+	second := prioritySaturationTestAccount(2, 2, 4)
+	pool := prioritySaturationPoolStats{
+		accounts:    []*Account{&first, &second},
+		active:      map[int64]int{first.ID: 2},
+		activeTotal: 2,
+		capacity:    6,
+	}
+
+	limits := allocatePrioritySaturationKeyLimits(pool, 3, 0)
+
+	require.Equal(t, 2, limits[first.ID])
+	require.Equal(t, 1, limits[second.ID])
+	require.Equal(t, 3, limits[first.ID]+limits[second.ID])
 }
 
 func TestPrioritySaturationScheduler_NewSessionsUsePriorityThenIDAndGeneralLimit(t *testing.T) {
@@ -839,6 +1079,23 @@ func TestPrioritySaturationScheduler_AllGeneralPoolsFullWaitsOnFirstPriority(t *
 	require.NotNil(t, selection.WaitPlan)
 	require.Equal(t, first.ID, selection.WaitPlan.AccountID)
 	require.Equal(t, 2, selection.WaitPlan.MaxConcurrency)
+	require.Equal(t, "all_general_candidates_busy", selection.WaitPlan.Reason)
+	require.Equal(t, []AccountWaitCandidateDiagnostic{
+		{
+			AccountID:    first.ID,
+			Priority:     first.Priority,
+			GeneralLimit: first.GeneralConcurrencyLimit(34),
+			HardLimit:    first.Concurrency,
+			Result:       "selected_for_wait",
+		},
+		{
+			AccountID:    second.ID,
+			Priority:     second.Priority,
+			GeneralLimit: second.GeneralConcurrencyLimit(34),
+			HardLimit:    second.Concurrency,
+			Result:       "busy",
+		},
+	}, selection.WaitPlan.Candidates)
 	require.Equal(t, []prioritySaturationAcquireAttempt{
 		{accountID: first.ID, limit: 2},
 		{accountID: second.ID, limit: 3},
@@ -866,8 +1123,43 @@ func TestPrioritySaturationScheduler_StaleFirstCandidateWaitsOnNextValidFullAcco
 	require.NotNil(t, selection.WaitPlan)
 	require.Equal(t, waitable.ID, selection.WaitPlan.AccountID)
 	require.Equal(t, waitable.GeneralConcurrencyLimit(34), selection.WaitPlan.MaxConcurrency)
+	require.Equal(t, []AccountWaitCandidateDiagnostic{
+		{
+			AccountID:    stale.ID,
+			Priority:     stale.Priority,
+			GeneralLimit: stale.GeneralConcurrencyLimit(34),
+			HardLimit:    stale.Concurrency,
+			Result:       "stale_after_immediate_acquire",
+		},
+		{
+			AccountID:    waitable.ID,
+			Priority:     waitable.Priority,
+			GeneralLimit: waitable.GeneralConcurrencyLimit(34),
+			HardLimit:    waitable.Concurrency,
+			Result:       "selected_for_wait",
+		},
+	}, selection.WaitPlan.Candidates)
 	require.Equal(t, 1, decision.GeneralRejectCount)
 	require.Equal(t, []int64{stale.ID}, cache.released)
+}
+
+func TestBoundedPrioritySaturationWaitCandidatesKeepsSelectedAccount(t *testing.T) {
+	candidates := make([]AccountWaitCandidateDiagnostic, prioritySaturationWaitDiagnosticCandidateLimit+8)
+	for i := range candidates {
+		candidates[i] = AccountWaitCandidateDiagnostic{
+			AccountID: int64(i + 1),
+			Result:    "busy",
+		}
+	}
+	selectedID := candidates[len(candidates)-1].AccountID
+	candidates[len(candidates)-1].Result = "selected_for_wait"
+
+	bounded, truncated := boundedPrioritySaturationWaitCandidates(candidates, selectedID)
+
+	require.True(t, truncated)
+	require.Len(t, bounded, prioritySaturationWaitDiagnosticCandidateLimit)
+	require.Equal(t, selectedID, bounded[len(bounded)-1].AccountID)
+	require.Equal(t, "selected_for_wait", bounded[len(bounded)-1].Result)
 }
 
 func TestGetOpenAIAccountScheduler_PrioritySaturationIsIndependentAndWinsDefensiveConflict(t *testing.T) {

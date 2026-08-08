@@ -129,6 +129,18 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	if err := validateOpenAIPrioritySaturationAffinityReservePercent(settings.OpenAIPrioritySaturationAffinityReservePercent); err != nil {
 		return nil, err
 	}
+	if err := validateOpenAIPrioritySaturationPoolShares(
+		settings.OpenAIPrioritySaturationAccountSharePercent,
+		settings.OpenAIPrioritySaturationAPIKeySharePercent,
+	); err != nil {
+		return nil, err
+	}
+	if err := validateOpenAIPrioritySaturationLoadThresholds(
+		settings.OpenAIPrioritySaturationEnterHighLoadPercent,
+		settings.OpenAIPrioritySaturationExitHighLoadPercent,
+	); err != nil {
+		return nil, err
+	}
 	settings.PaymentVisibleMethodAlipaySource = alipaySource
 	settings.PaymentVisibleMethodWxpaySource = wxpaySource
 	settings.WeChatConnectAppID = strings.TrimSpace(settings.WeChatConnectAppID)
@@ -224,6 +236,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	if settings.TencentCaptchaCloudSecretKey != "" {
 		updates[SettingKeyTencentCaptchaCloudSecretKey] = settings.TencentCaptchaCloudSecretKey
 	}
+	updates[SettingKeyTencentCaptchaRegion] = normalizeTencentCaptchaRegion(settings.TencentCaptchaRegion)
 	// 阿里云验证码 2.0 设置（只有非空才更新密钥）
 	updates[SettingKeyAliyunCaptchaEnabled] = strconv.FormatBool(settings.AliyunCaptchaEnabled)
 	updates[SettingKeyAliyunCaptchaAccessKeyID] = settings.AliyunCaptchaAccessKeyID
@@ -483,6 +496,11 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[openAIAdvancedSchedulerSettingKey] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerEnabled)
 	updates[SettingKeyOpenAIPrioritySaturationEnabled] = strconv.FormatBool(settings.OpenAIPrioritySaturationEnabled)
 	updates[SettingKeyOpenAIPrioritySaturationAffinityReservePercent] = strconv.Itoa(settings.OpenAIPrioritySaturationAffinityReservePercent)
+	updates[SettingKeyOpenAIPrioritySaturationPoolBalanceEnabled] = strconv.FormatBool(settings.OpenAIPrioritySaturationPoolBalanceEnabled)
+	updates[SettingKeyOpenAIPrioritySaturationAccountSharePercent] = strconv.Itoa(settings.OpenAIPrioritySaturationAccountSharePercent)
+	updates[SettingKeyOpenAIPrioritySaturationAPIKeySharePercent] = strconv.Itoa(settings.OpenAIPrioritySaturationAPIKeySharePercent)
+	updates[SettingKeyOpenAIPrioritySaturationEnterHighLoadPercent] = strconv.Itoa(settings.OpenAIPrioritySaturationEnterHighLoadPercent)
+	updates[SettingKeyOpenAIPrioritySaturationExitHighLoadPercent] = strconv.Itoa(settings.OpenAIPrioritySaturationExitHighLoadPercent)
 	updates[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerStickyWeightedEnabled)
 	updates[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled)
 	updates[SettingKeyOpenAIAdvancedSchedulerLBTopK] = settings.OpenAIAdvancedSchedulerLBTopK
@@ -652,6 +670,11 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		enabled:                        settings.OpenAIAdvancedSchedulerEnabled,
 		prioritySaturationEnabled:      settings.OpenAIPrioritySaturationEnabled,
 		affinityReservePercent:         settings.OpenAIPrioritySaturationAffinityReservePercent,
+		poolBalanceEnabled:             settings.OpenAIPrioritySaturationPoolBalanceEnabled,
+		accountSharePercent:            settings.OpenAIPrioritySaturationAccountSharePercent,
+		apiKeySharePercent:             settings.OpenAIPrioritySaturationAPIKeySharePercent,
+		enterHighLoadPercent:           settings.OpenAIPrioritySaturationEnterHighLoadPercent,
+		exitHighLoadPercent:            settings.OpenAIPrioritySaturationExitHighLoadPercent,
 		stickyWeightedEnabled:          settings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
 		subscriptionPriorityEnabled:    settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
 		lbTopKOverride:                 parsePositiveIntOverride(settings.OpenAIAdvancedSchedulerLBTopK),
