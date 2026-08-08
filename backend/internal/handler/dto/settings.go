@@ -64,6 +64,7 @@ type SystemSettings struct {
 	TencentCaptchaAppSecretKeyConfigured   bool     `json:"tencent_captcha_app_secret_key_configured"`
 	TencentCaptchaCloudSecretIDConfigured  bool     `json:"tencent_captcha_cloud_secret_id_configured"`
 	TencentCaptchaCloudSecretKeyConfigured bool     `json:"tencent_captcha_cloud_secret_key_configured"`
+	TencentCaptchaRegion                   string   `json:"tencent_captcha_region"`
 	AliyunCaptchaEnabled                   bool     `json:"aliyun_captcha_enabled"`
 	AliyunCaptchaAccessKeyID               string   `json:"aliyun_captcha_access_key_id"`
 	AliyunCaptchaAccessKeySecretConfigured bool     `json:"aliyun_captcha_access_key_secret_configured"`
@@ -238,6 +239,11 @@ type SystemSettings struct {
 	OpenAIAdvancedSchedulerEnabled                         bool    `json:"openai_advanced_scheduler_enabled"`
 	OpenAIPrioritySaturationEnabled                        bool    `json:"openai_priority_saturation_enabled"`
 	OpenAIPrioritySaturationAffinityReservePercent         int     `json:"openai_priority_saturation_affinity_reserve_percent"`
+	OpenAIPrioritySaturationPoolBalanceEnabled             bool    `json:"openai_priority_saturation_pool_balance_enabled"`
+	OpenAIPrioritySaturationAccountSharePercent            int     `json:"openai_priority_saturation_account_share_percent"`
+	OpenAIPrioritySaturationAPIKeySharePercent             int     `json:"openai_priority_saturation_api_key_share_percent"`
+	OpenAIPrioritySaturationEnterHighLoadPercent           int     `json:"openai_priority_saturation_enter_high_load_percent"`
+	OpenAIPrioritySaturationExitHighLoadPercent            int     `json:"openai_priority_saturation_exit_high_load_percent"`
 	OpenAIAdvancedSchedulerStickyWeightedEnabled           bool    `json:"openai_advanced_scheduler_sticky_weighted_enabled"`
 	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled     bool    `json:"openai_advanced_scheduler_subscription_priority_enabled"`
 	OpenAIAdvancedSchedulerLBTopK                          string  `json:"openai_advanced_scheduler_lb_top_k"`
@@ -357,6 +363,7 @@ type PublicSettings struct {
 	TurnstileSiteKey                 string                   `json:"turnstile_site_key"`
 	TencentCaptchaEnabled            bool                     `json:"tencent_captcha_enabled"`
 	TencentCaptchaAppID              string                   `json:"tencent_captcha_app_id"`
+	TencentCaptchaRegion             string                   `json:"tencent_captcha_region"`
 	AliyunCaptchaEnabled             bool                     `json:"aliyun_captcha_enabled"`
 	AliyunCaptchaSceneID             string                   `json:"aliyun_captcha_scene_id"`
 	AliyunCaptchaPrefix              string                   `json:"aliyun_captcha_prefix"`

@@ -746,6 +746,7 @@ func TestAPIContracts(t *testing.T) {
 					"tencent_captcha_app_secret_key_configured": false,
 					"tencent_captcha_cloud_secret_id_configured": false,
 					"tencent_captcha_cloud_secret_key_configured": false,
+					"tencent_captcha_region": "cn",
 					"aliyun_captcha_enabled": false,
 					"aliyun_captcha_access_key_id": "",
 					"aliyun_captcha_access_key_secret_configured": false,
@@ -913,6 +914,8 @@ func TestAPIContracts(t *testing.T) {
 					"openai_oauth_scheduling_rate_multiplier": 0.05,
 					"openai_priority_saturation_enabled": false,
 					"openai_priority_saturation_affinity_reserve_percent": 20,
+					"openai_priority_saturation_pool_balance_enabled": false,
+					"openai_priority_saturation_api_key_share_percent": 33,
 					"openai_advanced_scheduler_enabled": true,
 					"openai_advanced_scheduler_sticky_weighted_enabled": false,
 					"openai_advanced_scheduler_subscription_priority_enabled": false,
@@ -1088,6 +1091,7 @@ func TestAPIContracts(t *testing.T) {
 					"tencent_captcha_app_secret_key_configured": false,
 					"tencent_captcha_cloud_secret_id_configured": false,
 					"tencent_captcha_cloud_secret_key_configured": false,
+					"tencent_captcha_region": "cn",
 					"aliyun_captcha_enabled": false,
 					"aliyun_captcha_access_key_id": "",
 					"aliyun_captcha_access_key_secret_configured": false,
@@ -1220,6 +1224,8 @@ func TestAPIContracts(t *testing.T) {
 					"openai_oauth_scheduling_rate_multiplier": 1,
 					"openai_priority_saturation_enabled": false,
 					"openai_priority_saturation_affinity_reserve_percent": 20,
+					"openai_priority_saturation_pool_balance_enabled": false,
+					"openai_priority_saturation_api_key_share_percent": 33,
 					"openai_advanced_scheduler_enabled": false,
 					"openai_advanced_scheduler_sticky_weighted_enabled": false,
 					"openai_advanced_scheduler_subscription_priority_enabled": false,
@@ -2251,10 +2257,10 @@ func (stubUserSubscriptionRepo) UpdateStatus(ctx context.Context, subscriptionID
 func (stubUserSubscriptionRepo) UpdateNotes(ctx context.Context, subscriptionID int64, notes string) error {
 	return errors.New("not implemented")
 }
-func (stubUserSubscriptionRepo) ActivateWindows(ctx context.Context, id int64, start time.Time) error {
+func (stubUserSubscriptionRepo) ActivateWindows(ctx context.Context, id int64, dailyStart, periodicStart time.Time) error {
 	return errors.New("not implemented")
 }
-func (stubUserSubscriptionRepo) ResetUsageWindows(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, newWindowStart time.Time) error {
+func (stubUserSubscriptionRepo) ResetUsageWindows(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, dailyStart, periodicStart time.Time) error {
 	return errors.New("not implemented")
 }
 func (stubUserSubscriptionRepo) ResetDailyUsage(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) error {

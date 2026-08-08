@@ -578,6 +578,26 @@ func (s *ConcurrencyService) GetAccountsLoadBatchFresh(ctx context.Context, acco
 	return s.getAccountsLoadBatch(ctx, accounts, false)
 }
 
+// GetAccountsLoadBatchFreshWithTimeout is the bounded, uncached variant used
+// by best-effort diagnostics. It prevents logging enrichment from adding the
+// normal three-second load-fetch timeout to a client response path.
+func (s *ConcurrencyService) GetAccountsLoadBatchFreshWithTimeout(
+	ctx context.Context,
+	accounts []AccountWithConcurrency,
+	timeout time.Duration,
+) (map[int64]*AccountLoadInfo, error) {
+	if len(accounts) == 0 {
+		return map[int64]*AccountLoadInfo{}, nil
+	}
+	if s == nil || s.cache == nil {
+		return map[int64]*AccountLoadInfo{}, nil
+	}
+	if timeout <= 0 {
+		timeout = accountLoadBatchFetchTimeout
+	}
+	return s.fetchAccountsLoadBatchWithTimeout(ctx, accounts, timeout)
+}
+
 func (s *ConcurrencyService) getAccountsLoadBatch(ctx context.Context, accounts []AccountWithConcurrency, allowCache bool) (map[int64]*AccountLoadInfo, error) {
 	if len(accounts) == 0 {
 		return map[int64]*AccountLoadInfo{}, nil
@@ -620,6 +640,14 @@ func (s *ConcurrencyService) getAccountsLoadBatch(ctx context.Context, accounts 
 }
 
 func (s *ConcurrencyService) fetchAccountsLoadBatch(ctx context.Context, accounts []AccountWithConcurrency) (map[int64]*AccountLoadInfo, error) {
+	return s.fetchAccountsLoadBatchWithTimeout(ctx, accounts, accountLoadBatchFetchTimeout)
+}
+
+func (s *ConcurrencyService) fetchAccountsLoadBatchWithTimeout(
+	ctx context.Context,
+	accounts []AccountWithConcurrency,
+	timeout time.Duration,
+) (map[int64]*AccountLoadInfo, error) {
 	if s.cache == nil {
 		return map[int64]*AccountLoadInfo{}, nil
 	}
@@ -627,7 +655,7 @@ func (s *ConcurrencyService) fetchAccountsLoadBatch(ctx context.Context, account
 	if ctx != nil {
 		baseCtx = context.WithoutCancel(ctx)
 	}
-	redisCtx, cancel := context.WithTimeout(baseCtx, accountLoadBatchFetchTimeout)
+	redisCtx, cancel := context.WithTimeout(baseCtx, timeout)
 	defer cancel()
 	return s.cache.GetAccountsLoadBatch(redisCtx, accounts)
 }

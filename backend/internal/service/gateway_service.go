@@ -535,11 +535,30 @@ func shouldClearStickySession(account *Account, requestedModel string) bool {
 	return false
 }
 
+// AccountWaitCandidateDiagnostic records the non-sensitive scheduling facts
+// that led to a fallback wait plan. It intentionally excludes account names,
+// credentials, session hashes, and request content so it is safe to emit in
+// operational logs.
+type AccountWaitCandidateDiagnostic struct {
+	AccountID    int64  `json:"account_id"`
+	Priority     int    `json:"priority"`
+	GeneralLimit int    `json:"general_limit"`
+	HardLimit    int    `json:"hard_limit"`
+	Result       string `json:"result"`
+}
+
 type AccountWaitPlan struct {
 	AccountID      int64
 	MaxConcurrency int
 	Timeout        time.Duration
 	MaxWaiting     int
+
+	// Reason and Candidates are diagnostic-only metadata. They explain why the
+	// scheduler stopped scanning the pool and pinned the request to AccountID.
+	Reason              string
+	CandidateCount      int
+	CandidatesTruncated bool
+	Candidates          []AccountWaitCandidateDiagnostic
 }
 
 type AccountSelectionResult struct {
@@ -563,6 +582,11 @@ type AccountSelectionResult struct {
 	stickyBindingPreviousOwnerID int64
 	stickyBindingRollbackToken   string
 	stickyBindingLegacyClaimed   bool
+
+	// prioritySaturationPoolDecision carries account/Key pool balancing facts
+	// from the scheduler to the common observability hook without exposing
+	// scheduling internals to gateway handlers.
+	prioritySaturationPoolDecision *prioritySaturationPoolDecision
 
 	// profitGate 携带本次选号真实生效的利润门（无门为 nil）。门安装在调度栈的
 	// 局部 ctx 上，handler 必须经 ContextWithSelectionProfitGate 重放后才能在
@@ -600,12 +624,16 @@ type ForwardResult struct {
 	Model     string
 	// UpstreamModel is the actual upstream model after mapping.
 	// Prefer empty when it is identical to Model; persistence normalizes equal values away as no-op mappings.
-	UpstreamModel    string
-	Stream           bool
-	Duration         time.Duration
-	FirstTokenMs     *int // 首字时间（流式请求）
-	ClientDisconnect bool // 客户端是否在流式传输过程中断开
-	ReasoningEffort  *string
+	UpstreamModel string
+	// UpstreamResponseModel is captured from the raw successful upstream
+	// response before any client-facing rewrite or protocol conversion.
+	UpstreamResponseModel         string
+	UpstreamResponseModelConflict bool
+	Stream                        bool
+	Duration                      time.Duration
+	FirstTokenMs                  *int // 首字时间（流式请求）
+	ClientDisconnect              bool // 客户端是否在流式传输过程中断开
+	ReasoningEffort               *string
 
 	// 图片生成计费字段（图片生成模型使用）
 	ImageCount         int    // 生成的图片数量

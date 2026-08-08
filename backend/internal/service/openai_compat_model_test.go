@@ -18,6 +18,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -998,7 +999,7 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, firstResult)
 	require.Empty(t, upstream.requests[0].Header.Get("x-codex-turn-state"))
-	requireOpenAIMessagesCodexIdentity(t, upstream.requests[0], codexCLIUserAgent, "codex_cli_rs")
+	requireOpenAIMessagesCodexIdentity(t, upstream.requests[0], codexCLIUserAgent, openai.CodexDefaultOriginator)
 	wantCacheKey := isolateOpenAISessionID(501, "stable-cache-key")
 	require.Equal(t, wantCacheKey, gjson.GetBytes(upstream.bodies[0], "prompt_cache_key").String())
 	require.Equal(t, wantCacheKey, upstream.requests[0].Header.Get("session_id"))
@@ -1019,7 +1020,7 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	require.Equal(t, wantCacheKey, upstream.requests[1].Header.Get("session_id"))
 	require.Equal(t, upstream.requests[1].Header.Get("session_id"), upstream.requests[1].Header.Get(openAIOfficialSessionIDHeader))
 	require.Empty(t, upstream.requests[1].Header.Get("conversation_id"))
-	requireOpenAIMessagesCodexIdentity(t, upstream.requests[1], codexCLIUserAgent, "codex_cli_rs")
+	requireOpenAIMessagesCodexIdentity(t, upstream.requests[1], codexCLIUserAgent, openai.CodexDefaultOriginator)
 	require.Equal(t, wantCacheKey, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").String())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
 }
@@ -1070,7 +1071,7 @@ func TestForwardAsAnthropic_OAuthRestoresCodexIdentityHeaders(t *testing.T) {
 			result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.4")
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			requireOpenAIMessagesCodexIdentity(t, upstream.lastReq, codexCLIUserAgent, "codex_cli_rs")
+			requireOpenAIMessagesCodexIdentity(t, upstream.lastReq, codexCLIUserAgent, openai.CodexDefaultOriginator)
 		})
 	}
 }
@@ -1114,7 +1115,7 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 	firstSessionID := upstream.requests[0].Header.Get("session_id")
 	require.NotEmpty(t, firstSessionID)
 	require.Empty(t, upstream.requests[0].Header.Get("x-codex-turn-state"))
-	requireOpenAIMessagesCodexIdentity(t, upstream.requests[0], codexCLIUserAgent, "codex_cli_rs")
+	requireOpenAIMessagesCodexIdentity(t, upstream.requests[0], codexCLIUserAgent, openai.CodexDefaultOriginator)
 	firstCacheKey := gjson.GetBytes(upstream.bodies[0], "prompt_cache_key").String()
 	require.NotEmpty(t, firstCacheKey)
 	var firstAnthropicReq apicompat.AnthropicRequest
@@ -1138,7 +1139,7 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 	require.Equal(t, firstSessionID, upstream.requests[1].Header.Get("session_id"))
 	require.Equal(t, "turn_state_digest_first", upstream.requests[1].Header.Get("x-codex-turn-state"))
 	require.Empty(t, upstream.requests[1].Header.Get("conversation_id"))
-	requireOpenAIMessagesCodexIdentity(t, upstream.requests[1], codexCLIUserAgent, "codex_cli_rs")
+	requireOpenAIMessagesCodexIdentity(t, upstream.requests[1], codexCLIUserAgent, openai.CodexDefaultOriginator)
 	require.Equal(t, firstCacheKey, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").String())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
 }
@@ -1313,7 +1314,7 @@ func TestForwardAsAnthropic_OAuthKeepsSystemAsDeveloperInput(t *testing.T) {
 	instructions := gjson.GetBytes(upstream.lastBody, "instructions")
 	require.True(t, instructions.Exists())
 	require.Empty(t, instructions.String())
-	requireOpenAIMessagesCodexIdentity(t, upstream.requests[0], codexCLIUserAgent, "codex_cli_rs")
+	requireOpenAIMessagesCodexIdentity(t, upstream.requests[0], codexCLIUserAgent, openai.CodexDefaultOriginator)
 }
 
 func TestForwardAsAnthropic_OAuthAddsClaudeCodeTodoGuardForCompatModel(t *testing.T) {

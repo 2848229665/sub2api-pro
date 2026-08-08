@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 // claudeCodeValidator is a singleton validator for Claude Code client detection
@@ -143,6 +145,31 @@ type ConcurrencyHelper struct {
 	pingInterval       time.Duration
 }
 
+type slotLoadSnapshot struct {
+	ActiveCount  int
+	WaitingCount int
+	Available    bool
+	Err          error
+}
+
+const slotLoadSnapshotTimeout = 500 * time.Millisecond
+
+func (s slotLoadSnapshot) zapFields() []zap.Field {
+	fields := []zap.Field{
+		zap.Bool("load_snapshot_available", s.Available),
+	}
+	if s.Available {
+		fields = append(fields,
+			zap.Int("active_count", s.ActiveCount),
+			zap.Int("waiting_count", s.WaitingCount),
+		)
+	}
+	if s.Err != nil {
+		fields = append(fields, zap.String("load_snapshot_error", s.Err.Error()))
+	}
+	return fields
+}
+
 // NewConcurrencyHelper creates a new ConcurrencyHelper
 func NewConcurrencyHelper(concurrencyService *service.ConcurrencyService, pingFormat SSEPingFormat, pingInterval time.Duration) *ConcurrencyHelper {
 	if pingInterval <= 0 {
@@ -152,6 +179,60 @@ func NewConcurrencyHelper(concurrencyService *service.ConcurrencyService, pingFo
 		concurrencyService: concurrencyService,
 		pingFormat:         pingFormat,
 		pingInterval:       pingInterval,
+	}
+}
+
+func (h *ConcurrencyHelper) accountLoadSnapshot(ctx context.Context, accountID int64, maxConcurrency int) slotLoadSnapshot {
+	if h == nil || h.concurrencyService == nil || accountID <= 0 {
+		return slotLoadSnapshot{}
+	}
+	loadMap, err := h.concurrencyService.GetAccountsLoadBatchFreshWithTimeout(
+		ctx,
+		[]service.AccountWithConcurrency{{
+			ID:             accountID,
+			MaxConcurrency: maxConcurrency,
+		}},
+		slotLoadSnapshotTimeout,
+	)
+	if err != nil {
+		return slotLoadSnapshot{Err: err}
+	}
+	load := loadMap[accountID]
+	if load == nil {
+		return slotLoadSnapshot{}
+	}
+	return slotLoadSnapshot{
+		ActiveCount:  load.CurrentConcurrency,
+		WaitingCount: load.WaitingCount,
+		Available:    true,
+	}
+}
+
+func (h *ConcurrencyHelper) userLoadSnapshot(ctx context.Context, userID int64, maxConcurrency int) slotLoadSnapshot {
+	if h == nil || h.concurrencyService == nil || userID <= 0 {
+		return slotLoadSnapshot{}
+	}
+	baseCtx := context.Background()
+	if ctx != nil {
+		baseCtx = context.WithoutCancel(ctx)
+	}
+	snapshotCtx, cancel := context.WithTimeout(baseCtx, slotLoadSnapshotTimeout)
+	defer cancel()
+	loadMap, err := h.concurrencyService.GetUsersLoadBatch(snapshotCtx, []service.UserWithConcurrency{{
+		ID:             userID,
+		MaxConcurrency: maxConcurrency,
+	}})
+	if err != nil {
+		return slotLoadSnapshot{Err: err}
+	}
+	load := loadMap[userID]
+	if load == nil {
+		return slotLoadSnapshot{}
+	}
+	return slotLoadSnapshot{
+		ActiveCount:  load.CurrentConcurrency,
+		WaitingCount: load.WaitingCount,
+		Available:    true,
 	}
 }
 
@@ -244,12 +325,52 @@ func (h *ConcurrencyHelper) AcquireUserSlotWithWait(c *gin.Context, userID int64
 	return h.acquireUserSlotWithWaitTimeout(c, userID, maxConcurrency, maxConcurrencyWait, isStream, streamStarted)
 }
 
+// AcquireUserSlotWithWaitObserved adds request-scoped lifecycle logs only when
+// the immediate user slot acquisition fails and the request enters (or is
+// rejected by) the wait queue. eventPrefix should identify the gateway, for
+// example "openai".
+func (h *ConcurrencyHelper) AcquireUserSlotWithWaitObserved(
+	c *gin.Context,
+	userID int64,
+	maxConcurrency int,
+	isStream bool,
+	streamStarted *bool,
+	reqLog *zap.Logger,
+	eventPrefix string,
+) (func(), error) {
+	return h.acquireUserSlotWithWaitTimeoutObserved(
+		c,
+		userID,
+		maxConcurrency,
+		maxConcurrencyWait,
+		isStream,
+		streamStarted,
+		reqLog,
+		eventPrefix,
+	)
+}
+
 func (h *ConcurrencyHelper) acquireUserSlotWithWaitTimeout(c *gin.Context, userID int64, maxConcurrency int, timeout time.Duration, isStream bool, streamStarted *bool) (func(), error) {
+	return h.acquireUserSlotWithWaitTimeoutObserved(c, userID, maxConcurrency, timeout, isStream, streamStarted, nil, "")
+}
+
+func (h *ConcurrencyHelper) acquireUserSlotWithWaitTimeoutObserved(
+	c *gin.Context,
+	userID int64,
+	maxConcurrency int,
+	timeout time.Duration,
+	isStream bool,
+	streamStarted *bool,
+	reqLog *zap.Logger,
+	eventPrefix string,
+) (func(), error) {
 	ctx := c.Request.Context()
+	eventPrefix = strings.TrimSpace(eventPrefix)
 
 	// Try to acquire immediately
 	releaseFunc, acquired, err := h.TryAcquireUserSlot(ctx, userID, maxConcurrency)
 	if err != nil {
+		logUserSlotAcquireFailure(reqLog, eventPrefix, userID, maxConcurrency, 0, timeout, 0, "quick_acquire", streamStartedValue(streamStarted), slotLoadSnapshot{}, err)
 		return nil, err
 	}
 
@@ -261,21 +382,137 @@ func (h *ConcurrencyHelper) acquireUserSlotWithWaitTimeout(c *gin.Context, userI
 	if queueLimit < 1 {
 		queueLimit = 1
 	}
+	waitStartedAt := time.Now()
 	canWait, err := h.IncrementWaitCount(ctx, userID, queueLimit)
 	if err != nil {
+		logUserSlotAcquireFailure(reqLog, eventPrefix, userID, maxConcurrency, queueLimit, timeout, time.Since(waitStartedAt), "queue_increment", streamStartedValue(streamStarted), slotLoadSnapshot{}, err)
 		return nil, err
 	}
 	if !canWait {
-		return nil, &WaitQueueFullError{SlotType: "user"}
+		queueErr := &WaitQueueFullError{SlotType: "user"}
+		snapshot := slotLoadSnapshot{}
+		if reqLog != nil && eventPrefix != "" {
+			snapshot = h.userLoadSnapshot(ctx, userID, maxConcurrency)
+			fields := userSlotWaitLogFields(userID, maxConcurrency, queueLimit, timeout, time.Since(waitStartedAt), "queue_full", streamStartedValue(streamStarted), snapshot)
+			fields = append(fields, zap.Bool("terminal_event", false))
+			reqLog.Warn(eventPrefix+".user_wait_queue_full", fields...)
+		}
+		logUserSlotAcquireFailure(reqLog, eventPrefix, userID, maxConcurrency, queueLimit, timeout, time.Since(waitStartedAt), "queue_full", streamStartedValue(streamStarted), snapshot, queueErr)
+		return nil, queueErr
 	}
-	defer h.DecrementWaitCount(ctx, userID)
+	waitCounted := true
+	decrementWaitCount := func() {
+		if !waitCounted {
+			return
+		}
+		h.DecrementWaitCount(ctx, userID)
+		waitCounted = false
+	}
+	defer decrementWaitCount()
+
+	if reqLog != nil && eventPrefix != "" {
+		snapshot := h.userLoadSnapshot(ctx, userID, maxConcurrency)
+		fields := userSlotWaitLogFields(userID, maxConcurrency, queueLimit, timeout, 0, "waiting", streamStartedValue(streamStarted), snapshot)
+		reqLog.Info(eventPrefix+".user_wait_started", fields...)
+	}
 
 	// Need to wait - handle streaming ping if needed
 	releaseFunc, err = h.waitForSlotWithPingTimeout(c, "user", userID, maxConcurrency, timeout, isStream, streamStarted, false)
+	decrementWaitCount()
+	waitDuration := time.Since(waitStartedAt)
+	snapshot := slotLoadSnapshot{}
+	if reqLog != nil && eventPrefix != "" {
+		snapshot = h.userLoadSnapshot(ctx, userID, maxConcurrency)
+	}
 	if err != nil {
+		logUserSlotAcquireFailure(reqLog, eventPrefix, userID, maxConcurrency, queueLimit, timeout, waitDuration, "wait", streamStartedValue(streamStarted), snapshot, err)
 		return nil, err
 	}
+	if reqLog != nil && eventPrefix != "" {
+		fields := userSlotWaitLogFields(userID, maxConcurrency, queueLimit, timeout, waitDuration, "acquired", streamStartedValue(streamStarted), snapshot)
+		reqLog.Info(eventPrefix+".user_wait_acquired", fields...)
+	}
 	return h.withAPIKeySlotFromGin(c, releaseFunc), nil
+}
+
+func userSlotWaitLogFields(
+	userID int64,
+	maxConcurrency int,
+	queueLimit int,
+	timeout time.Duration,
+	waitDuration time.Duration,
+	phase string,
+	streamStarted bool,
+	snapshot slotLoadSnapshot,
+) []zap.Field {
+	fields := []zap.Field{
+		zap.Int64("user_id", userID),
+		zap.Int("max_concurrency", maxConcurrency),
+		zap.Int("queue_limit", queueLimit),
+		zap.Int64("timeout_ms", timeout.Milliseconds()),
+		zap.String("phase", phase),
+		zap.Bool("stream_started", streamStarted),
+	}
+	if waitDuration > 0 {
+		fields = append(fields, zap.Int64("wait_ms", waitDuration.Milliseconds()))
+	}
+	return append(fields, snapshot.zapFields()...)
+}
+
+func logUserSlotAcquireFailure(
+	reqLog *zap.Logger,
+	eventPrefix string,
+	userID int64,
+	maxConcurrency int,
+	queueLimit int,
+	timeout time.Duration,
+	waitDuration time.Duration,
+	phase string,
+	streamStarted bool,
+	snapshot slotLoadSnapshot,
+	err error,
+) {
+	if reqLog == nil || eventPrefix == "" {
+		return
+	}
+	fields := userSlotWaitLogFields(userID, maxConcurrency, queueLimit, timeout, waitDuration, phase, streamStarted, snapshot)
+	fields = append(fields,
+		zap.String("failure_reason", concurrencyWaitFailureReason(err)),
+	)
+	fields = append(fields, concurrencyResponseLogFields(err, "user")...)
+	fields = append(fields, zap.Error(err))
+	reqLog.Warn(eventPrefix+".user_slot_acquire_failed", fields...)
+}
+
+func streamStartedValue(streamStarted *bool) bool {
+	return streamStarted != nil && *streamStarted
+}
+
+func concurrencyWaitFailureReason(err error) string {
+	var queueFullErr *WaitQueueFullError
+	if errors.As(err, &queueFullErr) {
+		return "wait_queue_full"
+	}
+	var concurrencyErr *ConcurrencyError
+	if errors.As(err, &concurrencyErr) && concurrencyErr.IsTimeout {
+		return "wait_timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "request_canceled"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "request_deadline_exceeded"
+	}
+	return "acquire_error"
+}
+
+func concurrencyResponseLogFields(err error, slotType string) []zap.Field {
+	status, errType, _ := concurrencyErrorResponse(err, slotType)
+	return []zap.Field{
+		zap.Bool("terminal_event", true),
+		zap.Int("mapped_status_code", status),
+		zap.String("mapped_error_type", errType),
+	}
 }
 
 func (h *ConcurrencyHelper) withAPIKeySlotFromGin(c *gin.Context, releaseFunc func()) func() {

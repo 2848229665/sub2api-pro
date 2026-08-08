@@ -60,6 +60,7 @@ type UpdateSettingsRequest struct {
 	TencentCaptchaAppSecretKey   string `json:"tencent_captcha_app_secret_key"`
 	TencentCaptchaCloudSecretID  string `json:"tencent_captcha_cloud_secret_id"`
 	TencentCaptchaCloudSecretKey string `json:"tencent_captcha_cloud_secret_key"`
+	TencentCaptchaRegion         string `json:"tencent_captcha_region"`
 
 	// 阿里云验证码 2.0 设置
 	AliyunCaptchaEnabled         bool   `json:"aliyun_captcha_enabled"`
@@ -276,6 +277,11 @@ type UpdateSettingsRequest struct {
 	OpenAIAdvancedSchedulerEnabled                     *bool    `json:"openai_advanced_scheduler_enabled"`
 	OpenAIPrioritySaturationEnabled                    *bool    `json:"openai_priority_saturation_enabled"`
 	OpenAIPrioritySaturationAffinityReservePercent     *int     `json:"openai_priority_saturation_affinity_reserve_percent"`
+	OpenAIPrioritySaturationPoolBalanceEnabled         *bool    `json:"openai_priority_saturation_pool_balance_enabled"`
+	OpenAIPrioritySaturationAccountSharePercent        *int     `json:"openai_priority_saturation_account_share_percent"`
+	OpenAIPrioritySaturationAPIKeySharePercent         *int     `json:"openai_priority_saturation_api_key_share_percent"`
+	OpenAIPrioritySaturationEnterHighLoadPercent       *int     `json:"openai_priority_saturation_enter_high_load_percent"`
+	OpenAIPrioritySaturationExitHighLoadPercent        *int     `json:"openai_priority_saturation_exit_high_load_percent"`
 	OpenAIAdvancedSchedulerStickyWeightedEnabled       *bool    `json:"openai_advanced_scheduler_sticky_weighted_enabled"`
 	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled *bool    `json:"openai_advanced_scheduler_subscription_priority_enabled"`
 	OpenAIAdvancedSchedulerLBTopK                      *string  `json:"openai_advanced_scheduler_lb_top_k"`
@@ -646,6 +652,13 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 	if req.AliyunCaptchaRegion != service.AliyunCaptchaRegionSGP {
 		req.AliyunCaptchaRegion = service.AliyunCaptchaRegionCN
+	}
+	// 天御站点 normalize：未发送保留已存值，非法值一律按中国站落库
+	if _, sent := sentFields["tencent_captcha_region"]; !sent {
+		req.TencentCaptchaRegion = previousSettings.TencentCaptchaRegion
+	}
+	if req.TencentCaptchaRegion != service.TencentCaptchaRegionINTL {
+		req.TencentCaptchaRegion = service.TencentCaptchaRegionCN
 	}
 
 	// Turnstile 参数验证
@@ -1504,6 +1517,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		TencentCaptchaAppSecretKey:       req.TencentCaptchaAppSecretKey,
 		TencentCaptchaCloudSecretID:      req.TencentCaptchaCloudSecretID,
 		TencentCaptchaCloudSecretKey:     req.TencentCaptchaCloudSecretKey,
+		TencentCaptchaRegion:             req.TencentCaptchaRegion,
 		AliyunCaptchaEnabled:             req.AliyunCaptchaEnabled,
 		AliyunCaptchaAccessKeyID:         req.AliyunCaptchaAccessKeyID,
 		AliyunCaptchaAccessKeySecret:     req.AliyunCaptchaAccessKeySecret,
@@ -1800,6 +1814,36 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 				return *req.OpenAIPrioritySaturationAffinityReservePercent
 			}
 			return previousSettings.OpenAIPrioritySaturationAffinityReservePercent
+		}(),
+		OpenAIPrioritySaturationPoolBalanceEnabled: func() bool {
+			if req.OpenAIPrioritySaturationPoolBalanceEnabled != nil {
+				return *req.OpenAIPrioritySaturationPoolBalanceEnabled
+			}
+			return previousSettings.OpenAIPrioritySaturationPoolBalanceEnabled
+		}(),
+		OpenAIPrioritySaturationAccountSharePercent: func() int {
+			if req.OpenAIPrioritySaturationAccountSharePercent != nil {
+				return *req.OpenAIPrioritySaturationAccountSharePercent
+			}
+			return previousSettings.OpenAIPrioritySaturationAccountSharePercent
+		}(),
+		OpenAIPrioritySaturationAPIKeySharePercent: func() int {
+			if req.OpenAIPrioritySaturationAPIKeySharePercent != nil {
+				return *req.OpenAIPrioritySaturationAPIKeySharePercent
+			}
+			return previousSettings.OpenAIPrioritySaturationAPIKeySharePercent
+		}(),
+		OpenAIPrioritySaturationEnterHighLoadPercent: func() int {
+			if req.OpenAIPrioritySaturationEnterHighLoadPercent != nil {
+				return *req.OpenAIPrioritySaturationEnterHighLoadPercent
+			}
+			return previousSettings.OpenAIPrioritySaturationEnterHighLoadPercent
+		}(),
+		OpenAIPrioritySaturationExitHighLoadPercent: func() int {
+			if req.OpenAIPrioritySaturationExitHighLoadPercent != nil {
+				return *req.OpenAIPrioritySaturationExitHighLoadPercent
+			}
+			return previousSettings.OpenAIPrioritySaturationExitHighLoadPercent
 		}(),
 		OpenAIAdvancedSchedulerStickyWeightedEnabled: func() bool {
 			if req.OpenAIAdvancedSchedulerStickyWeightedEnabled != nil {
@@ -2105,6 +2149,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		TencentCaptchaAppSecretKeyConfigured:                   updatedSettings.TencentCaptchaAppSecretKeyConfigured,
 		TencentCaptchaCloudSecretIDConfigured:                  updatedSettings.TencentCaptchaCloudSecretIDConfigured,
 		TencentCaptchaCloudSecretKeyConfigured:                 updatedSettings.TencentCaptchaCloudSecretKeyConfigured,
+		TencentCaptchaRegion:                                   updatedSettings.TencentCaptchaRegion,
 		AliyunCaptchaEnabled:                                   updatedSettings.AliyunCaptchaEnabled,
 		AliyunCaptchaAccessKeyID:                               updatedSettings.AliyunCaptchaAccessKeyID,
 		AliyunCaptchaAccessKeySecretConfigured:                 updatedSettings.AliyunCaptchaAccessKeySecretConfigured,
@@ -2250,6 +2295,11 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpenAIAdvancedSchedulerEnabled:                         updatedSettings.OpenAIAdvancedSchedulerEnabled,
 		OpenAIPrioritySaturationEnabled:                        updatedSettings.OpenAIPrioritySaturationEnabled,
 		OpenAIPrioritySaturationAffinityReservePercent:         updatedSettings.OpenAIPrioritySaturationAffinityReservePercent,
+		OpenAIPrioritySaturationPoolBalanceEnabled:             updatedSettings.OpenAIPrioritySaturationPoolBalanceEnabled,
+		OpenAIPrioritySaturationAccountSharePercent:            updatedSettings.OpenAIPrioritySaturationAccountSharePercent,
+		OpenAIPrioritySaturationAPIKeySharePercent:             updatedSettings.OpenAIPrioritySaturationAPIKeySharePercent,
+		OpenAIPrioritySaturationEnterHighLoadPercent:           updatedSettings.OpenAIPrioritySaturationEnterHighLoadPercent,
+		OpenAIPrioritySaturationExitHighLoadPercent:            updatedSettings.OpenAIPrioritySaturationExitHighLoadPercent,
 		OpenAIAdvancedSchedulerStickyWeightedEnabled:           updatedSettings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
 		OpenAIAdvancedSchedulerSubscriptionPriorityEnabled:     updatedSettings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
 		OpenAIAdvancedSchedulerLBTopK:                          updatedSettings.OpenAIAdvancedSchedulerLBTopK,

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { ref } from 'vue'
 
@@ -7,6 +7,8 @@ import DateRangePicker from '../DateRangePicker.vue'
 const messages: Record<string, string> = {
   'dates.today': 'Today',
   'dates.yesterday': 'Yesterday',
+  'dates.thisWeek': 'This Week',
+  'dates.lastWeek': 'Last Week',
   'dates.last24Hours': 'Last 24 Hours',
   'dates.last7Days': 'Last 7 Days',
   'dates.last14Days': 'Last 14 Days',
@@ -34,6 +36,10 @@ const formatLocalDate = (date: Date): string => {
 }
 
 describe('DateRangePicker', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('uses last 24 hours as the default recognized preset', () => {
     const now = new Date()
     const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
@@ -90,6 +96,52 @@ describe('DateRangePicker', () => {
         startDate: expectedStart,
         endDate: expectedEnd,
         preset: 'last24Hours'
+      }
+    ])
+  })
+
+  it('offers Monday-based this-week and last-week presets', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 7, 8, 12, 0, 0))
+
+    const wrapper = mount(DateRangePicker, {
+      props: {
+        startDate: '2026-08-08',
+        endDate: '2026-08-08'
+      },
+      global: {
+        stubs: {
+          Icon: true
+        }
+      }
+    })
+
+    await wrapper.find('.date-picker-trigger').trigger('click')
+    const presets = wrapper.findAll('.date-picker-preset')
+    const thisWeek = presets.find((node) => node.text().includes('This Week'))
+    const lastWeek = presets.find((node) => node.text().includes('Last Week'))
+
+    expect(thisWeek).toBeDefined()
+    expect(lastWeek).toBeDefined()
+
+    await thisWeek!.trigger('click')
+    await wrapper.find('.date-picker-apply').trigger('click')
+    expect(wrapper.emitted('change')?.at(-1)).toEqual([
+      {
+        startDate: '2026-08-03',
+        endDate: '2026-08-08',
+        preset: 'thisWeek'
+      }
+    ])
+
+    await wrapper.find('.date-picker-trigger').trigger('click')
+    await wrapper.findAll('.date-picker-preset').find((node) => node.text().includes('Last Week'))!.trigger('click')
+    await wrapper.find('.date-picker-apply').trigger('click')
+    expect(wrapper.emitted('change')?.at(-1)).toEqual([
+      {
+        startDate: '2026-07-27',
+        endDate: '2026-08-02',
+        preset: 'lastWeek'
       }
     ])
   })

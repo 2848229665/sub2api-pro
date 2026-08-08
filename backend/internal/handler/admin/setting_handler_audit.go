@@ -122,6 +122,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if req.TencentCaptchaCloudSecretKey != "" {
 		changed = append(changed, "tencent_captcha_cloud_secret_key")
 	}
+	if before.TencentCaptchaRegion != after.TencentCaptchaRegion {
+		changed = append(changed, "tencent_captcha_region")
+	}
 	if before.AliyunCaptchaEnabled != after.AliyunCaptchaEnabled {
 		changed = append(changed, "aliyun_captcha_enabled")
 	}
@@ -511,6 +514,21 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.OpenAIPrioritySaturationAffinityReservePercent != after.OpenAIPrioritySaturationAffinityReservePercent {
 		changed = append(changed, service.SettingKeyOpenAIPrioritySaturationAffinityReservePercent)
+	}
+	if before.OpenAIPrioritySaturationPoolBalanceEnabled != after.OpenAIPrioritySaturationPoolBalanceEnabled {
+		changed = append(changed, service.SettingKeyOpenAIPrioritySaturationPoolBalanceEnabled)
+	}
+	if before.OpenAIPrioritySaturationAccountSharePercent != after.OpenAIPrioritySaturationAccountSharePercent {
+		changed = append(changed, service.SettingKeyOpenAIPrioritySaturationAccountSharePercent)
+	}
+	if before.OpenAIPrioritySaturationAPIKeySharePercent != after.OpenAIPrioritySaturationAPIKeySharePercent {
+		changed = append(changed, service.SettingKeyOpenAIPrioritySaturationAPIKeySharePercent)
+	}
+	if before.OpenAIPrioritySaturationEnterHighLoadPercent != after.OpenAIPrioritySaturationEnterHighLoadPercent {
+		changed = append(changed, service.SettingKeyOpenAIPrioritySaturationEnterHighLoadPercent)
+	}
+	if before.OpenAIPrioritySaturationExitHighLoadPercent != after.OpenAIPrioritySaturationExitHighLoadPercent {
+		changed = append(changed, service.SettingKeyOpenAIPrioritySaturationExitHighLoadPercent)
 	}
 	if before.OpenAIAdvancedSchedulerStickyWeightedEnabled != after.OpenAIAdvancedSchedulerStickyWeightedEnabled {
 		changed = append(changed, "openai_advanced_scheduler_sticky_weighted_enabled")

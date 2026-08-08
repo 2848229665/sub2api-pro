@@ -216,6 +216,63 @@
           </div>
         </div>
 
+        <!-- Natural Period Usage -->
+        <div class="card p-4">
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 class="text-sm font-semibold text-gray-900 dark:text-white">
+                {{ t('admin.dashboard.periodUsage') }}
+              </h2>
+              <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.dashboard.periodUsageHint') }}
+              </p>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <button
+              v-for="period in periodCards"
+              :key="period.key"
+              type="button"
+              :data-testid="`period-usage-${period.key}`"
+              :aria-pressed="activePeriodFilter === period.key"
+              :class="[
+                'rounded-xl border p-3 text-left transition-all',
+                activePeriodFilter === period.key
+                  ? 'border-primary-500 bg-primary-50 ring-2 ring-primary-500/20 dark:bg-primary-900/20'
+                  : 'border-gray-200 bg-gray-50 hover:border-primary-300 hover:bg-primary-50/50 dark:border-dark-700 dark:bg-dark-800/50 dark:hover:border-primary-700 dark:hover:bg-primary-900/10'
+              ]"
+              @click="selectPeriodFilter(period.key)"
+            >
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <p class="text-sm font-semibold text-gray-900 dark:text-white">
+                    {{ period.label }}
+                  </p>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ period.rangeLabel }}
+                  </p>
+                </div>
+                <Icon
+                  name="chart"
+                  size="sm"
+                  class="mt-0.5 text-primary-500 dark:text-primary-400"
+                />
+              </div>
+              <div class="mt-3">
+                <div v-if="periodUsageLoading" class="h-7 w-24 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
+                <p v-else class="text-xl font-bold text-emerald-600 dark:text-emerald-400">
+                  ${{ formatCost(period.actualCost) }}
+                </p>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {{ formatNumber(period.requests) }} {{ t('admin.dashboard.requestsShort') }}
+                  <span class="mx-1 text-gray-300 dark:text-dark-600">·</span>
+                  {{ formatTokens(period.tokens) }} {{ t('admin.dashboard.tokensShort') }}
+                </p>
+              </div>
+            </button>
+          </div>
+        </div>
+
         <!-- Quick Actions -->
         <div class="card p-4">
           <div class="mb-3 flex items-center justify-between">
@@ -268,8 +325,30 @@
         <div class="space-y-6">
           <!-- Date Range Filter -->
           <div class="card p-4">
-            <div class="flex flex-wrap items-center gap-4">
-              <div class="flex items-center gap-2">
+            <div class="space-y-3">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.dashboard.quickRanges') }}:
+                </span>
+                <button
+                  v-for="period in periodCards"
+                  :key="`filter-${period.key}`"
+                  type="button"
+                  :data-testid="`quick-filter-${period.key}`"
+                  :aria-pressed="activePeriodFilter === period.key"
+                  :class="[
+                    'rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors',
+                    activePeriodFilter === period.key
+                      ? 'border-primary-500 bg-primary-600 text-white'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-primary-300 hover:text-primary-600 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300 dark:hover:border-primary-700 dark:hover:text-primary-400'
+                  ]"
+                  @click="selectPeriodFilter(period.key)"
+                >
+                  {{ period.label }}
+                </button>
+              </div>
+              <div class="flex flex-wrap items-center gap-4">
+                <div class="flex items-center gap-2">
                 <span class="text-sm font-medium text-gray-700 dark:text-gray-300"
                   >{{ t('admin.dashboard.timeRange') }}:</span
                 >
@@ -278,20 +357,21 @@
                   v-model:end-date="endDate"
                   @change="onDateRangeChange"
                 />
-              </div>
-              <button @click="loadDashboardStats" :disabled="chartsLoading" class="btn btn-secondary">
-                {{ t('common.refresh') }}
-              </button>
-              <div class="ml-auto flex items-center gap-2">
-                <span class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >{{ t('admin.dashboard.granularity') }}:</span
-                >
-                <div class="w-28">
-                  <Select
-                    v-model="granularity"
-                    :options="granularityOptions"
-                    @change="loadChartData"
-                  />
+                </div>
+                <button @click="loadDashboardStats" :disabled="chartsLoading" class="btn btn-secondary">
+                  {{ t('common.refresh') }}
+                </button>
+                <div class="ml-auto flex items-center gap-2">
+                  <span class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >{{ t('admin.dashboard.granularity') }}:</span
+                  >
+                  <div class="w-28">
+                    <Select
+                      v-model="granularity"
+                      :options="granularityOptions"
+                      @change="loadChartData"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
@@ -346,7 +426,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 import { adminAPI } from '@/api/admin'
 import type {
   DashboardStats,
@@ -363,6 +443,13 @@ import Select from '@/components/common/Select.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
 import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
+import {
+  formatLocalDate,
+  getNaturalUsagePeriodRanges,
+  inclusiveCalendarDays,
+  type LocalDateRange,
+  type NaturalUsagePeriod
+} from '@/utils/dateRanges'
 
 import {
   Chart as ChartJS,
@@ -405,15 +492,33 @@ const rankingItems = ref<UserSpendingRankingItem[]>([])
 const rankingTotalActualCost = ref(0)
 const rankingTotalRequests = ref(0)
 const rankingTotalTokens = ref(0)
+const periodUsageLoading = ref(false)
+const activePeriodFilter = ref<NaturalUsagePeriod | null>(null)
 let chartLoadSeq = 0
 let usersTrendLoadSeq = 0
 let rankingLoadSeq = 0
+let periodUsageLoadSeq = 0
 const rankingLimit = 12
 
-// Helper function to format date in local timezone
-const formatLocalDate = (date: Date): string => {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+interface UsagePeriodSummary extends LocalDateRange {
+  requests: number
+  tokens: number
+  actualCost: number
 }
+
+const usagePeriodKeys: NaturalUsagePeriod[] = ['today', 'yesterday', 'thisWeek', 'lastWeek']
+
+const createEmptyPeriodUsage = (): Record<NaturalUsagePeriod, UsagePeriodSummary> => {
+  const ranges = getNaturalUsagePeriodRanges()
+  return {
+    today: { ...ranges.today, requests: 0, tokens: 0, actualCost: 0 },
+    yesterday: { ...ranges.yesterday, requests: 0, tokens: 0, actualCost: 0 },
+    thisWeek: { ...ranges.thisWeek, requests: 0, tokens: 0, actualCost: 0 },
+    lastWeek: { ...ranges.lastWeek, requests: 0, tokens: 0, actualCost: 0 }
+  }
+}
+
+const periodUsage = ref<Record<NaturalUsagePeriod, UsagePeriodSummary>>(createEmptyPeriodUsage())
 
 const getLast24HoursRangeDates = (): { start: string; end: string } => {
   const end = new Date()
@@ -611,6 +716,45 @@ const formatDuration = (ms: number): string => {
   return `${Math.round(ms)}ms`
 }
 
+const formatPeriodRange = (range: LocalDateRange): string => {
+  const formatDate = (value: string) => {
+    const [year, month, day] = value.split('-').map(Number)
+    const date = new Date(year, month - 1, day)
+    const dateLocale = locale.value.startsWith('zh') ? 'zh-CN' : 'en-US'
+    return new Intl.DateTimeFormat(dateLocale, {
+      month: 'short',
+      day: 'numeric'
+    }).format(date)
+  }
+
+  if (range.start === range.end) {
+    return formatDate(range.start)
+  }
+  return `${formatDate(range.start)} – ${formatDate(range.end)}`
+}
+
+const periodLabelKeys: Record<NaturalUsagePeriod, string> = {
+  today: 'dates.today',
+  yesterday: 'dates.yesterday',
+  thisWeek: 'dates.thisWeek',
+  lastWeek: 'dates.lastWeek'
+}
+
+const periodCards = computed(() =>
+  usagePeriodKeys.map((key) => ({
+    key,
+    label: t(periodLabelKeys[key]),
+    rangeLabel: formatPeriodRange(periodUsage.value[key]),
+    ...periodUsage.value[key]
+  }))
+)
+
+const isNaturalUsagePeriod = (value: string | null): value is NaturalUsagePeriod =>
+  value !== null && usagePeriodKeys.includes(value as NaturalUsagePeriod)
+
+const granularityForRange = (range: LocalDateRange): 'day' | 'hour' =>
+  inclusiveCalendarDays(range.start, range.end) <= 2 ? 'hour' : 'day'
+
 const goToUserUsage = (item: UserSpendingRankingItem) => {
   void router.push({
     path: '/admin/usage',
@@ -622,25 +766,24 @@ const goToUserUsage = (item: UserSpendingRankingItem) => {
   })
 }
 
+const selectPeriodFilter = (period: NaturalUsagePeriod) => {
+  const range = getNaturalUsagePeriodRanges()[period]
+  startDate.value = range.start
+  endDate.value = range.end
+  granularity.value = granularityForRange(range)
+  activePeriodFilter.value = period
+  void loadChartData()
+}
+
 // Date range change handler
 const onDateRangeChange = (range: {
   startDate: string
   endDate: string
   preset: string | null
 }) => {
-  // Auto-select granularity based on date range
-  const start = new Date(range.startDate)
-  const end = new Date(range.endDate)
-  const daysDiff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
-
-  // If range is 1 day, use hourly granularity
-  if (daysDiff <= 1) {
-    granularity.value = 'hour'
-  } else {
-    granularity.value = 'day'
-  }
-
-  loadChartData()
+  activePeriodFilter.value = isNaturalUsagePeriod(range.preset) ? range.preset : null
+  granularity.value = granularityForRange({ start: range.startDate, end: range.endDate })
+  void loadChartData()
 }
 
 // Load data
@@ -732,11 +875,59 @@ const loadUserSpendingRanking = async () => {
   }
 }
 
+const loadPeriodUsage = async () => {
+  const currentSeq = ++periodUsageLoadSeq
+  const ranges = getNaturalUsagePeriodRanges()
+  periodUsageLoading.value = true
+
+  try {
+    const response = await adminAPI.dashboard.getUsageTrend({
+      start_date: ranges.lastWeek.start,
+      end_date: ranges.today.end,
+      granularity: 'day'
+    })
+    if (currentSeq !== periodUsageLoadSeq) return
+
+    const summarize = (range: LocalDateRange): UsagePeriodSummary => {
+      const summary: UsagePeriodSummary = {
+        ...range,
+        requests: 0,
+        tokens: 0,
+        actualCost: 0
+      }
+
+      for (const point of response.trend || []) {
+        const pointDate = point.date.slice(0, 10)
+        if (pointDate < range.start || pointDate > range.end) continue
+        summary.requests += toFiniteNumber(point.requests)
+        summary.tokens += toFiniteNumber(point.total_tokens)
+        summary.actualCost += toFiniteNumber(point.actual_cost)
+      }
+      return summary
+    }
+
+    periodUsage.value = {
+      today: summarize(ranges.today),
+      yesterday: summarize(ranges.yesterday),
+      thisWeek: summarize(ranges.thisWeek),
+      lastWeek: summarize(ranges.lastWeek)
+    }
+  } catch (error) {
+    if (currentSeq !== periodUsageLoadSeq) return
+    console.error('Error loading dashboard period usage:', error)
+  } finally {
+    if (currentSeq === periodUsageLoadSeq) {
+      periodUsageLoading.value = false
+    }
+  }
+}
+
 const loadDashboardStats = async () => {
   await Promise.all([
     loadDashboardSnapshot(true),
     loadUsersTrend(),
-    loadUserSpendingRanking()
+    loadUserSpendingRanking(),
+    loadPeriodUsage()
   ])
 }
 

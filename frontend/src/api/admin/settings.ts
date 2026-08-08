@@ -464,6 +464,7 @@ export interface SystemSettings {
   tencent_captcha_app_secret_key_configured: boolean;
   tencent_captcha_cloud_secret_id_configured: boolean;
   tencent_captcha_cloud_secret_key_configured: boolean;
+  tencent_captcha_region: string;
   aliyun_captcha_enabled: boolean;
   aliyun_captcha_access_key_id: string;
   aliyun_captcha_access_key_secret_configured: boolean;
@@ -637,6 +638,11 @@ export interface SystemSettings {
   openai_advanced_scheduler_enabled?: boolean;
   openai_priority_saturation_enabled?: boolean;
   openai_priority_saturation_affinity_reserve_percent?: number;
+  openai_priority_saturation_pool_balance_enabled?: boolean;
+  openai_priority_saturation_account_share_percent?: number;
+  openai_priority_saturation_api_key_share_percent?: number;
+  openai_priority_saturation_enter_high_load_percent?: number;
+  openai_priority_saturation_exit_high_load_percent?: number;
   openai_advanced_scheduler_sticky_weighted_enabled?: boolean;
   openai_advanced_scheduler_subscription_priority_enabled?: boolean;
   openai_advanced_scheduler_lb_top_k?: string;
@@ -792,6 +798,7 @@ export interface UpdateSettingsRequest {
   tencent_captcha_app_secret_key?: string;
   tencent_captcha_cloud_secret_id?: string;
   tencent_captcha_cloud_secret_key?: string;
+  tencent_captcha_region?: string;
   aliyun_captcha_enabled?: boolean;
   aliyun_captcha_access_key_id?: string;
   aliyun_captcha_access_key_secret?: string;
@@ -942,6 +949,11 @@ export interface UpdateSettingsRequest {
   openai_advanced_scheduler_enabled?: boolean;
   openai_priority_saturation_enabled?: boolean;
   openai_priority_saturation_affinity_reserve_percent?: number;
+  openai_priority_saturation_pool_balance_enabled?: boolean;
+  openai_priority_saturation_account_share_percent?: number;
+  openai_priority_saturation_api_key_share_percent?: number;
+  openai_priority_saturation_enter_high_load_percent?: number;
+  openai_priority_saturation_exit_high_load_percent?: number;
   openai_advanced_scheduler_sticky_weighted_enabled?: boolean;
   openai_advanced_scheduler_subscription_priority_enabled?: boolean;
   openai_advanced_scheduler_lb_top_k?: string;
