@@ -16,7 +16,7 @@ const keywordSessionBlockKeyContextKey = "sub2api.keyword_session_block.key"
 
 const keywordSessionBlockedErrorCode = "session_blocked_by_content_policy"
 const keywordSessionBlockedClientMsg = "该会话已被关键词策略屏蔽，请开启新会话 / This session is blocked by keyword policy, please start a new session"
-const keywordPolicyCodexWireErrorCode = "invalid_prompt"
+const keywordPolicyCodexWireErrorCode = "content_policy_violation"
 
 // cachesSecurityAuditCompletion reports whether a successful audit may be
 // reused for the rest of the gin request. WebSocket turns share one Context
