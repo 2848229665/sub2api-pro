@@ -18,6 +18,7 @@ describe("groupsModelsList", () => {
     setModelsListCandidates(state, ["gpt-5.5", "gpt-5.4"]);
 
     expect(state.enabled).toBe(false);
+    expect(state.useAccessibleModels).toBe(false);
     expect(state.items).toEqual([
       { id: "gpt-5.5", selected: true },
       { id: "gpt-5.4", selected: true },
@@ -65,6 +66,7 @@ describe("groupsModelsList", () => {
 
     expect(buildModelsListConfig(state)).toEqual({
       enabled: true,
+      use_accessible_models: false,
       models: ["gpt-5.4", "gpt-5.5"],
     });
   });
@@ -77,6 +79,7 @@ describe("groupsModelsList", () => {
 
     expect(buildModelsListConfig(state)).toEqual({
       enabled: false,
+      use_accessible_models: false,
       models: ["gpt-5.5"],
     });
   });
@@ -89,7 +92,23 @@ describe("groupsModelsList", () => {
 
     expect(buildModelsListConfig(state)).toEqual({
       enabled: true,
+      use_accessible_models: false,
       models: ["gpt-5.5", "gpt-5.4"],
+    });
+  });
+
+  it("round-trips accessible models discovery mode", () => {
+    const state = createModelsListState({
+      enabled: false,
+      models: [],
+      use_accessible_models: true,
+    });
+
+    expect(state.useAccessibleModels).toBe(true);
+    expect(buildModelsListConfig(state)).toEqual({
+      enabled: false,
+      use_accessible_models: true,
+      models: [],
     });
   });
 

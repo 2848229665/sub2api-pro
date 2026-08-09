@@ -623,6 +623,7 @@ export interface AdminGroup extends Group {
 export interface ModelsListConfig {
   enabled: boolean
   models: string[]
+  use_accessible_models: boolean
 }
 
 export type CompositeRouteMatchType = 'exact' | 'prefix'

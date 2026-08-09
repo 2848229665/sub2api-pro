@@ -1083,6 +1083,14 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	if forcedPlatform, ok := middleware2.GetForcePlatformFromContext(c); ok && strings.TrimSpace(forcedPlatform) != "" {
 		platform = forcedPlatform
 	}
+	if apiKey != nil && apiKey.Group != nil && apiKey.Group.AccessibleModelsListEnabled() {
+		availableModels := h.gatewayService.GetAccessibleModels(c.Request.Context(), groupID, platform)
+		if apiKey.Group.CustomModelsListEnabled() {
+			availableModels = filterModelsByCustomList(availableModels, nil, apiKey.Group.ModelsListConfig.Models)
+		}
+		writeCustomModelsList(c, platform, availableModels)
+		return
+	}
 
 	if platform == service.PlatformComposite {
 		availableModels := h.compositeAvailableModels(c.Request.Context(), groupID)

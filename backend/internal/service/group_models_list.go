@@ -3,7 +3,10 @@ package service
 import "strings"
 
 func normalizeGroupModelsListConfig(cfg GroupModelsListConfig) GroupModelsListConfig {
-	out := GroupModelsListConfig{Enabled: cfg.Enabled}
+	out := GroupModelsListConfig{
+		Enabled:             cfg.Enabled,
+		UseAccessibleModels: cfg.UseAccessibleModels,
+	}
 	if len(cfg.Models) == 0 {
 		return out
 	}
@@ -29,4 +32,8 @@ func normalizeGroupModelsListConfig(cfg GroupModelsListConfig) GroupModelsListCo
 
 func (g *Group) CustomModelsListEnabled() bool {
 	return g != nil && g.ModelsListConfig.Enabled && len(g.ModelsListConfig.Models) > 0
+}
+
+func (g *Group) AccessibleModelsListEnabled() bool {
+	return g != nil && g.ModelsListConfig.UseAccessibleModels
 }

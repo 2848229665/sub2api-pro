@@ -51,6 +51,36 @@ func (s *gatewayModelsAccountRepoStub) ListSchedulableByGroupID(ctx context.Cont
 	return out, nil
 }
 
+func (s *gatewayModelsAccountRepoStub) ListModelAvailabilityCandidates(
+	_ context.Context,
+	groupID *int64,
+	platforms []string,
+	_ bool,
+) ([]service.Account, error) {
+	allowedPlatforms := make(map[string]struct{}, len(platforms))
+	for _, platform := range platforms {
+		allowedPlatforms[platform] = struct{}{}
+	}
+
+	var source []service.Account
+	if groupID != nil {
+		source = s.byGroup[*groupID]
+	} else {
+		for _, accounts := range s.byGroup {
+			source = append(source, accounts...)
+		}
+	}
+
+	out := make([]service.Account, 0, len(source))
+	for _, account := range source {
+		if _, ok := allowedPlatforms[account.Platform]; !ok {
+			continue
+		}
+		out = append(out, account)
+	}
+	return out, nil
+}
+
 func newGatewayModelsHandlerForTest(repo service.AccountRepository) *GatewayHandler {
 	return &GatewayHandler{
 		gatewayService: service.NewGatewayService(
@@ -236,6 +266,191 @@ func TestGatewayModels_CustomModelsListDisabledKeepsOriginalModels(t *testing.T)
 	var got gatewayModelsResponseForTest
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	require.Equal(t, []string{"gpt-5.4", "gpt-5.5"}, modelIDsForTest(got.Data))
+}
+
+func TestGatewayModels_AccessibleModelsListUsesPersistentlySupportedModels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(2201)
+	h := newGatewayModelsHandlerForTest(
+		&gatewayModelsAccountRepoStub{
+			byGroup: map[int64][]service.Account{
+				groupID: {
+					{
+						ID:          1,
+						Platform:    service.PlatformOpenAI,
+						Status:      service.StatusActive,
+						Schedulable: true,
+						Credentials: map[string]any{
+							"model_mapping": map[string]any{
+								"gpt-5.4":  "gpt-5.4",
+								"team-gpt": "gpt-5.4",
+							},
+						},
+					},
+				},
+			},
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		Group: &service.Group{
+			ID:       groupID,
+			Platform: service.PlatformOpenAI,
+			ModelsListConfig: service.GroupModelsListConfig{
+				UseAccessibleModels: true,
+			},
+		},
+	})
+
+	h.Models(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got gatewayModelsResponseForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Equal(t, []string{"gpt-5.4", "team-gpt"}, modelIDsForTest(got.Data))
+	require.Equal(t, "model", got.Data[0].Object)
+	require.NotZero(t, got.Data[0].Created)
+	require.Equal(t, "openai", got.Data[0].OwnedBy)
+}
+
+func TestGatewayModels_AccessibleModelsListCanBeNarrowedAndOrderedByCustomList(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(2202)
+	h := newGatewayModelsHandlerForTest(
+		&gatewayModelsAccountRepoStub{
+			byGroup: map[int64][]service.Account{
+				groupID: {
+					{
+						ID:          1,
+						Platform:    service.PlatformOpenAI,
+						Status:      service.StatusActive,
+						Schedulable: true,
+						Credentials: map[string]any{
+							"model_mapping": map[string]any{
+								"gpt-5.4":  "gpt-5.4",
+								"team-gpt": "gpt-5.4",
+							},
+						},
+					},
+				},
+			},
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		Group: &service.Group{
+			ID:       groupID,
+			Platform: service.PlatformOpenAI,
+			ModelsListConfig: service.GroupModelsListConfig{
+				Enabled:             true,
+				Models:              []string{"team-gpt", "gpt-5.5", "gpt-5.4"},
+				UseAccessibleModels: true,
+			},
+		},
+	})
+
+	h.Models(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got gatewayModelsResponseForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Equal(t, []string{"team-gpt", "gpt-5.4"}, modelIDsForTest(got.Data))
+}
+
+func TestGatewayModels_AccessibleModelsListDoesNotFallbackWhenPoolIsEmpty(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(2203)
+	h := newGatewayModelsHandlerForTest(&gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{}})
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		Group: &service.Group{
+			ID:       groupID,
+			Platform: service.PlatformOpenAI,
+			ModelsListConfig: service.GroupModelsListConfig{
+				UseAccessibleModels: true,
+			},
+		},
+	})
+
+	h.Models(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got gatewayModelsResponseForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Empty(t, got.Data)
+}
+
+func TestGatewayModels_CompositeAccessibleModelsListOnlyAdvertisesRoutableModels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(2204)
+	h := newGatewayModelsHandlerForTest(
+		&gatewayModelsAccountRepoStub{
+			byGroup: map[int64][]service.Account{
+				groupID: {
+					{
+						ID:          1,
+						Platform:    service.PlatformOpenAI,
+						Status:      service.StatusActive,
+						Schedulable: true,
+						Credentials: map[string]any{
+							"model_mapping": map[string]any{
+								"gpt-5.4":       "gpt-5.4",
+								"private-alias": "gpt-5.4",
+							},
+						},
+					},
+					{
+						ID:          2,
+						Platform:    service.PlatformGemini,
+						Status:      service.StatusActive,
+						Schedulable: true,
+						Credentials: map[string]any{
+							"model_mapping": map[string]any{
+								"gemini-2.5-flash": "gemini-2.5-flash",
+							},
+						},
+					},
+				},
+			},
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		Group: &service.Group{
+			ID:       groupID,
+			Platform: service.PlatformComposite,
+			ModelsListConfig: service.GroupModelsListConfig{
+				UseAccessibleModels: true,
+			},
+		},
+	})
+
+	h.Models(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got gatewayModelsResponseForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	ids := modelIDsForTest(got.Data)
+	require.Contains(t, ids, "gpt-5.4")
+	require.Contains(t, ids, "gemini-2.5-flash")
+	require.NotContains(t, ids, "private-alias", "an ambiguous alias needs an explicit composite route")
+	require.NotContains(t, ids, "claude-sonnet-4-6")
 }
 
 func TestGatewayModels_CustomModelsListFiltersAndOrdersMappedModels(t *testing.T) {
