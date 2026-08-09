@@ -1451,23 +1451,6 @@ const actionOptions = computed<SelectOption[]>(() => [
   { value: 'hash_block', label: t('admin.riskControl.actionFilter.hashBlock') },
 ])
 
-const endpointOptions = computed<SelectOption[]>(() => [
-  { value: '', label: t('admin.riskControl.filters.allEndpoints') },
-  { value: '/v1/messages', label: '/v1/messages' },
-  { value: '/v1/responses', label: '/v1/responses' },
-  { value: '/v1/chat/completions', label: '/v1/chat/completions' },
-  { value: '/v1beta/models', label: '/v1beta/models' },
-  { value: '/v1/images/generations', label: '/v1/images/generations' },
-  { value: '/v1/images/edits', label: '/v1/images/edits' },
-])
-
-const groupFilterOptions = computed<SelectOption[]>(() => [
-  { value: 0, label: t('admin.riskControl.filters.allGroups') },
-  ...groups.value.map((group) => ({
-    value: group.id,
-    label: `${group.name} (${group.platform})`,
-  })),
-])
 
 const selectedGroupCount = computed(() => String(configForm.group_ids.length))
 
