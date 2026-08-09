@@ -460,7 +460,7 @@ func (h *UsageHandler) DashboardTrend(c *gin.Context) {
 	if !ok {
 		return
 	}
-	granularity := c.DefaultQuery("granularity", "day")
+	granularity := usagestats.NormalizeUsageTrendGranularity(c.DefaultQuery("granularity", usagestats.UsageTrendGranularityDay))
 
 	trend, err := h.usageService.GetUsageTrendWithFilters(c.Request.Context(), parsed.StartTime, parsed.EndTime, granularity, parsed.Filters)
 	if err != nil {
@@ -511,10 +511,7 @@ func (h *UsageHandler) DashboardSnapshotV2(c *gin.Context) {
 		return
 	}
 
-	granularity := strings.TrimSpace(c.DefaultQuery("granularity", "day"))
-	if granularity != "hour" {
-		granularity = "day"
-	}
+	granularity := usagestats.NormalizeUsageTrendGranularity(c.DefaultQuery("granularity", usagestats.UsageTrendGranularityDay))
 	includeTrend, ok := parseBoolQueryWithDefault(c, "include_trend", true)
 	if !ok {
 		return

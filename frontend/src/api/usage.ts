@@ -15,7 +15,8 @@ import type {
   UsageRequestType,
   UserErrorRequest,
   UserErrorRequestDetail,
-  UserErrorListParams
+  UserErrorListParams,
+  UsageTrendGranularity
 } from '@/types'
 
 // ==================== Dashboard Types ====================
@@ -58,7 +59,7 @@ export interface UserDashboardStats {
 export interface TrendParams {
   start_date?: string
   end_date?: string
-  granularity?: 'day' | 'hour'
+  granularity?: UsageTrendGranularity
   api_key_id?: number
   model?: string
   group_id?: number
@@ -73,7 +74,7 @@ export interface TrendResponse {
   trend: TrendDataPoint[]
   start_date: string
   end_date: string
-  granularity: string
+  granularity: UsageTrendGranularity
 }
 
 export interface ModelStatsResponse {
@@ -111,7 +112,7 @@ export interface UsageDashboardSnapshotV2Response {
   generated_at: string
   start_date: string
   end_date: string
-  granularity: string
+  granularity: UsageTrendGranularity
   trend?: TrendDataPoint[]
   models?: ModelStat[]
   groups?: GroupStat[]

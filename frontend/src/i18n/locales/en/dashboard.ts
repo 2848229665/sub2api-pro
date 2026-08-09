@@ -16,6 +16,8 @@ export default {
     granularity: 'Granularity',
     day: 'Day',
     hour: 'Hour',
+    week: 'Week',
+    month: 'Month',
     modelDistribution: 'Model Distribution',
     groupDistribution: 'Group Usage Distribution',
     platformBreakdown: 'Per-platform Breakdown',

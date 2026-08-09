@@ -227,49 +227,92 @@
                 {{ t('admin.dashboard.periodUsageHint') }}
               </p>
             </div>
+            <div class="flex items-center rounded-lg bg-gray-100 p-1 dark:bg-dark-800">
+              <button
+                v-for="option in usagePeriodDimensionOptions"
+                :key="option.value"
+                type="button"
+                :data-testid="`period-dimension-${option.value}`"
+                :aria-pressed="activeUsageDimension === option.value"
+                :class="[
+                  'rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
+                  activeUsageDimension === option.value
+                    ? 'bg-white text-primary-600 shadow-sm dark:bg-dark-700 dark:text-primary-400'
+                    : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+                ]"
+                @click="selectUsageDimension(option.value)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
           </div>
-          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-stretch">
             <button
-              v-for="period in periodCards"
-              :key="period.key"
               type="button"
-              :data-testid="`period-usage-${period.key}`"
-              :aria-pressed="activePeriodFilter === period.key"
-              :class="[
-                'rounded-xl border p-3 text-left transition-all',
-                activePeriodFilter === period.key
-                  ? 'border-primary-500 bg-primary-50 ring-2 ring-primary-500/20 dark:bg-primary-900/20'
-                  : 'border-gray-200 bg-gray-50 hover:border-primary-300 hover:bg-primary-50/50 dark:border-dark-700 dark:bg-dark-800/50 dark:hover:border-primary-700 dark:hover:bg-primary-900/10'
-              ]"
-              @click="selectPeriodFilter(period.key)"
+              data-testid="period-previous"
+              class="btn btn-secondary flex min-h-12 items-center justify-center gap-1 lg:w-28"
+              @click="navigateUsagePeriod(1)"
             >
-              <div class="flex items-start justify-between gap-2">
+              <Icon name="chevronLeft" size="sm" />
+              {{ periodNavigationLabels.previous }}
+            </button>
+
+            <div class="min-w-0 flex-1 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-800/50">
+              <div class="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p class="text-sm font-semibold text-gray-900 dark:text-white">
-                    {{ period.label }}
+                  <p data-testid="period-usage-title" class="text-base font-semibold text-gray-900 dark:text-white">
+                    {{ selectedUsagePeriodLabel }}
                   </p>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{ period.rangeLabel }}
+                  <p data-testid="period-usage-range" class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ formatPeriodRange(periodUsage) }}
                   </p>
                 </div>
-                <Icon
-                  name="chart"
-                  size="sm"
-                  class="mt-0.5 text-primary-500 dark:text-primary-400"
-                />
+                <Icon name="chart" size="sm" class="mt-0.5 text-primary-500 dark:text-primary-400" />
               </div>
-              <div class="mt-3">
-                <div v-if="periodUsageLoading" class="h-7 w-24 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
-                <p v-else class="text-xl font-bold text-emerald-600 dark:text-emerald-400">
-                  ${{ formatCost(period.actualCost) }}
-                </p>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  {{ formatNumber(period.requests) }} {{ t('admin.dashboard.requestsShort') }}
-                  <span class="mx-1 text-gray-300 dark:text-dark-600">·</span>
-                  {{ formatTokens(period.tokens) }} {{ t('admin.dashboard.tokensShort') }}
-                </p>
+              <div v-if="periodUsageLoading" class="mt-4 h-12 animate-pulse rounded-lg bg-gray-200 dark:bg-dark-700"></div>
+              <div v-else class="mt-4 grid grid-cols-3 gap-3">
+                <div>
+                  <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.spendShort') }}</p>
+                  <p data-testid="period-usage-cost" class="mt-1 text-lg font-bold text-emerald-600 dark:text-emerald-400">
+                    ${{ formatCost(periodUsage.actualCost) }}
+                  </p>
+                </div>
+                <div>
+                  <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.requestsShort') }}</p>
+                  <p class="mt-1 text-lg font-semibold text-gray-900 dark:text-white">
+                    {{ formatNumber(periodUsage.requests) }}
+                  </p>
+                </div>
+                <div>
+                  <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.tokensShort') }}</p>
+                  <p class="mt-1 text-lg font-semibold text-gray-900 dark:text-white">
+                    {{ formatTokens(periodUsage.tokens) }}
+                  </p>
+                </div>
               </div>
-            </button>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 lg:w-56 lg:grid-cols-1">
+              <button
+                type="button"
+                data-testid="period-current"
+                class="btn btn-secondary min-h-12"
+                :disabled="usagePeriodOffset === 0"
+                @click="resetUsagePeriod"
+              >
+                {{ periodNavigationLabels.current }}
+              </button>
+              <button
+                type="button"
+                data-testid="period-next"
+                class="btn btn-secondary flex min-h-12 items-center justify-center gap-1"
+                :disabled="usagePeriodOffset === 0"
+                @click="navigateUsagePeriod(-1)"
+              >
+                {{ periodNavigationLabels.next }}
+                <Icon name="chevronRight" size="sm" />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -331,7 +374,7 @@
                   {{ t('admin.dashboard.quickRanges') }}:
                 </span>
                 <button
-                  v-for="period in periodCards"
+                  v-for="period in quickPeriodFilters"
                   :key="`filter-${period.key}`"
                   type="button"
                   :data-testid="`quick-filter-${period.key}`"
@@ -433,7 +476,8 @@ import type {
   TrendDataPoint,
   ModelStat,
   UserUsageTrendPoint,
-  UserSpendingRankingItem
+  UserSpendingRankingItem,
+  UsageTrendGranularity
 } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -446,9 +490,11 @@ import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
 import {
   formatLocalDate,
   getNaturalUsagePeriodRanges,
-  inclusiveCalendarDays,
+  getUsagePeriodRange,
+  getUsageTrendGranularityForRange,
   type LocalDateRange,
-  type NaturalUsagePeriod
+  type NaturalUsagePeriod,
+  type UsagePeriodDimension
 } from '@/utils/dateRanges'
 
 import {
@@ -494,6 +540,8 @@ const rankingTotalRequests = ref(0)
 const rankingTotalTokens = ref(0)
 const periodUsageLoading = ref(false)
 const activePeriodFilter = ref<NaturalUsagePeriod | null>(null)
+const activeUsageDimension = ref<UsagePeriodDimension>('week')
+const usagePeriodOffset = ref(0)
 let chartLoadSeq = 0
 let usersTrendLoadSeq = 0
 let rankingLoadSeq = 0
@@ -507,18 +555,13 @@ interface UsagePeriodSummary extends LocalDateRange {
 }
 
 const usagePeriodKeys: NaturalUsagePeriod[] = ['today', 'yesterday', 'thisWeek', 'lastWeek']
-
-const createEmptyPeriodUsage = (): Record<NaturalUsagePeriod, UsagePeriodSummary> => {
-  const ranges = getNaturalUsagePeriodRanges()
-  return {
-    today: { ...ranges.today, requests: 0, tokens: 0, actualCost: 0 },
-    yesterday: { ...ranges.yesterday, requests: 0, tokens: 0, actualCost: 0 },
-    thisWeek: { ...ranges.thisWeek, requests: 0, tokens: 0, actualCost: 0 },
-    lastWeek: { ...ranges.lastWeek, requests: 0, tokens: 0, actualCost: 0 }
-  }
-}
-
-const periodUsage = ref<Record<NaturalUsagePeriod, UsagePeriodSummary>>(createEmptyPeriodUsage())
+const initialUsagePeriodRange = getUsagePeriodRange(activeUsageDimension.value, usagePeriodOffset.value)
+const periodUsage = ref<UsagePeriodSummary>({
+  ...initialUsagePeriodRange,
+  requests: 0,
+  tokens: 0,
+  actualCost: 0
+})
 
 const getLast24HoursRangeDates = (): { start: string; end: string } => {
   const end = new Date()
@@ -530,15 +573,17 @@ const getLast24HoursRangeDates = (): { start: string; end: string } => {
 }
 
 // Date range
-const granularity = ref<'day' | 'hour'>('hour')
+const granularity = ref<UsageTrendGranularity>('hour')
 const defaultRange = getLast24HoursRangeDates()
 const startDate = ref(defaultRange.start)
 const endDate = ref(defaultRange.end)
 
 // Granularity options for Select component
 const granularityOptions = computed(() => [
+  { value: 'hour', label: t('admin.dashboard.hour') },
   { value: 'day', label: t('admin.dashboard.day') },
-  { value: 'hour', label: t('admin.dashboard.hour') }
+  { value: 'week', label: t('admin.dashboard.week') },
+  { value: 'month', label: t('admin.dashboard.month') }
 ])
 
 // Dark mode detection
@@ -740,20 +785,112 @@ const periodLabelKeys: Record<NaturalUsagePeriod, string> = {
   lastWeek: 'dates.lastWeek'
 }
 
-const periodCards = computed(() =>
+const quickPeriodFilters = computed(() =>
   usagePeriodKeys.map((key) => ({
     key,
-    label: t(periodLabelKeys[key]),
-    rangeLabel: formatPeriodRange(periodUsage.value[key]),
-    ...periodUsage.value[key]
+    label: t(periodLabelKeys[key])
   }))
 )
+
+const usagePeriodRange = computed(() =>
+  getUsagePeriodRange(activeUsageDimension.value, usagePeriodOffset.value)
+)
+
+const usagePeriodDimensionOptions = computed(() => [
+  { value: 'day' as const, label: t('admin.dashboard.day') },
+  { value: 'week' as const, label: t('admin.dashboard.week') },
+  { value: 'month' as const, label: t('admin.dashboard.month') }
+])
+
+const previousPeriodLabelKeys: Record<UsagePeriodDimension, string> = {
+  day: 'admin.dashboard.previousDay',
+  week: 'admin.dashboard.previousWeek',
+  month: 'admin.dashboard.previousMonth'
+}
+
+const nextPeriodLabelKeys: Record<UsagePeriodDimension, string> = {
+  day: 'admin.dashboard.nextDay',
+  week: 'admin.dashboard.nextWeek',
+  month: 'admin.dashboard.nextMonth'
+}
+
+const currentPeriodLabelKeys: Record<UsagePeriodDimension, string> = {
+  day: 'dates.today',
+  week: 'dates.thisWeek',
+  month: 'dates.thisMonth'
+}
+
+const periodNavigationLabels = computed(() => ({
+  previous: t(previousPeriodLabelKeys[activeUsageDimension.value]),
+  current: t(currentPeriodLabelKeys[activeUsageDimension.value]),
+  next: t(nextPeriodLabelKeys[activeUsageDimension.value])
+}))
+
+const formatPeriodTitleDate = (
+  value: string,
+  options: Intl.DateTimeFormatOptions
+): string => {
+  const [year, month, day] = value.split('-').map(Number)
+  const dateLocale = locale.value.startsWith('zh') ? 'zh-CN' : 'en-US'
+  return new Intl.DateTimeFormat(dateLocale, options).format(new Date(year, month - 1, day))
+}
+
+const selectedUsagePeriodLabel = computed(() => {
+  const offset = usagePeriodOffset.value
+  if (activeUsageDimension.value === 'day') {
+    if (offset === 0) return t('dates.today')
+    if (offset === 1) return t('dates.yesterday')
+    return formatPeriodTitleDate(usagePeriodRange.value.start, {
+      month: 'short',
+      day: 'numeric',
+      weekday: 'short'
+    })
+  }
+
+  if (activeUsageDimension.value === 'week') {
+    if (offset === 0) return t('dates.thisWeek')
+    if (offset === 1) return t('dates.lastWeek')
+    if (offset === 2) return t('admin.dashboard.twoWeeksAgo')
+    return t('admin.dashboard.weeksAgo', { count: offset })
+  }
+
+  if (offset === 0) return t('dates.thisMonth')
+  if (offset === 1) return t('dates.lastMonth')
+  return formatPeriodTitleDate(usagePeriodRange.value.start, {
+    year: 'numeric',
+    month: 'long'
+  })
+})
 
 const isNaturalUsagePeriod = (value: string | null): value is NaturalUsagePeriod =>
   value !== null && usagePeriodKeys.includes(value as NaturalUsagePeriod)
 
-const granularityForRange = (range: LocalDateRange): 'day' | 'hour' =>
-  inclusiveCalendarDays(range.start, range.end) <= 2 ? 'hour' : 'day'
+const naturalPeriodForUsageNavigator = (): NaturalUsagePeriod | null => {
+  if (activeUsageDimension.value === 'day') {
+    if (usagePeriodOffset.value === 0) return 'today'
+    if (usagePeriodOffset.value === 1) return 'yesterday'
+  }
+  if (activeUsageDimension.value === 'week') {
+    if (usagePeriodOffset.value === 0) return 'thisWeek'
+    if (usagePeriodOffset.value === 1) return 'lastWeek'
+  }
+  return null
+}
+
+const syncUsageNavigatorFromPreset = (preset: string | null): boolean => {
+  const mappings: Record<string, { dimension: UsagePeriodDimension; offset: number }> = {
+    today: { dimension: 'day', offset: 0 },
+    yesterday: { dimension: 'day', offset: 1 },
+    thisWeek: { dimension: 'week', offset: 0 },
+    lastWeek: { dimension: 'week', offset: 1 },
+    thisMonth: { dimension: 'month', offset: 0 },
+    lastMonth: { dimension: 'month', offset: 1 }
+  }
+  if (!preset || !mappings[preset]) return false
+  activeUsageDimension.value = mappings[preset].dimension
+  usagePeriodOffset.value = mappings[preset].offset
+  return true
+}
 
 const goToUserUsage = (item: UserSpendingRankingItem) => {
   void router.push({
@@ -768,11 +905,38 @@ const goToUserUsage = (item: UserSpendingRankingItem) => {
 
 const selectPeriodFilter = (period: NaturalUsagePeriod) => {
   const range = getNaturalUsagePeriodRanges()[period]
+  syncUsageNavigatorFromPreset(period)
   startDate.value = range.start
   endDate.value = range.end
-  granularity.value = granularityForRange(range)
+  granularity.value = getUsageTrendGranularityForRange(range.start, range.end)
   activePeriodFilter.value = period
-  void loadChartData()
+  void Promise.all([loadChartData(), loadPeriodUsage()])
+}
+
+const applyUsagePeriodToDashboard = () => {
+  const range = usagePeriodRange.value
+  startDate.value = range.start
+  endDate.value = range.end
+  granularity.value = getUsageTrendGranularityForRange(range.start, range.end)
+  activePeriodFilter.value = naturalPeriodForUsageNavigator()
+  void Promise.all([loadChartData(), loadPeriodUsage()])
+}
+
+const selectUsageDimension = (dimension: UsagePeriodDimension) => {
+  activeUsageDimension.value = dimension
+  usagePeriodOffset.value = 0
+  applyUsagePeriodToDashboard()
+}
+
+const navigateUsagePeriod = (direction: 1 | -1) => {
+  usagePeriodOffset.value = Math.max(0, usagePeriodOffset.value + direction)
+  applyUsagePeriodToDashboard()
+}
+
+const resetUsagePeriod = () => {
+  if (usagePeriodOffset.value === 0) return
+  usagePeriodOffset.value = 0
+  applyUsagePeriodToDashboard()
 }
 
 // Date range change handler
@@ -782,8 +946,9 @@ const onDateRangeChange = (range: {
   preset: string | null
 }) => {
   activePeriodFilter.value = isNaturalUsagePeriod(range.preset) ? range.preset : null
-  granularity.value = granularityForRange({ start: range.startDate, end: range.endDate })
-  void loadChartData()
+  granularity.value = getUsageTrendGranularityForRange(range.startDate, range.endDate)
+  const syncedPeriod = syncUsageNavigatorFromPreset(range.preset)
+  void Promise.all([loadChartData(), ...(syncedPeriod ? [loadPeriodUsage()] : [])])
 }
 
 // Load data
@@ -877,41 +1042,35 @@ const loadUserSpendingRanking = async () => {
 
 const loadPeriodUsage = async () => {
   const currentSeq = ++periodUsageLoadSeq
-  const ranges = getNaturalUsagePeriodRanges()
+  const range = { ...usagePeriodRange.value }
   periodUsageLoading.value = true
+  periodUsage.value = {
+    ...range,
+    requests: 0,
+    tokens: 0,
+    actualCost: 0
+  }
 
   try {
     const response = await adminAPI.dashboard.getUsageTrend({
-      start_date: ranges.lastWeek.start,
-      end_date: ranges.today.end,
-      granularity: 'day'
+      start_date: range.start,
+      end_date: range.end,
+      granularity: getUsageTrendGranularityForRange(range.start, range.end)
     })
     if (currentSeq !== periodUsageLoadSeq) return
 
-    const summarize = (range: LocalDateRange): UsagePeriodSummary => {
-      const summary: UsagePeriodSummary = {
-        ...range,
-        requests: 0,
-        tokens: 0,
-        actualCost: 0
-      }
-
-      for (const point of response.trend || []) {
-        const pointDate = point.date.slice(0, 10)
-        if (pointDate < range.start || pointDate > range.end) continue
-        summary.requests += toFiniteNumber(point.requests)
-        summary.tokens += toFiniteNumber(point.total_tokens)
-        summary.actualCost += toFiniteNumber(point.actual_cost)
-      }
-      return summary
+    const summary: UsagePeriodSummary = {
+      ...range,
+      requests: 0,
+      tokens: 0,
+      actualCost: 0
     }
-
-    periodUsage.value = {
-      today: summarize(ranges.today),
-      yesterday: summarize(ranges.yesterday),
-      thisWeek: summarize(ranges.thisWeek),
-      lastWeek: summarize(ranges.lastWeek)
+    for (const point of response.trend || []) {
+      summary.requests += toFiniteNumber(point.requests)
+      summary.tokens += toFiniteNumber(point.total_tokens)
+      summary.actualCost += toFiniteNumber(point.actual_cost)
     }
+    periodUsage.value = summary
   } catch (error) {
     if (currentSeq !== periodUsageLoadSeq) return
     console.error('Error loading dashboard period usage:', error)

@@ -16,6 +16,8 @@ export default {
     granularity: '粒度',
     day: '按天',
     hour: '按小时',
+    week: '按周',
+    month: '按月',
     modelDistribution: '模型分布',
     groupDistribution: '分组使用分布',
     platformBreakdown: '按平台拆分',

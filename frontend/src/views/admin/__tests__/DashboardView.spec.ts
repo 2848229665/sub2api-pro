@@ -100,7 +100,10 @@ const mountDashboard = () =>
         LoadingSpinner: true,
         Icon: true,
         DateRangePicker: true,
-        Select: true,
+        Select: {
+          props: ['options'],
+          template: '<div data-testid="granularity-options"><span v-for="option in options" :key="option.value">{{ option.value }}</span></div>'
+        },
         ModelDistributionChart: true,
         TokenUsageTrend: true,
         Line: true
@@ -164,43 +167,89 @@ describe('admin DashboardView', () => {
     }))
   })
 
-  it('shows natural period usage and applies a period as the chart filter', async () => {
+  it('offers hour, day, week, and month usage dimensions', async () => {
+    const wrapper = mountDashboard()
+
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="granularity-options"]').text()).toBe('hourdayweekmonth')
+  })
+
+  it('continuously navigates previous weeks and months while updating the chart filter', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date(2026, 7, 8, 12, 0, 0))
-    getUsageTrend.mockResolvedValue({
-      trend: [
-        { date: '2026-08-02', requests: 2, total_tokens: 20, actual_cost: 0.2 },
-        { date: '2026-08-03', requests: 3, total_tokens: 30, actual_cost: 0.3 },
-        { date: '2026-08-07', requests: 7, total_tokens: 70, actual_cost: 0.7 },
-        { date: '2026-08-08', requests: 8, total_tokens: 80, actual_cost: 0.8 }
-      ],
-      start_date: '2026-07-27',
-      end_date: '2026-08-08',
-      granularity: 'day'
+    vi.setSystemTime(new Date(2026, 7, 9, 12, 0, 0))
+    getUsageTrend.mockImplementation(async ({ start_date, end_date, granularity }) => {
+      const costs: Record<string, number> = {
+        '2026-08-03': 0.9,
+        '2026-07-27': 0.8,
+        '2026-07-20': 0.7,
+        '2026-08-01': 8,
+        '2026-07-01': 7,
+        '2026-06-01': 6
+      }
+      return {
+        trend: [{
+          date: start_date,
+          requests: 10,
+          total_tokens: 100,
+          actual_cost: costs[start_date] ?? 0
+        }],
+        start_date,
+        end_date,
+        granularity
+      }
     })
 
     const wrapper = mountDashboard()
     await flushPromises()
 
     expect(getUsageTrend).toHaveBeenCalledWith({
-      start_date: '2026-07-27',
-      end_date: '2026-08-08',
+      start_date: '2026-08-03',
+      end_date: '2026-08-09',
       granularity: 'day'
     })
-    expect(wrapper.get('[data-testid="period-usage-today"]').text()).toContain('$0.800')
-    expect(wrapper.get('[data-testid="period-usage-yesterday"]').text()).toContain('$0.700')
-    expect(wrapper.get('[data-testid="period-usage-thisWeek"]').text()).toContain('$1.80')
-    expect(wrapper.get('[data-testid="period-usage-lastWeek"]').text()).toContain('$0.200')
+    expect(wrapper.get('[data-testid="period-usage-title"]').text()).toBe('dates.thisWeek')
+    expect(wrapper.get('[data-testid="period-usage-cost"]').text()).toContain('$0.900')
 
-    await wrapper.get('[data-testid="quick-filter-thisWeek"]').trigger('click')
+    await wrapper.get('[data-testid="period-previous"]').trigger('click')
     await flushPromises()
-
+    expect(wrapper.get('[data-testid="period-usage-title"]').text()).toBe('dates.lastWeek')
     expect(getSnapshotV2).toHaveBeenLastCalledWith(expect.objectContaining({
-      start_date: '2026-08-03',
-      end_date: '2026-08-08',
+      start_date: '2026-07-27',
+      end_date: '2026-08-02',
       granularity: 'day',
       include_stats: false
     }))
-    expect(wrapper.get('[data-testid="quick-filter-thisWeek"]').attributes('aria-pressed')).toBe('true')
+
+    await wrapper.get('[data-testid="period-previous"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="period-usage-title"]').text()).toBe('admin.dashboard.twoWeeksAgo')
+    expect(getSnapshotV2).toHaveBeenLastCalledWith(expect.objectContaining({
+      start_date: '2026-07-20',
+      end_date: '2026-07-26',
+      granularity: 'day',
+      include_stats: false
+    }))
+
+    await wrapper.get('[data-testid="period-dimension-month"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="period-usage-title"]').text()).toBe('dates.thisMonth')
+
+    await wrapper.get('[data-testid="period-previous"]').trigger('click')
+    await wrapper.get('[data-testid="period-previous"]').trigger('click')
+    await flushPromises()
+    expect(getSnapshotV2).toHaveBeenLastCalledWith(expect.objectContaining({
+      start_date: '2026-06-01',
+      end_date: '2026-06-30',
+      granularity: 'day',
+      include_stats: false
+    }))
+
+    await wrapper.get('[data-testid="period-next"]').trigger('click')
+    await flushPromises()
+    expect(getSnapshotV2).toHaveBeenLastCalledWith(expect.objectContaining({
+      start_date: '2026-07-01',
+      end_date: '2026-07-31'
+    }))
   })
 })
