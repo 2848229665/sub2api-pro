@@ -1,0 +1,28 @@
+name: Migration Guard
+
+on:
+  pull_request:
+    branches: [product/main, main]
+    paths:
+      - 'backend/migrations/**'
+
+jobs:
+  check-migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reject modifications to existing migration files
+        run: |
+          modified=$(git diff --diff-filter=M --name-only origin/${{ github.base_ref }}...HEAD -- 'backend/migrations/*.sql')
+          if [ -n "$modified" ]; then
+            echo "::error::The following applied migration files were modified:"
+            echo "$modified"
+            echo ""
+            echo "Modifying applied migrations breaks checksum validation and causes startup failures."
+            echo "Create a new migration file instead."
+            exit 1
+          fi
+          echo "All migration changes are new files only — OK."
