@@ -75,6 +75,10 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		return
 	}
 	requestedModel := strings.TrimSpace(modelResult.String())
+	if !groupModelsListAllowsModel(c, apiKey, requestedModel) {
+		h.errorResponse(c, http.StatusNotFound, "model_not_found", groupModelsListModelNotFoundMessage(c, requestedModel))
+		return
+	}
 	if !fixedEndpointTargetPlatformAllowed(c, apiKey, requestedModel, service.PlatformOpenAI) {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Codex alpha search is only available for OpenAI groups")
 		return

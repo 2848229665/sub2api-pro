@@ -204,6 +204,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
 	}
+	if !groupModelsListAllowsModel(c, apiKey, reqModel) {
+		h.errorResponse(c, http.StatusNotFound, "model_not_found", groupModelsListModelNotFoundMessage(c, reqModel))
+		return
+	}
 	if !compositeTargetPlatformResolved(c, apiKey, reqModel) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by composite groups")
 		return
@@ -1083,12 +1087,8 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	if forcedPlatform, ok := middleware2.GetForcePlatformFromContext(c); ok && strings.TrimSpace(forcedPlatform) != "" {
 		platform = forcedPlatform
 	}
-	if apiKey != nil && apiKey.Group != nil && apiKey.Group.AccessibleModelsListEnabled() {
-		availableModels := h.gatewayService.GetAccessibleModels(c.Request.Context(), groupID, platform)
-		if apiKey.Group.CustomModelsListEnabled() {
-			availableModels = filterModelsByCustomList(availableModels, nil, apiKey.Group.ModelsListConfig.Models)
-		}
-		writeCustomModelsList(c, platform, availableModels)
+	if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelsListAccessRestricted() {
+		writeCustomModelsList(c, platform, apiKey.Group.ModelsListConfig.Models)
 		return
 	}
 
@@ -2030,6 +2030,10 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	// 验证 model 必填
 	if parsedReq.Model == "" {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
+		return
+	}
+	if !groupModelsListAllowsModel(c, apiKey, parsedReq.Model) {
+		h.errorResponse(c, http.StatusNotFound, "model_not_found", groupModelsListModelNotFoundMessage(c, parsedReq.Model))
 		return
 	}
 	if !compositeTargetPlatformResolved(c, apiKey, parsedReq.Model) {

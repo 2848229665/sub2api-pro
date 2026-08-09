@@ -17,6 +17,11 @@ import (
 // The route middleware already authenticates the API key and resolves the
 // group; this handler intentionally does not select an account or check billing.
 func (h *OpenAIGatewayHandler) GrokCountTokens(c *gin.Context) {
+	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+	if !ok {
+		h.anthropicErrorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
+		return
+	}
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
 		if maxErr, ok := extractMaxBytesError(err); ok {
@@ -40,6 +45,10 @@ func (h *OpenAIGatewayHandler) GrokCountTokens(c *gin.Context) {
 	}
 	if parsedReq.Model == "" {
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
+		return
+	}
+	if !groupModelsListAllowsModel(c, apiKey, parsedReq.Model) {
+		h.anthropicErrorResponse(c, http.StatusNotFound, "model_not_found", groupModelsListModelNotFoundMessage(c, parsedReq.Model))
 		return
 	}
 
@@ -116,6 +125,10 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	}
 
 	reqModel := parsedReq.Model
+	if !groupModelsListAllowsModel(c, apiKey, reqModel) {
+		h.anthropicErrorResponse(c, http.StatusNotFound, "model_not_found", groupModelsListModelNotFoundMessage(c, reqModel))
+		return
+	}
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	if !compositeTargetPlatformAllowed(c, apiKey, reqModel, service.PlatformOpenAI) {
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")

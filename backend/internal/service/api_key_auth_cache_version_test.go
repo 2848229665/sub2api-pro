@@ -60,7 +60,7 @@ func TestAPIKeyService_RejectsV15AuthSnapshotWithoutReasoningEffortPolicy(t *tes
 	}
 }
 
-func TestAPIKeyService_RejectsV18AuthSnapshotWithoutAccessibleModelsDiscoveryMode(t *testing.T) {
+func TestAPIKeyService_RejectsV18AuthSnapshotWithoutModelsListAccessRestriction(t *testing.T) {
 	svc := &APIKeyService{}
 
 	apiKey, ok, err := svc.applyAuthCacheEntry("k-legacy-accessible-models", &APIKeyAuthCacheEntry{
@@ -71,7 +71,7 @@ func TestAPIKeyService_RejectsV18AuthSnapshotWithoutAccessibleModelsDiscoveryMod
 		t.Fatalf("expected stale snapshot to be ignored without error, got %v", err)
 	}
 	if ok {
-		t.Fatal("expected v18 auth snapshot to be rejected after accessible-models discovery mode was added")
+		t.Fatal("expected v18 auth snapshot to be rejected after models-list access restriction was added")
 	}
 	if apiKey != nil {
 		t.Fatalf("expected no API key from stale snapshot, got %#v", apiKey)

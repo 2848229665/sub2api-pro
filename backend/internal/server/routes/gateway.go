@@ -64,6 +64,11 @@ func RegisterGatewayRoutes(
 		}
 	}
 	modelsHandler := func(c *gin.Context) {
+		if apiKey, ok := middleware.GetAPIKeyFromContext(c); ok && apiKey != nil &&
+			apiKey.Group != nil && apiKey.Group.ModelsListAccessRestricted() {
+			h.Gateway.Models(c)
+			return
+		}
 		groupPlatform := getGroupPlatform(c)
 		if c.Query("client_version") != "" &&
 			(groupPlatform == service.PlatformOpenAI || groupPlatform == service.PlatformComposite) {

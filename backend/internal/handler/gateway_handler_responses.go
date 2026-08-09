@@ -75,6 +75,10 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 	reqModel := modelResult.String()
+	if !groupModelsListAllowsModel(c, apiKey, reqModel) {
+		h.responsesErrorResponse(c, http.StatusNotFound, "model_not_found", groupModelsListModelNotFoundMessage(c, reqModel))
+		return
+	}
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	if !compositeTargetPlatformResolved(c, apiKey, reqModel) {
 		h.responsesErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by composite groups")

@@ -1032,10 +1032,10 @@ export default {
         sumTooHigh: 'Min gross margin plus safety buffer must be less than 100%, otherwise every account would be excluded'
       },
       modelsList: {
-        accessibleTitle: 'Only advertise accessible models',
-        accessibleHint: 'When enabled, /v1/models is generated from persistently schedulable accounts and their model mappings. Temporary rate limits, overload, and breakers do not hide models. A custom list can further filter and order the result.',
+        accessibleTitle: 'Only allow models in the list',
+        accessibleHint: 'When enabled, the configured list below is used verbatim for both /v1/models and request access control. Unlisted models are rejected; the list is no longer derived from accounts or model mappings.',
         title: 'Custom /v1/models Model List',
-        hint: 'Filter and order the /v1/models response without changing model calls or account routing.',
+        hint: 'Select and order the /v1/models response. When access restriction is enabled, this list also controls which models can be called.',
         loading: 'Loading model list...',
         empty: 'No displayable models',
         selectedSummary: 'Selected {selected} / {total}',

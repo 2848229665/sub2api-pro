@@ -109,6 +109,10 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "request_id is required")
 		return
 	}
+	if endpoint.IsGenerationRequest() && !groupModelsListAllowsModel(c, apiKey, requestModel) {
+		h.errorResponse(c, http.StatusNotFound, "model_not_found", groupModelsListModelNotFoundMessage(c, requestModel))
+		return
+	}
 
 	reqLog = reqLog.With(zap.String("model", requestModel))
 	setOpsRequestContext(c, requestModel, false)

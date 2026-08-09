@@ -11,19 +11,22 @@ export interface ModelsListItem {
 
 export interface ModelsListState {
   enabled: boolean
-  useAccessibleModels: boolean
+  restrictToModelsList: boolean
   savedModels: string[]
   items: ModelsListItem[]
 }
 
 export const createModelsListState = (
   config?: Partial<ModelsListConfig> | null,
-): ModelsListState => ({
-  enabled: config?.enabled ?? false,
-  useAccessibleModels: config?.use_accessible_models ?? false,
-  savedModels: normalizeModels(config?.models ?? []),
-  items: [],
-})
+): ModelsListState => {
+  const restrictToModelsList = config?.use_accessible_models ?? false
+  return {
+    enabled: (config?.enabled ?? false) || restrictToModelsList,
+    restrictToModelsList,
+    savedModels: normalizeModels(config?.models ?? []),
+    items: [],
+  }
+}
 
 export const hydrateModelsListState = (
   config: Partial<ModelsListConfig> | null | undefined,
@@ -84,6 +87,20 @@ export const invertModelsListSelection = (state: ModelsListState) => {
   })
 }
 
+export const toggleModelsListAccessRestriction = (state: ModelsListState) => {
+  state.restrictToModelsList = !state.restrictToModelsList
+  if (state.restrictToModelsList) {
+    state.enabled = true
+  }
+}
+
+export const toggleModelsListEnabled = (state: ModelsListState) => {
+  if (state.restrictToModelsList) {
+    return
+  }
+  state.enabled = !state.enabled
+}
+
 export const moveModelsListItem = (
   state: ModelsListState,
   fromIndex: number,
@@ -103,8 +120,8 @@ export const moveModelsListItem = (
 }
 
 export const buildModelsListConfig = (state: ModelsListState): ModelsListConfig => ({
-  enabled: state.enabled,
-  use_accessible_models: state.useAccessibleModels,
+  enabled: state.enabled || state.restrictToModelsList,
+  use_accessible_models: state.restrictToModelsList,
   models: state.items.length > 0
     ? state.items.filter(item => item.selected).map(item => item.id)
     : [...state.savedModels],
