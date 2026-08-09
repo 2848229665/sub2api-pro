@@ -445,7 +445,8 @@ export default {
         currentFilter: 'Current filter',
       },
       filters: {
-        search: 'Search user/key/summary',
+        userEmail: 'Username / Email',
+        search: 'Search key/summary',
         from: 'From',
         to: 'To',
         allGroups: 'All Groups',

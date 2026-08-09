@@ -451,6 +451,7 @@ type ContentModerationLogFilter struct {
 	Action     string
 	GroupID    *int64
 	Endpoint   string
+	UserEmail  string
 	Search     string
 	From       *time.Time
 	To         *time.Time

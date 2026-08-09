@@ -37,12 +37,41 @@ func TestBuildContentModerationLogWhere_ActionUsesParameterizedCondition(t *test
 	require.Contains(t, sql, "l.group_id = $2")
 	require.Contains(t, sql, "l.endpoint = $3")
 	require.Contains(t, sql, "l.request_id ILIKE $4")
+	require.NotContains(t, sql, "l.input_excerpt ILIKE")
 	require.Equal(t, []any{
 		service.ContentModerationActionKeywordBlock,
 		groupID,
 		"/v1/responses",
-		"%needle%", "%needle%", "%needle%", "%needle%", "%needle%",
+		"%needle%", "%needle%", "%needle%", "%needle%",
 	}, args)
+}
+
+func TestBuildContentModerationLogWhere_EmailSearchUsesExactMatch(t *testing.T) {
+	where, args := buildContentModerationLogWhere(service.ContentModerationLogFilter{
+		Result: "hit",
+		Action: service.ContentModerationActionKeywordBlock,
+		Search: "user@example.com",
+	})
+
+	sql := strings.Join(where, " AND ")
+	require.Contains(t, sql, "l.user_email = $2")
+	require.NotContains(t, sql, "ILIKE")
+	require.Equal(t, []any{
+		service.ContentModerationActionKeywordBlock,
+		"user@example.com",
+	}, args)
+}
+
+func TestBuildContentModerationLogWhere_UserEmailFilter(t *testing.T) {
+	where, args := buildContentModerationLogWhere(service.ContentModerationLogFilter{
+		Result:    "hit",
+		UserEmail: "alice@example.com",
+	})
+
+	sql := strings.Join(where, " AND ")
+	require.Contains(t, sql, "l.flagged = TRUE")
+	require.Contains(t, sql, "l.user_email = $1")
+	require.Equal(t, []any{"alice@example.com"}, args)
 }
 
 func TestContentModerationRepositoryCountFlaggedByUserSince_ExcludesHashBlock(t *testing.T) {
