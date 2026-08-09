@@ -352,7 +352,7 @@ func (r *usageLogRepository) getUsageTrendWithFilters(ctx context.Context, start
 }
 
 func shouldUsePreaggregatedTrend(granularity string, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8, billingMode string, upstreamModelMismatch *bool) bool {
-	if granularity != "day" && granularity != "hour" {
+	if granularity != "day" && granularity != "hour" && granularity != "week" && granularity != "month" {
 		return false
 	}
 	return userID == 0 &&
@@ -404,6 +404,23 @@ func (r *usageLogRepository) getUsageTrendFromAggregates(ctx context.Context, st
 			FROM usage_dashboard_daily
 			WHERE bucket_date >= $1::date AND bucket_date < $2::date
 			ORDER BY bucket_date ASC
+		`, dateFormat)
+	case "week", "month":
+		query = fmt.Sprintf(`
+			SELECT
+				TO_CHAR(bucket_date::timestamp, '%s') as date,
+				SUM(total_requests) as requests,
+				SUM(input_tokens) as input_tokens,
+				SUM(output_tokens) as output_tokens,
+				SUM(cache_creation_tokens) as cache_creation_tokens,
+				SUM(cache_read_tokens) as cache_read_tokens,
+				SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) as total_tokens,
+				SUM(total_cost) as cost,
+				SUM(actual_cost) as actual_cost
+			FROM usage_dashboard_daily
+			WHERE bucket_date >= $1::date AND bucket_date < $2::date
+			GROUP BY date
+			ORDER BY MIN(bucket_date) ASC
 		`, dateFormat)
 	default:
 		return nil, nil

@@ -1812,6 +1812,8 @@ export interface UsageStatsResponse {
 
 // ==================== Trend & Chart Types ====================
 
+export type UsageTrendGranularity = 'hour' | 'day' | 'week' | 'month'
+
 export interface TrendDataPoint {
   date: string
   requests: number

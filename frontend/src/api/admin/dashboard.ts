@@ -13,7 +13,8 @@ import type {
   UserUsageTrendPoint,
   UserSpendingRankingResponse,
   UserBreakdownItem,
-  UsageRequestType
+  UsageRequestType,
+  UsageTrendGranularity
 } from '@/types'
 
 /**
@@ -47,7 +48,7 @@ export async function getRealtimeMetrics(): Promise<{
 export interface TrendParams {
   start_date?: string
   end_date?: string
-  granularity?: 'day' | 'hour'
+  granularity?: UsageTrendGranularity
   user_id?: number
   api_key_id?: number
   model?: string
@@ -63,7 +64,7 @@ export interface TrendResponse {
   trend: TrendDataPoint[]
   start_date: string
   end_date: string
-  granularity: string
+  granularity: UsageTrendGranularity
 }
 
 /**
@@ -143,7 +144,7 @@ export interface DashboardSnapshotV2Response {
   generated_at: string
   start_date: string
   end_date: string
-  granularity: string
+  granularity: UsageTrendGranularity
   stats?: DashboardSnapshotV2Stats
   trend?: TrendDataPoint[]
   models?: ModelStat[]
@@ -212,7 +213,7 @@ export interface ApiKeyTrendResponse {
   trend: ApiKeyUsageTrendPoint[]
   start_date: string
   end_date: string
-  granularity: string
+  granularity: UsageTrendGranularity
 }
 
 /**
@@ -237,7 +238,7 @@ export interface UserTrendResponse {
   trend: UserUsageTrendPoint[]
   start_date: string
   end_date: string
-  granularity: string
+  granularity: UsageTrendGranularity
 }
 
 export interface UserSpendingRankingParams

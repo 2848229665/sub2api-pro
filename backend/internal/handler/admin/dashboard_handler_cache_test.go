@@ -16,8 +16,10 @@ import (
 
 type dashboardUsageRepoCacheProbe struct {
 	service.UsageLogRepository
-	trendCalls      atomic.Int32
-	usersTrendCalls atomic.Int32
+	trendCalls            atomic.Int32
+	usersTrendCalls       atomic.Int32
+	trendGranularity      string
+	usersTrendGranularity string
 }
 
 func (r *dashboardUsageRepoCacheProbe) GetUsageTrendWithFilters(
@@ -31,6 +33,7 @@ func (r *dashboardUsageRepoCacheProbe) GetUsageTrendWithFilters(
 	billingType *int8,
 ) ([]usagestats.TrendDataPoint, error) {
 	r.trendCalls.Add(1)
+	r.trendGranularity = granularity
 	return []usagestats.TrendDataPoint{{
 		Date:        "2026-03-11",
 		Requests:    1,
@@ -47,6 +50,7 @@ func (r *dashboardUsageRepoCacheProbe) GetUserUsageTrend(
 	limit int,
 ) ([]usagestats.UserUsageTrendPoint, error) {
 	r.usersTrendCalls.Add(1)
+	r.usersTrendGranularity = granularity
 	return []usagestats.UserUsageTrendPoint{{
 		Date:       "2026-03-11",
 		UserID:     1,
@@ -115,4 +119,35 @@ func TestDashboardHandler_GetUserUsageTrend_UsesCache(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec2.Code)
 	require.Equal(t, "hit", rec2.Header().Get("X-Snapshot-Cache"))
 	require.Equal(t, int32(1), repo.usersTrendCalls.Load())
+}
+
+func TestDashboardHandler_GetSnapshotV2_SupportsWeekAndMonthGranularity(t *testing.T) {
+	for _, granularity := range []string{
+		usagestats.UsageTrendGranularityWeek,
+		usagestats.UsageTrendGranularityMonth,
+	} {
+		t.Run(granularity, func(t *testing.T) {
+			t.Cleanup(resetDashboardReadCachesForTest)
+			resetDashboardReadCachesForTest()
+
+			gin.SetMode(gin.TestMode)
+			repo := &dashboardUsageRepoCacheProbe{}
+			dashboardSvc := service.NewDashboardService(repo, nil, nil, nil)
+			handler := NewDashboardHandler(dashboardSvc, nil)
+			router := gin.New()
+			router.GET("/admin/dashboard/snapshot-v2", handler.GetSnapshotV2)
+
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/admin/dashboard/snapshot-v2?start_date=2026-01-01&end_date=2026-08-09&granularity="+granularity+"&include_stats=false&include_model_stats=false&include_group_stats=false&include_users_trend=false",
+				nil,
+			)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.Equal(t, granularity, repo.trendGranularity)
+			require.Contains(t, rec.Body.String(), `"granularity":"`+granularity+`"`)
+		})
+	}
 }

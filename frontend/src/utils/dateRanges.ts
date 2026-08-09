@@ -1,9 +1,12 @@
+import type { UsageTrendGranularity } from '@/types'
+
 export interface LocalDateRange {
   start: string
   end: string
 }
 
 export type NaturalUsagePeriod = 'today' | 'yesterday' | 'thisWeek' | 'lastWeek'
+export type UsagePeriodDimension = 'day' | 'week' | 'month'
 
 const millisecondsPerDay = 24 * 60 * 60 * 1000
 
@@ -58,6 +61,34 @@ export const getNaturalUsagePeriodRanges = (
   }
 }
 
+export const getUsagePeriodRange = (
+  dimension: UsagePeriodDimension,
+  offset: number,
+  referenceDate = new Date()
+): LocalDateRange => {
+  const today = atLocalMidnight(referenceDate)
+  const currentWeekStart = startOfLocalWeek(today)
+  const safeOffset = Math.max(0, Math.floor(offset))
+
+  if (dimension === 'day') {
+    const date = addLocalDays(today, -safeOffset)
+    const value = formatLocalDate(date)
+    return { start: value, end: value }
+  }
+
+  if (dimension === 'week') {
+    const start = addLocalDays(currentWeekStart, -safeOffset * 7)
+    const end = safeOffset === 0 ? today : addLocalDays(start, 6)
+    return { start: formatLocalDate(start), end: formatLocalDate(end) }
+  }
+
+  const start = new Date(today.getFullYear(), today.getMonth() - safeOffset, 1)
+  const end = safeOffset === 0
+    ? today
+    : new Date(start.getFullYear(), start.getMonth() + 1, 0)
+  return { start: formatLocalDate(start), end: formatLocalDate(end) }
+}
+
 const dateStringToUTC = (value: string): number | null => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
   if (!match) return null
@@ -73,4 +104,16 @@ export const inclusiveCalendarDays = (start: string, end: string): number => {
   const endUTC = dateStringToUTC(end)
   if (startUTC === null || endUTC === null || endUTC < startUTC) return 0
   return Math.floor((endUTC - startUTC) / millisecondsPerDay) + 1
+}
+
+export const getUsageTrendGranularityForRange = (
+  start: string,
+  end: string
+): UsageTrendGranularity => {
+  const days = inclusiveCalendarDays(start, end)
+  if (days <= 0) return 'day'
+  if (days <= 2) return 'hour'
+  if (days <= 90) return 'day'
+  if (days <= 730) return 'week'
+  return 'month'
 }

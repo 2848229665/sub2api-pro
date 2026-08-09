@@ -17,15 +17,16 @@ import (
 
 type userUsageRepoCapture struct {
 	service.UsageLogRepository
-	listParams   pagination.PaginationParams
-	listFilters  usagestats.UsageLogFilters
-	statsFilters usagestats.UsageLogFilters
-	trendFilters usagestats.UsageLogFilters
-	groupFilters usagestats.UsageLogFilters
-	listRows     []service.UsageLog
-	stats        *usagestats.UsageStats
-	modelStats   []usagestats.ModelStat
-	groupStats   []usagestats.GroupStat
+	listParams       pagination.PaginationParams
+	listFilters      usagestats.UsageLogFilters
+	statsFilters     usagestats.UsageLogFilters
+	trendFilters     usagestats.UsageLogFilters
+	trendGranularity string
+	groupFilters     usagestats.UsageLogFilters
+	listRows         []service.UsageLog
+	stats            *usagestats.UsageStats
+	modelStats       []usagestats.ModelStat
+	groupStats       []usagestats.GroupStat
 }
 
 func (s *userUsageRepoCapture) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters usagestats.UsageLogFilters) ([]service.UsageLog, *pagination.PaginationResult, error) {
@@ -48,6 +49,7 @@ func (s *userUsageRepoCapture) GetStatsWithFilters(ctx context.Context, filters 
 }
 
 func (s *userUsageRepoCapture) GetUsageTrendWithFilters(ctx context.Context, startTime, endTime time.Time, granularity string, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8) ([]usagestats.TrendDataPoint, error) {
+	s.trendGranularity = granularity
 	s.trendFilters = usagestats.UsageLogFilters{
 		UserID:      userID,
 		APIKeyID:    apiKeyID,
@@ -89,9 +91,51 @@ func newUserUsageRequestTypeTestRouter(repo *userUsageRepoCapture) *gin.Engine {
 	})
 	router.GET("/usage", handler.List)
 	router.GET("/usage/stats", handler.Stats)
+	router.GET("/usage/dashboard/trend", handler.DashboardTrend)
 	router.GET("/usage/dashboard/models", handler.DashboardModels)
 	router.GET("/usage/dashboard/snapshot-v2", handler.DashboardSnapshotV2)
 	return router
+}
+
+func TestUserDashboardTrendSupportsWeekAndMonthGranularity(t *testing.T) {
+	for _, granularity := range []string{
+		usagestats.UsageTrendGranularityWeek,
+		usagestats.UsageTrendGranularityMonth,
+	} {
+		t.Run(granularity, func(t *testing.T) {
+			repo := &userUsageRepoCapture{}
+			router := newUserUsageRequestTypeTestRouter(repo)
+
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/usage/dashboard/trend?start_date=2026-01-01&end_date=2026-08-09&granularity="+granularity,
+				nil,
+			)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.Equal(t, granularity, repo.trendGranularity)
+			require.Contains(t, rec.Body.String(), `"granularity":"`+granularity+`"`)
+		})
+	}
+}
+
+func TestUserDashboardSnapshotV2SupportsMonthGranularity(t *testing.T) {
+	repo := &userUsageRepoCapture{}
+	router := newUserUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/usage/dashboard/snapshot-v2?start_date=2026-01-01&end_date=2026-08-09&granularity=month&include_model_stats=false&include_group_stats=false",
+		nil,
+	)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, usagestats.UsageTrendGranularityMonth, repo.trendGranularity)
+	require.Contains(t, rec.Body.String(), `"granularity":"month"`)
 }
 
 func TestUserUsageListRequestTypePriority(t *testing.T) {
