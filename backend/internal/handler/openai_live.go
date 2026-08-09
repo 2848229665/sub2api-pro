@@ -40,6 +40,10 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 		return
 	}
 	model := strings.TrimSpace(gjson.GetBytes(request.Session, "model").String())
+	if !groupModelsListAllowsModel(c, apiKey, model) {
+		h.errorResponse(c, http.StatusNotFound, "model_not_found", groupModelsListModelNotFoundMessage(c, model))
+		return
+	}
 	if !fixedEndpointTargetPlatformAllowed(c, apiKey, model, service.PlatformOpenAI) {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Live is not supported for this platform")
 		return

@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 19 // v19: include group accessible-models discovery mode
+const apiKeyAuthSnapshotVersion = 19 // v19: include group models-list access restriction
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int

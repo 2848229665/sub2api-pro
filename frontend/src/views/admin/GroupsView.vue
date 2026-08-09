@@ -766,10 +766,10 @@
             </div>
             <button
               type="button"
-              @click="createModelsListState.useAccessibleModels = !createModelsListState.useAccessibleModels"
+              @click="toggleModelsListAccessRestriction(createModelsListState)"
               :class="[
                 'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors',
-                createModelsListState.useAccessibleModels
+                createModelsListState.restrictToModelsList
                   ? 'bg-primary-500'
                   : 'bg-gray-300 dark:bg-dark-600',
               ]"
@@ -777,7 +777,7 @@
               <span
                 :class="[
                   'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
-                  createModelsListState.useAccessibleModels ? 'translate-x-6' : 'translate-x-1',
+                  createModelsListState.restrictToModelsList ? 'translate-x-6' : 'translate-x-1',
                 ]"
               />
             </button>
@@ -793,9 +793,11 @@
             </div>
             <button
               type="button"
-              @click="createModelsListState.enabled = !createModelsListState.enabled"
+              :disabled="createModelsListState.restrictToModelsList"
+              @click="toggleModelsListEnabled(createModelsListState)"
               :class="[
                 'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors',
+                createModelsListState.restrictToModelsList ? 'cursor-not-allowed opacity-70' : '',
                 createModelsListState.enabled
                   ? 'bg-primary-500'
                   : 'bg-gray-300 dark:bg-dark-600',
@@ -2398,10 +2400,10 @@
             </div>
             <button
               type="button"
-              @click="editModelsListState.useAccessibleModels = !editModelsListState.useAccessibleModels"
+              @click="toggleModelsListAccessRestriction(editModelsListState)"
               :class="[
                 'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors',
-                editModelsListState.useAccessibleModels
+                editModelsListState.restrictToModelsList
                   ? 'bg-primary-500'
                   : 'bg-gray-300 dark:bg-dark-600',
               ]"
@@ -2409,7 +2411,7 @@
               <span
                 :class="[
                   'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
-                  editModelsListState.useAccessibleModels ? 'translate-x-6' : 'translate-x-1',
+                  editModelsListState.restrictToModelsList ? 'translate-x-6' : 'translate-x-1',
                 ]"
               />
             </button>
@@ -2425,9 +2427,11 @@
             </div>
             <button
               type="button"
-              @click="editModelsListState.enabled = !editModelsListState.enabled"
+              :disabled="editModelsListState.restrictToModelsList"
+              @click="toggleModelsListEnabled(editModelsListState)"
               :class="[
                 'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors',
+                editModelsListState.restrictToModelsList ? 'cursor-not-allowed opacity-70' : '',
                 editModelsListState.enabled
                   ? 'bg-primary-500'
                   : 'bg-gray-300 dark:bg-dark-600',
@@ -4246,6 +4250,8 @@ import {
   moveModelsListItem,
   selectAllModelsListItems,
   setModelsListCandidates,
+  toggleModelsListAccessRestriction,
+  toggleModelsListEnabled,
 } from "./groupsModelsList";
 import { createModelsListCandidatesTracker } from "./groupsModelsListCandidates";
 import { normalizeSupportedModelScopesForPlatform } from "./groupsSupportedModelScopes";
@@ -5014,7 +5020,7 @@ const resetModelsListState = (
 ) => {
   const fresh = createInitialModelsListState(config);
   state.enabled = fresh.enabled;
-  state.useAccessibleModels = fresh.useAccessibleModels;
+  state.restrictToModelsList = fresh.restrictToModelsList;
   state.savedModels = fresh.savedModels;
   state.items = fresh.items;
 };

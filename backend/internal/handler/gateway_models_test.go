@@ -268,7 +268,7 @@ func TestGatewayModels_CustomModelsListDisabledKeepsOriginalModels(t *testing.T)
 	require.Equal(t, []string{"gpt-5.4", "gpt-5.5"}, modelIDsForTest(got.Data))
 }
 
-func TestGatewayModels_AccessibleModelsListUsesPersistentlySupportedModels(t *testing.T) {
+func TestGatewayModels_RestrictedListDoesNotDeriveModelsFromAccounts(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	groupID := int64(2201)
@@ -311,13 +311,10 @@ func TestGatewayModels_AccessibleModelsListUsesPersistentlySupportedModels(t *te
 	require.Equal(t, http.StatusOK, rec.Code)
 	var got gatewayModelsResponseForTest
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	require.Equal(t, []string{"gpt-5.4", "team-gpt"}, modelIDsForTest(got.Data))
-	require.Equal(t, "model", got.Data[0].Object)
-	require.NotZero(t, got.Data[0].Created)
-	require.Equal(t, "openai", got.Data[0].OwnedBy)
+	require.Empty(t, got.Data)
 }
 
-func TestGatewayModels_AccessibleModelsListCanBeNarrowedAndOrderedByCustomList(t *testing.T) {
+func TestGatewayModels_RestrictedListUsesConfiguredModelsVerbatim(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	groupID := int64(2202)
@@ -350,7 +347,7 @@ func TestGatewayModels_AccessibleModelsListCanBeNarrowedAndOrderedByCustomList(t
 			ID:       groupID,
 			Platform: service.PlatformOpenAI,
 			ModelsListConfig: service.GroupModelsListConfig{
-				Enabled:             true,
+				Enabled:             false,
 				Models:              []string{"team-gpt", "gpt-5.5", "gpt-5.4"},
 				UseAccessibleModels: true,
 			},
@@ -362,10 +359,13 @@ func TestGatewayModels_AccessibleModelsListCanBeNarrowedAndOrderedByCustomList(t
 	require.Equal(t, http.StatusOK, rec.Code)
 	var got gatewayModelsResponseForTest
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	require.Equal(t, []string{"team-gpt", "gpt-5.4"}, modelIDsForTest(got.Data))
+	require.Equal(t, []string{"team-gpt", "gpt-5.5", "gpt-5.4"}, modelIDsForTest(got.Data))
+	require.Equal(t, "model", got.Data[0].Object)
+	require.NotZero(t, got.Data[0].Created)
+	require.Equal(t, "openai", got.Data[0].OwnedBy)
 }
 
-func TestGatewayModels_AccessibleModelsListDoesNotFallbackWhenPoolIsEmpty(t *testing.T) {
+func TestGatewayModels_RestrictedEmptyListDoesNotFallback(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	groupID := int64(2203)
@@ -392,7 +392,7 @@ func TestGatewayModels_AccessibleModelsListDoesNotFallbackWhenPoolIsEmpty(t *tes
 	require.Empty(t, got.Data)
 }
 
-func TestGatewayModels_CompositeAccessibleModelsListOnlyAdvertisesRoutableModels(t *testing.T) {
+func TestGatewayModels_CompositeRestrictedListDoesNotAutoDiscoverRoutableModels(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	groupID := int64(2204)
@@ -446,11 +446,7 @@ func TestGatewayModels_CompositeAccessibleModelsListOnlyAdvertisesRoutableModels
 	require.Equal(t, http.StatusOK, rec.Code)
 	var got gatewayModelsResponseForTest
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	ids := modelIDsForTest(got.Data)
-	require.Contains(t, ids, "gpt-5.4")
-	require.Contains(t, ids, "gemini-2.5-flash")
-	require.NotContains(t, ids, "private-alias", "an ambiguous alias needs an explicit composite route")
-	require.NotContains(t, ids, "claude-sonnet-4-6")
+	require.Empty(t, got.Data)
 }
 
 func TestGatewayModels_CustomModelsListFiltersAndOrdersMappedModels(t *testing.T) {

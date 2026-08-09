@@ -218,7 +218,7 @@ func (Group) Fields() []ent.Field {
 		field.JSON("models_list_config", domain.GroupModelsListConfig{}).
 			Default(domain.GroupModelsListConfig{}).
 			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
-			Comment("/v1/models 对外展示配置：支持自定义列表或按分组可访问模型自动生成；不影响调度"),
+			Comment("/v1/models 对外展示列表；可选将该列表同时作为请求模型白名单，不影响账号调度"),
 
 		// 分组级每分钟请求数上限（0 = 不限制）。设置后优先于用户级兜底生效。
 		field.Int("rpm_limit").

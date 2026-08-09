@@ -8,6 +8,8 @@ import {
   moveModelsListItem,
   selectAllModelsListItems,
   setModelsListCandidates,
+  toggleModelsListAccessRestriction,
+  toggleModelsListEnabled,
   toggleModelsListItem,
 } from "../groupsModelsList";
 
@@ -18,7 +20,7 @@ describe("groupsModelsList", () => {
     setModelsListCandidates(state, ["gpt-5.5", "gpt-5.4"]);
 
     expect(state.enabled).toBe(false);
-    expect(state.useAccessibleModels).toBe(false);
+    expect(state.restrictToModelsList).toBe(false);
     expect(state.items).toEqual([
       { id: "gpt-5.5", selected: true },
       { id: "gpt-5.4", selected: true },
@@ -97,19 +99,41 @@ describe("groupsModelsList", () => {
     });
   });
 
-  it("round-trips accessible models discovery mode", () => {
+  it("round-trips model-list access restriction and enables the displayed list", () => {
     const state = createModelsListState({
       enabled: false,
       models: [],
       use_accessible_models: true,
     });
 
-    expect(state.useAccessibleModels).toBe(true);
+    expect(state.enabled).toBe(true);
+    expect(state.restrictToModelsList).toBe(true);
     expect(buildModelsListConfig(state)).toEqual({
-      enabled: false,
+      enabled: true,
       use_accessible_models: true,
       models: [],
     });
+  });
+
+  it("enables the custom list when access restriction is turned on", () => {
+    const state = createModelsListState();
+
+    toggleModelsListAccessRestriction(state);
+
+    expect(state.enabled).toBe(true);
+    expect(state.restrictToModelsList).toBe(true);
+  });
+
+  it("keeps the displayed list enabled while access restriction is on", () => {
+    const state = createModelsListState({
+      enabled: true,
+      models: ["gpt-5.4"],
+      use_accessible_models: true,
+    });
+
+    toggleModelsListEnabled(state);
+
+    expect(state.enabled).toBe(true);
   });
 
   it("selects all candidate models from the toolbar action", () => {

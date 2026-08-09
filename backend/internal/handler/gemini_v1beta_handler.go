@@ -103,6 +103,10 @@ func (h *GatewayHandler) GeminiV1BetaGetModel(c *gin.Context) {
 		googleError(c, http.StatusBadRequest, "Invalid model in URL")
 		return
 	}
+	if !groupModelsListAllowsModel(c, apiKey, modelName) {
+		googleError(c, http.StatusNotFound, groupModelsListModelNotFoundMessage(c, modelName))
+		return
+	}
 
 	// 强制 antigravity 模式：返回 antigravity 模型信息
 	if forcePlatform == service.PlatformAntigravity {
@@ -174,6 +178,10 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	modelName, ok = resolvedSafeGeminiModelName(c.Request.Context(), modelName)
 	if !ok {
 		googleError(c, http.StatusBadRequest, "Invalid model in URL")
+		return
+	}
+	if !groupModelsListAllowsModel(c, apiKey, modelName) {
+		googleError(c, http.StatusNotFound, groupModelsListModelNotFoundMessage(c, modelName))
 		return
 	}
 
