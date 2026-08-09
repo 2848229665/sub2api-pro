@@ -220,6 +220,7 @@ export interface ListContentModerationLogsParams {
   action?: ContentModerationAction
   group_id?: number
   endpoint?: string
+  user_email?: string
   search?: string
   from?: string
   to?: string

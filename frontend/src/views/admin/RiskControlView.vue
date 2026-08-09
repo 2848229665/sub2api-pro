@@ -263,11 +263,10 @@
               </div>
             </div>
 
-            <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-7">
+            <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
               <Select v-model="filters.result" :options="resultOptions" @change="reloadLogsFromFirstPage" />
               <Select v-model="filters.action" :options="actionOptions" data-test="action-filter" @change="reloadLogsFromFirstPage" />
-              <Select v-model="filters.group_id" :options="groupFilterOptions" @change="reloadLogsFromFirstPage" />
-              <Select v-model="filters.endpoint" :options="endpointOptions" @change="reloadLogsFromFirstPage" />
+              <input v-model.trim="filters.user_email" type="search" class="input" :placeholder="t('admin.riskControl.filters.userEmail')" @keyup.enter="reloadLogsFromFirstPage" />
               <input v-model.trim="filters.search" type="search" class="input" :placeholder="t('admin.riskControl.filters.search')" @keyup.enter="reloadLogsFromFirstPage" />
               <input v-model="filters.from" type="datetime-local" class="input" :title="t('admin.riskControl.filters.from')" @change="reloadLogsFromFirstPage" />
               <input v-model="filters.to" type="datetime-local" class="input" :title="t('admin.riskControl.filters.to')" @change="reloadLogsFromFirstPage" />
@@ -1324,6 +1323,7 @@ const filters = reactive({
   action: '' as ContentModerationAction | '',
   group_id: 0,
   endpoint: '',
+  user_email: '',
   search: '',
   from: '',
   to: '',
@@ -1960,6 +1960,7 @@ async function loadLogs() {
       action: filters.action || undefined,
       group_id: filters.group_id || undefined,
       endpoint: filters.endpoint || undefined,
+      user_email: filters.user_email || undefined,
       search: filters.search || undefined,
       from: normalizeDateTimeLocal(filters.from),
       to: normalizeDateTimeLocal(filters.to),

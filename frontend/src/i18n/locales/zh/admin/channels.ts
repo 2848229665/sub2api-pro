@@ -445,7 +445,8 @@ export default {
         currentFilter: '当前筛选结果',
       },
       filters: {
-        search: '按用户/Key/摘要搜索',
+        userEmail: '用户名/邮箱',
+        search: '按Key/摘要搜索',
         from: '开始时间',
         to: '结束时间',
         allGroups: '全部分组',
