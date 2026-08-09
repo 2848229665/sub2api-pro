@@ -66,7 +66,7 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 
 	var streamStarted bool
 	reqLog := requestLogger(c, "handler.openai_gateway.grok_realtime")
-	release, slotStatus := h.acquireResponsesAccountSlot(c, apiKey.GroupID, "", selection, true, &streamStarted, reqLog)
+	release, slotStatus, _ := h.acquireResponsesAccountSlot(c, apiKey.GroupID, "", selection, true, true, &streamStarted, reqLog)
 	if slotStatus != openAISlotAcquireOK {
 		return
 	}
@@ -203,7 +203,7 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 		}
 		account := selection.Account
 		var started bool
-		release, status := h.acquireResponsesAccountSlot(c, apiKey.GroupID, "", selection, false, &started, reqLog)
+		release, status, _ := h.acquireResponsesAccountSlot(c, apiKey.GroupID, "", selection, false, true, &started, reqLog)
 		if status == openAISlotAcquireProfitVetoed {
 			failed[account.ID] = struct{}{}
 			continue

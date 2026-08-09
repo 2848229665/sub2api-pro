@@ -38,14 +38,8 @@ func (h *OpenAIGatewayHandler) openAISecurityAuditError(c *gin.Context, decision
 
 func (h *OpenAIGatewayHandler) writeOpenAIContentPolicyError(c *gin.Context, code, message string) {
 	compactSSECommitted := service.StopOpenAICompactSSEKeepaliveCommitted(c)
-	if compactSSECommitted || openAIContentPolicyWantsResponsesSSE(c) {
+	if compactSSECommitted {
 		if _, ok := c.Writer.(http.Flusher); ok {
-			if !compactSSECommitted {
-				c.Header("Content-Type", "text/event-stream")
-				c.Header("Cache-Control", "no-store")
-				c.Header("Connection", "keep-alive")
-				c.Header("X-Accel-Buffering", "no")
-			}
 			service.MarkOpsStreamError(c, "invalid_request_error", message, http.StatusBadRequest)
 			if writeResponsesInvalidPromptSSE(c, message) {
 				return
@@ -58,23 +52,7 @@ func (h *OpenAIGatewayHandler) writeOpenAIContentPolicyError(c *gin.Context, cod
 	}})
 }
 
-func openAIContentPolicyWantsResponsesSSE(c *gin.Context) bool {
-	if !inboundIsResponses(c) {
-		return false
-	}
-	// Legacy body-signal compact removes stream:true from the normalized
-	// upstream body, while the downstream Codex client still expects Responses
-	// SSE. Preserve that original transport intent for fast local policy blocks.
-	if service.OpenAICompactClientWantsStream(c) {
-		return true
-	}
-	value, ok := c.Get(opsStreamKey)
-	if !ok {
-		return false
-	}
-	stream, _ := value.(bool)
-	return stream
-}
+
 
 func (h *GatewayHandler) openAISecurityAuditError(c *gin.Context, decision *securityaudit.Decision) {
 	if decision == nil {
