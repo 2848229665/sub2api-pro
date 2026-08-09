@@ -569,7 +569,6 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	req.generalRejectCounter = generalRejectCounter
 	start := time.Now()
 	defer func() {
-		selection = attachSelectionProfitGate(ctx, selection)
 		decision.LatencyMs = time.Since(start).Milliseconds()
 		decision.GeneralRejectCount = generalRejectCounter.count
 		s.metrics.recordSelect(decision)
