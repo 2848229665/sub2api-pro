@@ -3207,7 +3207,7 @@ func writeContentModerationWSError(ctx context.Context, conn *coderws.Conn, deci
 		},
 	})
 	if err != nil {
-		return
+		payload = []byte(`{"event_id":"evt_content_moderation_blocked","type":"error","error":{"type":"invalid_request_error","code":"content_policy_violation","message":"content moderation blocked this request"}}`)
 	}
 	writeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
