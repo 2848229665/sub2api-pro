@@ -1019,8 +1019,10 @@ export default {
         sumTooHigh: '最低毛利率与安全缓冲之和必须小于 100%，否则将排除全部账号'
       },
       modelsList: {
+        accessibleTitle: '仅展示允许访问的模型',
+        accessibleHint: '开启后，/v1/models 会根据分组内已启用调度的账号及模型映射自动生成；临时限流、过载和熔断不会隐藏模型。若同时启用自定义列表，将继续筛选并沿用自定义顺序。',
         title: '自定义 /v1/models 模型列表',
-        hint: '仅影响 /v1/models 展示结果，不影响白名单模型调用和账号调度。',
+        hint: '筛选并调整 /v1/models 的展示顺序，不影响模型调用和账号调度。',
         loading: '正在加载模型列表...',
         empty: '暂无可展示模型',
         selectedSummary: '已选 {selected} / {total}',

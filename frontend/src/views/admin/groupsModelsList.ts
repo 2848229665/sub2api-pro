@@ -1,6 +1,7 @@
 export interface ModelsListConfig {
   enabled: boolean
   models: string[]
+  use_accessible_models: boolean
 }
 
 export interface ModelsListItem {
@@ -10,6 +11,7 @@ export interface ModelsListItem {
 
 export interface ModelsListState {
   enabled: boolean
+  useAccessibleModels: boolean
   savedModels: string[]
   items: ModelsListItem[]
 }
@@ -18,6 +20,7 @@ export const createModelsListState = (
   config?: Partial<ModelsListConfig> | null,
 ): ModelsListState => ({
   enabled: config?.enabled ?? false,
+  useAccessibleModels: config?.use_accessible_models ?? false,
   savedModels: normalizeModels(config?.models ?? []),
   items: [],
 })
@@ -101,6 +104,7 @@ export const moveModelsListItem = (
 
 export const buildModelsListConfig = (state: ModelsListState): ModelsListConfig => ({
   enabled: state.enabled,
+  use_accessible_models: state.useAccessibleModels,
   models: state.items.length > 0
     ? state.items.filter(item => item.selected).map(item => item.id)
     : [...state.savedModels],

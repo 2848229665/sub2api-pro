@@ -1394,6 +1394,7 @@ func (s *GatewayService) InvalidateAvailableModelsCache(groupID *int64, platform
 	// 完整匹配时精准失效；否则按维度批量失效。
 	if groupID != nil && normalizedPlatform != "" {
 		s.modelsListCache.Delete(modelsListCacheKey(groupID, normalizedPlatform))
+		s.modelsListCache.Delete(modelsListCacheKey(groupID, accessibleModelsCacheNamespace+normalizedPlatform))
 		return
 	}
 
@@ -1410,7 +1411,8 @@ func (s *GatewayService) InvalidateAvailableModelsCache(groupID *int64, platform
 		if groupID != nil && groupPart != targetGroup {
 			continue
 		}
-		if normalizedPlatform != "" && parts[1] != normalizedPlatform {
+		cachedPlatform := strings.TrimPrefix(parts[1], accessibleModelsCacheNamespace)
+		if normalizedPlatform != "" && cachedPlatform != normalizedPlatform {
 			continue
 		}
 		s.modelsListCache.Delete(key)
