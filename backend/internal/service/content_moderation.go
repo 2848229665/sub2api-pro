@@ -73,6 +73,7 @@ const (
 	defaultContentModerationViolationWindowHours = 720
 	defaultContentModerationBlockHTTPStatus      = http.StatusForbidden
 	defaultContentModerationBlockMessage         = "内容审计命中风险规则，请调整输入后重试"
+	defaultContentModerationBlockErrorCode = "cyber_policy"
 	defaultContentModerationRetryCount           = 2
 	maxContentModerationRetryCount               = 5
 	defaultContentModerationHitRetentionDays     = 180
@@ -98,6 +99,10 @@ const (
 	contentModerationRuntimeCacheTTL       = time.Second
 	contentModerationRuntimeRefreshTimeout = 5 * time.Second
 )
+
+func DefaultContentModerationBlockErrorCode() string {
+	return defaultContentModerationBlockErrorCode
+}
 
 var contentModerationCategoryOrder = []string{
 	"harassment",
@@ -158,6 +163,7 @@ type ContentModerationConfig struct {
 	QueueSize            int                          `json:"queue_size"`
 	BlockStatus          int                          `json:"block_status"`
 	BlockMessage         string                       `json:"block_message"`
+	BlockErrorCode       string                       `json:"block_error_code"`
 	EmailOnHit           bool                         `json:"email_on_hit"`
 	AutoBanEnabled       bool                         `json:"auto_ban_enabled"`
 	BanThreshold         int                          `json:"ban_threshold"`
@@ -179,6 +185,7 @@ type ContentModerationKeywordSessionPolicy struct {
 	Version    string
 	Active     bool
 	WouldBlock bool
+	ErrorCode  string
 }
 
 type ContentModerationConfigView struct {
@@ -202,6 +209,7 @@ type ContentModerationConfigView struct {
 	QueueSize                      int                             `json:"queue_size"`
 	BlockStatus                    int                             `json:"block_status"`
 	BlockMessage                   string                          `json:"block_message"`
+	BlockErrorCode                 string                          `json:"block_error_code"`
 	EmailOnHit                     bool                            `json:"email_on_hit"`
 	AutoBanEnabled                 bool                            `json:"auto_ban_enabled"`
 	BanThreshold                   int                             `json:"ban_threshold"`
@@ -294,6 +302,7 @@ type UpdateContentModerationConfigInput struct {
 	QueueSize                      *int                          `json:"queue_size"`
 	BlockStatus                    *int                          `json:"block_status"`
 	BlockMessage                   *string                       `json:"block_message"`
+	BlockErrorCode                 *string                       `json:"block_error_code"`
 	EmailOnHit                     *bool                         `json:"email_on_hit"`
 	AutoBanEnabled                 *bool                         `json:"auto_ban_enabled"`
 	BanThreshold                   *int                          `json:"ban_threshold"`
@@ -385,6 +394,7 @@ type ContentModerationDecision struct {
 	Flagged         bool               `json:"flagged"`
 	Message         string             `json:"message"`
 	StatusCode      int                `json:"status_code"`
+	ErrorCode       string             `json:"error_code,omitempty"`
 	InputHash       string             `json:"input_hash,omitempty"`
 	HighestCategory string             `json:"highest_category"`
 	HighestScore    float64            `json:"highest_score"`
@@ -735,6 +745,9 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	if input.BlockMessage != nil {
 		cfg.BlockMessage = strings.TrimSpace(*input.BlockMessage)
 	}
+	if input.BlockErrorCode != nil {
+		cfg.BlockErrorCode = strings.TrimSpace(*input.BlockErrorCode)
+	}
 	if input.EmailOnHit != nil {
 		cfg.EmailOnHit = *input.EmailOnHit
 	}
@@ -1037,6 +1050,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 					Flagged:         true,
 					Message:         cfg.BlockMessage,
 					StatusCode:      cfg.BlockStatus,
+					ErrorCode:       cfg.BlockErrorCode,
 					HighestCategory: contentModerationKeywordCategory,
 					HighestScore:    1.0,
 					CategoryScores:  scores,
@@ -1799,6 +1813,7 @@ func (s *ContentModerationService) KeywordSessionPolicy(ctx context.Context, inp
 		Version:    hex.EncodeToString(digest.Sum(nil)),
 		Active:     true,
 		WouldBlock: wouldBlock,
+		ErrorCode:  cfg.BlockErrorCode,
 	}
 }
 
@@ -2269,6 +2284,7 @@ func defaultContentModerationConfig() *ContentModerationConfig {
 		QueueSize:            defaultContentModerationQueueSize,
 		BlockStatus:          defaultContentModerationBlockHTTPStatus,
 		BlockMessage:         defaultContentModerationBlockMessage,
+		BlockErrorCode:       defaultContentModerationBlockErrorCode,
 		EmailOnHit:           true,
 		AutoBanEnabled:       true,
 		BanThreshold:         defaultContentModerationBanThreshold,
@@ -2356,6 +2372,10 @@ func (cfg *ContentModerationConfig) normalize() {
 	if cfg.BlockStatus <= 0 {
 		cfg.BlockStatus = defaultContentModerationBlockHTTPStatus
 	}
+	if strings.TrimSpace(cfg.BlockErrorCode) == "" {
+		cfg.BlockErrorCode = defaultContentModerationBlockErrorCode
+	}
+	cfg.BlockErrorCode = strings.TrimSpace(cfg.BlockErrorCode)
 	if cfg.BanThreshold <= 0 {
 		cfg.BanThreshold = defaultContentModerationBanThreshold
 	}
@@ -2604,6 +2624,7 @@ func (s *ContentModerationService) configView(cfg *ContentModerationConfig) *Con
 		QueueSize:                      cfg.QueueSize,
 		BlockStatus:                    cfg.BlockStatus,
 		BlockMessage:                   cfg.BlockMessage,
+		BlockErrorCode:                 cfg.BlockErrorCode,
 		EmailOnHit:                     cfg.EmailOnHit,
 		AutoBanEnabled:                 cfg.AutoBanEnabled,
 		BanThreshold:                   cfg.BanThreshold,

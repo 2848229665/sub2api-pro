@@ -41,7 +41,7 @@ func (h *OpenAIGatewayHandler) writeOpenAIContentPolicyError(c *gin.Context, cod
 	if compactSSECommitted {
 		if _, ok := c.Writer.(http.Flusher); ok {
 			service.MarkOpsStreamError(c, "invalid_request_error", message, http.StatusBadRequest)
-			if writeResponsesInvalidPromptSSE(c, message) {
+			if writeResponsesContentPolicySSE(c, code, message) {
 				return
 			}
 		}
@@ -184,9 +184,6 @@ func writeSecurityAuditWSError(ctx context.Context, conn *coderws.Conn, decision
 	}
 	status := securityAuditStatus(decision)
 	code := securityAuditErrorCode(decision)
-	if isKeywordContentPolicyDecision(decision) {
-		code = keywordPolicyCodexWireErrorCode
-	}
 	payload, err := json.Marshal(gin.H{
 		"event_id": "evt_prompt_guard_rejected", "type": "error", "status": status,
 		"error": gin.H{"type": "invalid_request_error", "code": code, "message": securityAuditMessage(decision)},
@@ -205,7 +202,7 @@ func (d legacyContentModerationDecision) toService() *service.ContentModerationD
 	if d.value == nil {
 		return nil
 	}
-	return &service.ContentModerationDecision{Allowed: d.value.Allowed, Blocked: d.value.Blocked, Flagged: d.value.Flagged, Message: d.value.Message, StatusCode: d.value.StatusCode, Action: d.value.Action}
+	return &service.ContentModerationDecision{Allowed: d.value.Allowed, Blocked: d.value.Blocked, Flagged: d.value.Flagged, Message: d.value.Message, StatusCode: d.value.StatusCode, ErrorCode: d.value.ErrorCode, Action: d.value.Action}
 }
 
 func securityAuditWSCloseStatus(decision *securityaudit.Decision) coderws.StatusCode {
@@ -213,7 +210,7 @@ func securityAuditWSCloseStatus(decision *securityaudit.Decision) coderws.Status
 		return coderws.StatusInternalError
 	}
 	if (decision.Legacy != nil && decision.Legacy.Blocked) ||
-		securityAuditErrorCode(decision) == keywordSessionBlockedErrorCode {
+		decision.ClientMessage == keywordSessionBlockedClientMsg {
 		return coderws.StatusPolicyViolation
 	}
 	if decision.Kind == securityaudit.DecisionBlock {

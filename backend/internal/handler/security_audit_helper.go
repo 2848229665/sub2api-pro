@@ -14,9 +14,7 @@ import (
 const securityAuditCompletedContextKey = "sub2api.security_audit.completed"
 const keywordSessionBlockKeyContextKey = "sub2api.keyword_session_block.key"
 
-const keywordSessionBlockedErrorCode = "session_blocked_by_content_policy"
 const keywordSessionBlockedClientMsg = "该会话已被关键词策略屏蔽，请开启新会话 / This session is blocked by keyword policy, please start a new session"
-const keywordPolicyCodexWireErrorCode = "content_policy_violation"
 
 // cachesSecurityAuditCompletion reports whether a successful audit may be
 // reused for the rest of the gin request. WebSocket turns share one Context
@@ -63,12 +61,12 @@ func (h *OpenAIGatewayHandler) checkOpenAISecurityAuditStage(c *gin.Context, req
 		if policy.Active {
 			blockKey = service.OpenAIKeywordSessionBlockKey(sessionKey, policy.Version)
 			if h.gatewayService.IsKeywordSessionBlocked(c.Request.Context(), blockKey) {
-				return keywordSessionBlockedDecision()
+				return keywordSessionBlockedDecision(policy.ErrorCode)
 			}
 			if policy.WouldBlock {
 				claimed, available := h.gatewayService.ClaimKeywordSessionBlocked(c.Request.Context(), blockKey)
 				if available && !claimed {
-					return keywordSessionBlockedDecision()
+					return keywordSessionBlockedDecision(policy.ErrorCode)
 				}
 			}
 		}
@@ -95,14 +93,17 @@ func isKeywordBlockDecision(decision *securityaudit.Decision) bool {
 
 func isKeywordContentPolicyDecision(decision *securityaudit.Decision) bool {
 	return isKeywordBlockDecision(decision) ||
-		(decision != nil && securityAuditErrorCode(decision) == keywordSessionBlockedErrorCode)
+		(decision != nil && decision.ClientMessage == keywordSessionBlockedClientMsg)
 }
 
-func keywordSessionBlockedDecision() *securityaudit.Decision {
+func keywordSessionBlockedDecision(errorCode string) *securityaudit.Decision {
+	if errorCode == "" {
+		errorCode = service.DefaultContentModerationBlockErrorCode()
+	}
 	return &securityaudit.Decision{
 		Kind:           securityaudit.DecisionBlock,
 		HTTPStatus:     http.StatusBadRequest,
-		ErrorCode:      keywordSessionBlockedErrorCode,
+		ErrorCode:      errorCode,
 		ClientMessage:  keywordSessionBlockedClientMsg,
 		AllowNextStage: false,
 	}
@@ -123,14 +124,18 @@ func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securitya
 		if legacyDecision == nil {
 			return nil
 		}
+		legacyErrorCode := legacyDecision.ErrorCode
+		if legacyErrorCode == "" {
+			legacyErrorCode = service.DefaultContentModerationBlockErrorCode()
+		}
 		decision := securityaudit.Decision{Kind: securityaudit.DecisionAllow, HTTPStatus: http.StatusOK, AllowNextStage: true}
 		decision.Legacy = &securityaudit.LegacyDecision{
 			Allowed: legacyDecision.Allowed, Blocked: legacyDecision.Blocked, Flagged: legacyDecision.Flagged,
 			Message: legacyDecision.Message, StatusCode: legacyDecision.StatusCode,
-			ErrorCode: "content_policy_violation", Action: legacyDecision.Action,
+			ErrorCode: legacyErrorCode, Action: legacyDecision.Action,
 		}
 		if legacyDecision.Blocked {
-			decision.Kind, decision.HTTPStatus, decision.ErrorCode, decision.ClientMessage, decision.AllowNextStage = securityaudit.DecisionBlock, contentModerationStatus(legacyDecision), "content_policy_violation", legacyDecision.Message, false
+			decision.Kind, decision.HTTPStatus, decision.ErrorCode, decision.ClientMessage, decision.AllowNextStage = securityaudit.DecisionBlock, contentModerationStatus(legacyDecision), legacyErrorCode, legacyDecision.Message, false
 		}
 		if decision.AllowNextStage && cacheCompletion {
 			c.Set(securityAuditCompletedContextKey, true)

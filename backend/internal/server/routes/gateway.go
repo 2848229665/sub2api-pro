@@ -206,7 +206,13 @@ func RegisterGatewayRoutes(
 		gateway.POST("/live", h.OpenAIGateway.Live)
 		gateway.GET("/live/:call_id", h.OpenAIGateway.LiveSideband)
 		gateway.POST("/realtime/calls", h.OpenAIGateway.Live)
-		gateway.GET("/realtime", h.OpenAIGateway.LiveSideband)
+		gateway.GET("/realtime", func(c *gin.Context) {
+			if getGroupPlatform(c) == service.PlatformGrok {
+				h.OpenAIGateway.GrokRealtime(c)
+				return
+			}
+			h.OpenAIGateway.LiveSideband(c)
+		})
 		// OpenAI Responses API: auto-route based on group platform
 		gateway.POST("/responses", func(c *gin.Context) {
 			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
@@ -306,14 +312,6 @@ func RegisterGatewayRoutes(
 		gateway.GET("/custom-voices/:voice_id", customVoicePathHandler)
 		gateway.PATCH("/custom-voices/:voice_id", customVoicePathHandler)
 		gateway.DELETE("/custom-voices/:voice_id", customVoicePathHandler)
-		gateway.GET("/realtime", func(c *gin.Context) {
-			if getGroupPlatform(c) != service.PlatformGrok {
-				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
-				c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"type": "not_found_error", "message": "Realtime API is not supported for this platform"}})
-				return
-			}
-			h.OpenAIGateway.GrokRealtime(c)
-		})
 		gateway.POST("/web_search", func(c *gin.Context) {
 			if getGroupPlatform(c) != service.PlatformGrok {
 				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)

@@ -3195,8 +3195,8 @@ func writeContentModerationWSError(ctx context.Context, conn *coderws.Conn, deci
 	}
 	status := contentModerationWebSocketStatus(decision)
 	code := contentModerationErrorCode(decision)
-	if decision.Action == service.ContentModerationActionKeywordBlock {
-		code = keywordPolicyCodexWireErrorCode
+	if decision.Action == service.ContentModerationActionKeywordBlock && decision.ErrorCode != "" {
+		code = decision.ErrorCode
 	}
 	payload, err := json.Marshal(gin.H{
 		"event_id": "evt_content_moderation_blocked",

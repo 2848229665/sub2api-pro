@@ -92,7 +92,7 @@ func (e *keywordSessionLegacyEngine) Check(context.Context, securityaudit.Reques
 	}
 	return &securityaudit.LegacyDecision{
 		Blocked: true, Flagged: true, StatusCode: http.StatusForbidden,
-		ErrorCode: "content_policy_violation", Message: "keyword blocked",
+		ErrorCode: service.DefaultContentModerationBlockErrorCode(), Message: "keyword blocked",
 		Action: service.ContentModerationActionKeywordBlock,
 	}, nil
 }
@@ -156,7 +156,7 @@ func TestOpenAISecurityAuditKeywordBlockStopsSameSessionBeforeReaudit(t *testing
 		middleware2.AuthSubject{UserID: 9}, service.ContentModerationProtocolOpenAIResponses,
 		"gpt-5", body,
 	)
-	require.Equal(t, keywordSessionBlockedErrorCode, second.ErrorCode)
+	require.Equal(t, service.DefaultContentModerationBlockErrorCode(), second.ErrorCode)
 	require.Equal(t, http.StatusBadRequest, second.HTTPStatus)
 	time.Sleep(20 * time.Millisecond)
 	require.Len(t, repo.logSnapshot(), 1, "blocked session must stop before another keyword log is created")
@@ -228,12 +228,12 @@ func TestOpenAIResponsesKeywordSessionBlockIsTerminalBeforeUpstream(t *testing.T
 	first, firstPayload := run()
 	require.Equal(t, http.StatusBadRequest, first.Code)
 	require.Equal(t, "no-store", first.Header().Get("Cache-Control"))
-	require.Equal(t, "content_policy_violation", requireObject(t, firstPayload["error"])["code"])
+	require.Equal(t, service.DefaultContentModerationBlockErrorCode(), requireObject(t, firstPayload["error"])["code"])
 	require.Eventually(t, func() bool { return len(repo.logSnapshot()) == 1 }, time.Second, time.Millisecond)
 
 	second, secondPayload := run()
 	require.Equal(t, http.StatusBadRequest, second.Code)
-	require.Equal(t, keywordSessionBlockedErrorCode, requireObject(t, secondPayload["error"])["code"])
+	require.Equal(t, service.DefaultContentModerationBlockErrorCode(), requireObject(t, secondPayload["error"])["code"])
 	time.Sleep(20 * time.Millisecond)
 	require.Len(t, repo.logSnapshot(), 1)
 }
@@ -285,20 +285,20 @@ func TestOpenAIResponsesWebSocketKeywordBlockIsTerminalAndReconnectDeduplicates(
 	first, firstClose := run()
 	require.Equal(t, "error", first["type"])
 	require.Equal(t, float64(http.StatusBadRequest), first["status"])
-	require.Equal(t, "invalid_prompt", requireObject(t, first["error"])["code"])
+	require.Equal(t, service.DefaultContentModerationBlockErrorCode(), requireObject(t, first["error"])["code"])
 	require.Equal(t, coderws.StatusPolicyViolation, firstClose.Code)
 	require.Eventually(t, func() bool { return len(repo.logSnapshot()) == 1 }, time.Second, time.Millisecond)
 
 	second, secondClose := run()
 	require.Equal(t, "error", second["type"])
 	require.Equal(t, float64(http.StatusBadRequest), second["status"])
-	require.Equal(t, "invalid_prompt", requireObject(t, second["error"])["code"])
+	require.Equal(t, service.DefaultContentModerationBlockErrorCode(), requireObject(t, second["error"])["code"])
 	require.Equal(t, coderws.StatusPolicyViolation, secondClose.Code)
 	time.Sleep(20 * time.Millisecond)
 	require.Len(t, repo.logSnapshot(), 1, "a reconnect in the blocked session must stop before another audit")
 }
 
-func TestOpenAIResponsesStreamingKeywordSessionBlockUsesInvalidPromptTerminalEvent(t *testing.T) {
+func TestOpenAIResponsesStreamingKeywordSessionBlockReturnsHTTPError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cache := &keywordSessionTestCache{}
 	moderation, repo, _ := newKeywordSessionModerationService(t)
@@ -325,28 +325,29 @@ func TestOpenAIResponsesStreamingKeywordSessionBlockUsesInvalidPromptTerminalEve
 		c.Set(string(middleware2.ContextKeyAPIKey), apiKey)
 		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 9, Concurrency: 1})
 		h.Responses(c)
-		_, errorObject := parseResponsesFailedSSE(t, recorder.Body.String())
-		return recorder, errorObject
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
+		return recorder, requireObject(t, resp["error"])
 	}
 
 	first, firstError := run()
-	require.Equal(t, http.StatusOK, first.Code)
-	require.Contains(t, first.Header().Get("Content-Type"), "text/event-stream")
+	require.Equal(t, http.StatusBadRequest, first.Code)
+	require.Equal(t, "no-store", first.Header().Get("Cache-Control"))
 	require.Equal(t, "invalid_request_error", firstError["type"])
-	require.Equal(t, "invalid_prompt", firstError["code"])
+	require.Equal(t, service.DefaultContentModerationBlockErrorCode(), firstError["code"])
 	require.Equal(t, "keyword blocked", firstError["message"])
 	require.Eventually(t, func() bool { return len(repo.logSnapshot()) == 1 }, time.Second, time.Millisecond)
 
 	second, secondError := run()
-	require.Equal(t, http.StatusOK, second.Code)
+	require.Equal(t, http.StatusBadRequest, second.Code)
 	require.Equal(t, "invalid_request_error", secondError["type"])
-	require.Equal(t, "invalid_prompt", secondError["code"])
+	require.Equal(t, service.DefaultContentModerationBlockErrorCode(), secondError["code"])
 	require.Equal(t, keywordSessionBlockedClientMsg, secondError["message"])
 	time.Sleep(20 * time.Millisecond)
 	require.Len(t, repo.logSnapshot(), 1)
 }
 
-func TestOpenAIResponsesBodySignalCompactKeywordBlockUsesInvalidPromptTerminalEvent(t *testing.T) {
+func TestOpenAIResponsesBodySignalCompactKeywordBlockReturnsHTTPError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cache := &keywordSessionTestCache{}
 	moderation, repo, _ := newKeywordSessionModerationService(t)
@@ -373,22 +374,23 @@ func TestOpenAIResponsesBodySignalCompactKeywordBlockUsesInvalidPromptTerminalEv
 		c.Set(string(middleware2.ContextKeyAPIKey), apiKey)
 		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 9, Concurrency: 1})
 		h.Responses(c)
-		_, errorObject := parseResponsesFailedSSE(t, recorder.Body.String())
-		return recorder, errorObject
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
+		return recorder, requireObject(t, resp["error"])
 	}
 
 	first, firstError := run()
-	require.Equal(t, http.StatusOK, first.Code)
-	require.Contains(t, first.Header().Get("Content-Type"), "text/event-stream")
+	require.Equal(t, http.StatusBadRequest, first.Code)
+	require.Equal(t, "no-store", first.Header().Get("Cache-Control"))
 	require.Equal(t, "invalid_request_error", firstError["type"])
-	require.Equal(t, "invalid_prompt", firstError["code"])
+	require.Equal(t, service.DefaultContentModerationBlockErrorCode(), firstError["code"])
 	require.Equal(t, "keyword blocked", firstError["message"])
 	require.Eventually(t, func() bool { return len(repo.logSnapshot()) == 1 }, time.Second, time.Millisecond)
 
 	second, secondError := run()
-	require.Equal(t, http.StatusOK, second.Code)
+	require.Equal(t, http.StatusBadRequest, second.Code)
 	require.Equal(t, "invalid_request_error", secondError["type"])
-	require.Equal(t, "invalid_prompt", secondError["code"])
+	require.Equal(t, service.DefaultContentModerationBlockErrorCode(), secondError["code"])
 	require.Equal(t, keywordSessionBlockedClientMsg, secondError["message"])
 	time.Sleep(20 * time.Millisecond)
 	require.Len(t, repo.logSnapshot(), 1)
@@ -431,7 +433,7 @@ func TestOpenAISecurityAuditConcurrentKeywordBlockCreatesOneLog(t *testing.T) {
 	for decision := range decisions {
 		if isKeywordBlockDecision(decision) {
 			keywordBlocks++
-		} else if decision != nil && decision.ErrorCode == keywordSessionBlockedErrorCode {
+		} else if decision != nil && decision.ErrorCode == service.DefaultContentModerationBlockErrorCode() {
 			sessionBlocks++
 		}
 	}
@@ -497,7 +499,7 @@ func TestOpenAISecurityAuditWebSocketTurnTracksCurrentExplicitSessionKey(t *test
 		[]byte(`{"model":"gpt-5","input":"another follow-up"}`),
 		"subsequent_turn",
 	)
-	require.Equal(t, keywordSessionBlockedErrorCode, third.ErrorCode)
+	require.Equal(t, service.DefaultContentModerationBlockErrorCode(), third.ErrorCode)
 	require.Equal(t, 2, legacy.calls, "a frame without identity must reuse the most recent explicit session key")
 
 	freshA := keywordSessionAuditContext(t, "")
