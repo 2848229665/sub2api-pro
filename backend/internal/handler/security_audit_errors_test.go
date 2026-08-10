@@ -191,11 +191,12 @@ func TestKeywordSessionBlockUsesCodexTerminalHTTPError(t *testing.T) {
 	require.Equal(t, keywordSessionBlockedClientMsg, errorObject["message"])
 }
 
-func TestKeywordContentPolicyUsesCodexTerminalSSEError(t *testing.T) {
+func TestKeywordContentPolicyReturnsHTTPErrorOnUncommittedStream(t *testing.T) {
 	cases := []struct {
 		name         string
 		decision     *securityaudit.Decision
 		internalCode string
+		expectedCode string
 		message      string
 	}{
 		{
@@ -209,12 +210,14 @@ func TestKeywordContentPolicyUsesCodexTerminalSSEError(t *testing.T) {
 				},
 			},
 			internalCode: "content_policy_violation",
+			expectedCode: "content_policy_violation",
 			message:      "keyword blocked",
 		},
 		{
 			name:         "historical session block",
 			decision:     keywordSessionBlockedDecision(),
 			internalCode: keywordSessionBlockedErrorCode,
+			expectedCode: keywordSessionBlockedErrorCode,
 			message:      keywordSessionBlockedClientMsg,
 		},
 	}
@@ -228,18 +231,16 @@ func TestKeywordContentPolicyUsesCodexTerminalSSEError(t *testing.T) {
 			(&OpenAIGatewayHandler{}).openAISecurityAuditError(c, tc.decision)
 
 			requireSecurityAuditSLAExclusion(t, c, tc.internalCode)
-			require.Equal(t, http.StatusOK, recorder.Code)
-			require.Contains(t, recorder.Header().Get("Content-Type"), "text/event-stream")
-			response, errorObject := parseResponsesFailedSSE(t, recorder.Body.String())
-			require.Equal(t, "gpt-5", response["model"])
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			errorObject := requireObject(t, decodeErrorJSON(t, recorder)["error"])
 			require.Equal(t, "invalid_request_error", errorObject["type"])
-			require.Equal(t, "invalid_prompt", errorObject["code"])
+			require.Equal(t, tc.expectedCode, errorObject["code"])
 			require.Equal(t, tc.message, errorObject["message"])
 		})
 	}
 }
 
-func TestKeywordContentPolicyBodySignalCompactUsesCodexTerminalSSEError(t *testing.T) {
+func TestKeywordContentPolicyBodySignalCompactReturnsHTTPError(t *testing.T) {
 	c, recorder := securityAuditErrorTestContext(t)
 	c.Request.URL.Path = EndpointResponsesCompact
 	setOpsRequestContext(c, "gpt-5", false)
@@ -248,12 +249,10 @@ func TestKeywordContentPolicyBodySignalCompactUsesCodexTerminalSSEError(t *testi
 	(&OpenAIGatewayHandler{}).openAISecurityAuditError(c, keywordSessionBlockedDecision())
 
 	requireSecurityAuditSLAExclusion(t, c, keywordSessionBlockedErrorCode)
-	require.Equal(t, http.StatusOK, recorder.Code)
-	require.Contains(t, recorder.Header().Get("Content-Type"), "text/event-stream")
-	response, errorObject := parseResponsesFailedSSE(t, recorder.Body.String())
-	require.Equal(t, "gpt-5", response["model"])
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	errorObject := requireObject(t, decodeErrorJSON(t, recorder)["error"])
 	require.Equal(t, "invalid_request_error", errorObject["type"])
-	require.Equal(t, "invalid_prompt", errorObject["code"])
+	require.Equal(t, keywordSessionBlockedErrorCode, errorObject["code"])
 	require.Equal(t, keywordSessionBlockedClientMsg, errorObject["message"])
 }
 

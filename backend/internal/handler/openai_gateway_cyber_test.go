@@ -45,6 +45,18 @@ func (c *cyberPolicyHandlerTestCache) RefreshSessionTTL(context.Context, int64, 
 func (c *cyberPolicyHandlerTestCache) DeleteSessionAccountID(context.Context, int64, string) error {
 	return nil
 }
+func (c *cyberPolicyHandlerTestCache) SetGrokVideoPendingBilling(context.Context, string, []byte, time.Duration) error {
+	return nil
+}
+func (c *cyberPolicyHandlerTestCache) GetGrokVideoPendingBilling(context.Context, string) ([]byte, error) {
+	return nil, nil
+}
+func (c *cyberPolicyHandlerTestCache) ClaimGrokVideoBilled(context.Context, string, time.Duration) (bool, error) {
+	return false, nil
+}
+func (c *cyberPolicyHandlerTestCache) ReleaseGrokVideoBilled(context.Context, string) error {
+	return nil
+}
 func (c *cyberPolicyHandlerTestCache) SetCyberSessionBlocked(_ context.Context, key string, ttl time.Duration) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

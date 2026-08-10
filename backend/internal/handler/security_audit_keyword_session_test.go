@@ -39,6 +39,18 @@ func (c *keywordSessionTestCache) RefreshSessionTTL(context.Context, int64, stri
 func (c *keywordSessionTestCache) DeleteSessionAccountID(context.Context, int64, string) error {
 	return nil
 }
+func (c *keywordSessionTestCache) SetGrokVideoPendingBilling(context.Context, string, []byte, time.Duration) error {
+	return nil
+}
+func (c *keywordSessionTestCache) GetGrokVideoPendingBilling(context.Context, string) ([]byte, error) {
+	return nil, nil
+}
+func (c *keywordSessionTestCache) ClaimGrokVideoBilled(context.Context, string, time.Duration) (bool, error) {
+	return false, nil
+}
+func (c *keywordSessionTestCache) ReleaseGrokVideoBilled(context.Context, string) error {
+	return nil
+}
 func (c *keywordSessionTestCache) ClaimKeywordSessionBlocked(_ context.Context, key string, _ time.Duration) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
