@@ -1648,12 +1648,17 @@ describe("admin SettingsView payment visible method controls", () => {
         .map((card) => card.attributes("data-testid")),
     ).toEqual([
       "codex-prompt-cache-settings",
+      "responses-rectifier-settings",
       "openai-priority-saturation-settings",
     ]);
 
     const codexToggle = forkSection.get(
       '[data-testid="codex-prompt-cache-optimization-toggle"]',
     );
+    const rectifierToggle = forkSection.get(
+      '[data-testid="responses-rectifier-toggle"]',
+    );
+    expect(rectifierToggle.isVisible()).toBe(true);
     const priorityToggle = forkSection.get(
       '[data-testid="openai-priority-saturation-toggle"]',
     );

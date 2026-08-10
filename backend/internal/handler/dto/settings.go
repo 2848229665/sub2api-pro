@@ -211,6 +211,7 @@ type SystemSettings struct {
 	RewriteMessageCacheControl                bool   `json:"rewrite_message_cache_control"`
 	EnableClientDatelineNormalization         bool   `json:"enable_client_dateline_normalization"`
 	OpenAICodexPromptCacheOptimizationEnabled bool   `json:"openai_codex_prompt_cache_optimization_enabled"`
+	OpenAIResponsesRectifierEnabled           bool   `json:"openai_responses_rectifier_enabled"`
 	AntigravityUserAgentVersion               string `json:"antigravity_user_agent_version"`
 	OpenAICodexUserAgent                      string `json:"openai_codex_user_agent"`
 	OpenAICodexClientVersion                  string `json:"openai_codex_client_version"`

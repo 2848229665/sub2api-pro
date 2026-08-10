@@ -234,6 +234,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyEnableAnthropicCacheTTL1hInjection:                 "false",
 		SettingKeyRewriteMessageCacheControl:                         strconv.FormatBool(s.defaultRewriteMessageCacheControl()),
 		SettingKeyOpenAICodexPromptCacheOptimizationEnabled:          strconv.FormatBool(s.defaultOpenAICodexPromptCacheOptimizationEnabled()),
+		SettingKeyOpenAIResponsesRectifierEnabled:                    strconv.FormatBool(s.defaultOpenAIResponsesRectifierEnabled()),
 		SettingKeyEnableClientDatelineNormalization:                  "true",
 		SettingKeyAntigravityUserAgentVersion:                        "",
 		SettingKeyOpenAICodexUserAgent:                               "",
@@ -877,6 +878,11 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.OpenAICodexPromptCacheOptimizationEnabled = v == "true"
 	} else {
 		result.OpenAICodexPromptCacheOptimizationEnabled = s.defaultOpenAICodexPromptCacheOptimizationEnabled()
+	}
+	if v, ok := settings[SettingKeyOpenAIResponsesRectifierEnabled]; ok && v != "" {
+		result.OpenAIResponsesRectifierEnabled = v == "true"
+	} else {
+		result.OpenAIResponsesRectifierEnabled = s.defaultOpenAIResponsesRectifierEnabled()
 	}
 	result.AntigravityUserAgentVersion = antigravity.NormalizeUserAgentVersion(settings[SettingKeyAntigravityUserAgentVersion])
 	result.OpenAICodexUserAgent = strings.TrimSpace(settings[SettingKeyOpenAICodexUserAgent])

@@ -447,6 +447,8 @@ export default {
       gatewayForwarding: {
         codexPromptCacheOptimization: 'Codex Prompt Cache 优化器',
         codexPromptCacheOptimizationHint: '默认开启。对官方 Codex 原生 Responses 请求使用局部 JSON patch，尽量保持 instructions、tools、input 与 text 的稳定前缀；关闭后使用上游兼容翻译路径。',
+        responsesRectifier: 'Responses 请求整流器',
+        responsesRectifierHint: '默认开启。responses-lite 转发强制 parallel_tool_calls=false；上游明确拒绝 reasoning_effort、background、reasoning.summary、item_reference 或 spark content 超长时自动删参重试。关闭后仅保留 max_output_tokens 与 namespace 的历史整流行为。',
         title: '请求转发行为',
         description: '控制请求转发到上游 OAuth 账号时的行为',
         grokDefaultTextModel: '默认 Grok 文本模型',

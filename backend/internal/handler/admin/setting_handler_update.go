@@ -253,6 +253,7 @@ type UpdateSettingsRequest struct {
 	RewriteMessageCacheControl                *bool   `json:"rewrite_message_cache_control"`
 	EnableClientDatelineNormalization         *bool   `json:"enable_client_dateline_normalization"`
 	OpenAICodexPromptCacheOptimizationEnabled *bool   `json:"openai_codex_prompt_cache_optimization_enabled"`
+	OpenAIResponsesRectifierEnabled           *bool   `json:"openai_responses_rectifier_enabled"`
 	AntigravityUserAgentVersion               *string `json:"antigravity_user_agent_version"`
 	OpenAICodexUserAgent                      *string `json:"openai_codex_user_agent"`
 	OpenAICodexClientVersion                  *string `json:"openai_codex_client_version"`
@@ -1741,6 +1742,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAICodexPromptCacheOptimizationEnabled
 		}(),
+		OpenAIResponsesRectifierEnabled: func() bool {
+			if req.OpenAIResponsesRectifierEnabled != nil {
+				return *req.OpenAIResponsesRectifierEnabled
+			}
+			return previousSettings.OpenAIResponsesRectifierEnabled
+		}(),
 		AntigravityUserAgentVersion: func() string {
 			if req.AntigravityUserAgentVersion != nil {
 				return *req.AntigravityUserAgentVersion
@@ -2323,6 +2330,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		RewriteMessageCacheControl:                             updatedSettings.RewriteMessageCacheControl,
 		EnableClientDatelineNormalization:                      updatedSettings.EnableClientDatelineNormalization,
 		OpenAICodexPromptCacheOptimizationEnabled:              updatedSettings.OpenAICodexPromptCacheOptimizationEnabled,
+		OpenAIResponsesRectifierEnabled:                        updatedSettings.OpenAIResponsesRectifierEnabled,
 		AntigravityUserAgentVersion:                            updatedSettings.AntigravityUserAgentVersion,
 		OpenAICodexUserAgent:                                   updatedSettings.OpenAICodexUserAgent,
 		OpenAICodexClientVersion:                               updatedSettings.OpenAICodexClientVersion,

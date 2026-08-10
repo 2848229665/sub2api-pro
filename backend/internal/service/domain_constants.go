@@ -580,6 +580,9 @@ const (
 	// SettingKeyOpenAICodexPromptCacheOptimizationEnabled 是否对官方 Codex 原生
 	// Responses 请求启用保持稳定 prompt 前缀的局部 JSON patch 翻译器。
 	SettingKeyOpenAICodexPromptCacheOptimizationEnabled = "openai_codex_prompt_cache_optimization_enabled"
+	// SettingKeyOpenAIResponsesRectifierEnabled 是否启用 /v1/responses 请求整流器
+	// （lite 强制 parallel_tool_calls=false + 扩展的删参重试表）。
+	SettingKeyOpenAIResponsesRectifierEnabled = "openai_responses_rectifier_enabled"
 	// SettingKeyAntigravityUserAgentVersion Antigravity 上游 User-Agent 版本号（空值使用环境变量/默认值）
 	SettingKeyAntigravityUserAgentVersion = "antigravity_user_agent_version"
 	// SettingKeyOpenAICodexUserAgent OpenAI Codex 完整 User-Agent（空值使用内置默认）

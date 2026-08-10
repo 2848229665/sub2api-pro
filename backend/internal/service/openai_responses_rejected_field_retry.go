@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"net/http"
@@ -11,6 +12,21 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+// openAIResponsesRectifierEnabled 读取 /v1/responses 请求整流器开关：
+// 管理端运行时设置优先，未接入 settingService 时回退到 YAML/环境变量配置。
+func (s *OpenAIGatewayService) openAIResponsesRectifierEnabled(ctx context.Context) bool {
+	if s == nil {
+		return false
+	}
+	if s.settingService != nil {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		return s.settingService.IsOpenAIResponsesRectifierEnabled(ctx)
+	}
+	return s.cfg != nil && s.cfg.Gateway.OpenAIResponsesRectifierEnabled
+}
 
 const maxOpenAIResponsesRejectedFieldRetries = 6
 
@@ -67,7 +83,11 @@ func (s *openAIResponsesRejectedFieldRetryState) remember(body []byte) {
 	s.seenBodyHashes[sha256.Sum256(body)] = struct{}{}
 }
 
-func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, responseBody []byte) ([]byte, string, bool, error) {
+// normalizeOpenAIResponsesRejectedFieldRetryBody rewrites the request body
+// after an explicit upstream 400 field rejection. extended=false restores the
+// historical behavior (max_output_tokens and input[N].namespace only); the
+// additional rules are gated by the responses-rectifier switch.
+func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, responseBody []byte, extended bool) ([]byte, string, bool, error) {
 	if statusCode != http.StatusBadRequest || len(body) == 0 || len(responseBody) == 0 {
 		return nil, "", false, nil
 	}
@@ -84,8 +104,13 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 			case "namespace":
 				return removeOpenAIResponsesRejectedNamespaceAtIndex(body, index)
 			case "item_reference":
-				return removeOpenAIResponsesRejectedItemReferenceAtIndex(body, index)
+				if extended {
+					return removeOpenAIResponsesRejectedItemReferenceAtIndex(body, index)
+				}
 			}
+			return nil, "", false, nil
+		}
+		if !extended && param != "max_output_tokens" {
 			return nil, "", false, nil
 		}
 		if path, ok := openAIResponsesRejectedTopLevelParams[param]; ok && gjson.GetBytes(body, path).Exists() {
@@ -97,8 +122,10 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 		}
 		return nil, "", false, nil
 	}
-	if index, ok := openAIResponsesContentTooLongIndex(message); ok {
-		return emptyOpenAIResponsesRejectedContentAtIndex(body, index)
+	if extended {
+		if index, ok := openAIResponsesContentTooLongIndex(message); ok {
+			return emptyOpenAIResponsesRejectedContentAtIndex(body, index)
+		}
 	}
 	return nil, "", false, nil
 }

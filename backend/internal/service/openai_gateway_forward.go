@@ -58,6 +58,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if toolSchemaSanitized {
 		body = sanitizedToolBody
 	}
+	responsesRectifierEnabled := s.openAIResponsesRectifierEnabled(ctx)
 	responsesLiteRequested := isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader))
 	responsesLiteModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	if account.IsOpenAIOAuth() {
@@ -88,7 +89,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		// responses-lite 上游硬性要求 parallel_tool_calls=false（否则 400），
 		// 缺省或其它取值一律显式改写。
-		if gjson.GetBytes(body, "parallel_tool_calls").Raw != "false" {
+		if responsesRectifierEnabled && gjson.GetBytes(body, "parallel_tool_calls").Raw != "false" {
 			parallelBody, parallelErr := sjson.SetBytes(body, "parallel_tool_calls", false)
 			if parallelErr != nil {
 				return nil, fmt.Errorf("force parallel_tool_calls=false for responses-lite: %w", parallelErr)
@@ -942,7 +943,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				}
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Skip non-WSv2 invalid_encrypted_content retry because encrypted reasoning items are missing (account: %s)", account.Name)
 			}
-			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody); retryErr != nil {
+			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody, responsesRectifierEnabled); retryErr != nil {
 				return nil, fmt.Errorf("normalize rejected Responses field retry body: %w", retryErr)
 			} else if changed && rejectedFieldRetryState.Allow(retryBody) {
 				body = retryBody

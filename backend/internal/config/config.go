@@ -910,6 +910,13 @@ type GatewayConfig struct {
 	// OpenAICodexPromptCacheOptimizationEnabled: 对官方 Codex 原生 Responses 请求启用
 	// 保持稳定 prompt 前缀的局部 JSON patch 翻译器。默认开启，可由管理端运行时设置覆盖。
 	OpenAICodexPromptCacheOptimizationEnabled bool `mapstructure:"openai_codex_prompt_cache_optimization_enabled"`
+	// OpenAIResponsesRectifierEnabled: /v1/responses 请求整流器。开启时：
+	// 1) responses-lite 转发强制 parallel_tool_calls=false；
+	// 2) 上游明确拒绝 reasoning_effort/background/reasoning.summary/
+	//    input[N].item_reference 及 spark content 超长时删参重试。
+	// 关闭后恢复历史行为（仅整流 max_output_tokens 与 input[N].namespace）。
+	// 默认开启，可由管理端运行时设置覆盖。
+	OpenAIResponsesRectifierEnabled bool `mapstructure:"openai_responses_rectifier_enabled"`
 	// DisableCodexIdentityEnforcement: 关闭「强制统一 Codex 出站身份」。上游 /backend-api/codex
 	// 在容量紧张时按客户端身份分优先级降载，被降载的请求会拿到 HTTP 200 + 流内
 	// server_is_overloaded，该次请求失败。默认强制统一出口：所有 OAuth 出站的
@@ -2273,6 +2280,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
 	viper.SetDefault("gateway.force_codex_cli", false)
 	viper.SetDefault("gateway.openai_codex_prompt_cache_optimization_enabled", true)
+	viper.SetDefault("gateway.openai_responses_rectifier_enabled", true)
 	viper.SetDefault("gateway.disable_codex_identity_enforcement", false)
 	viper.SetDefault("gateway.disable_codex_originator_normalization", false)
 	viper.SetDefault("gateway.codex_image_generation_bridge_enabled", false)

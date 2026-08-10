@@ -520,6 +520,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyRewriteMessageCacheControl] = strconv.FormatBool(settings.RewriteMessageCacheControl)
 	updates[SettingKeyEnableClientDatelineNormalization] = strconv.FormatBool(settings.EnableClientDatelineNormalization)
 	updates[SettingKeyOpenAICodexPromptCacheOptimizationEnabled] = strconv.FormatBool(settings.OpenAICodexPromptCacheOptimizationEnabled)
+	updates[SettingKeyOpenAIResponsesRectifierEnabled] = strconv.FormatBool(settings.OpenAIResponsesRectifierEnabled)
 	updates[SettingKeyAntigravityUserAgentVersion] = antigravity.NormalizeUserAgentVersion(settings.AntigravityUserAgentVersion)
 	updates[SettingKeyOpenAICodexUserAgent] = strings.TrimSpace(settings.OpenAICodexUserAgent)
 	updates[SettingKeyOpenAICodexClientVersion] = NormalizeCodexClientVersion(settings.OpenAICodexClientVersion)
@@ -762,6 +763,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		rewriteMessageCacheControl:         settings.RewriteMessageCacheControl,
 		clientDatelineNormalization:        settings.EnableClientDatelineNormalization,
 		openAICodexPromptCacheOptimization: settings.OpenAICodexPromptCacheOptimizationEnabled,
+		openAIResponsesRectifier:           settings.OpenAIResponsesRectifierEnabled,
 		expiresAt:                          time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
 	})
 	s.antigravityUAVersionSF.Forget("antigravity_user_agent_version")
@@ -859,6 +861,12 @@ func (s *SettingService) defaultOpenAICodexPromptCacheOptimizationEnabled() bool
 	return s != nil &&
 		s.cfg != nil &&
 		s.cfg.Gateway.OpenAICodexPromptCacheOptimizationEnabled
+}
+
+func (s *SettingService) defaultOpenAIResponsesRectifierEnabled() bool {
+	return s != nil &&
+		s.cfg != nil &&
+		s.cfg.Gateway.OpenAIResponsesRectifierEnabled
 }
 
 func (s *SettingService) validateDefaultSubscriptionGroups(ctx context.Context, items []DefaultSubscriptionSetting) error {
