@@ -3,6 +3,8 @@ package securityaudit
 import (
 	"context"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 const (
@@ -85,6 +87,11 @@ type Request struct {
 	Model      string
 	Body       []byte
 	Stage      string
+	// KeywordScan optionally carries a keyword-scan result the handler already
+	// computed for this exact body; the legacy engine forwards it so moderation
+	// Check can skip re-extracting and re-matching. Immutable once built, so
+	// Clone shares the pointer.
+	KeywordScan *service.ContentModerationKeywordScan
 }
 
 func (r Request) Clone() Request {

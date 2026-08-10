@@ -38,13 +38,14 @@ func clientRequestedUsageFields(c *gin.Context, mapping service.ChannelMappingRe
 	return mapping.ToUsageFields(clientRequestedModel(c, fallbackModel), upstreamModel)
 }
 
-func runContentModeration(c *gin.Context, reqLog *zap.Logger, svc *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol string, model string, body []byte) *service.ContentModerationDecision {
+func runContentModeration(c *gin.Context, reqLog *zap.Logger, svc *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol string, model string, body []byte, keywordScan *service.ContentModerationKeywordScan) *service.ContentModerationDecision {
 	if svc == nil || c == nil || c.Request == nil {
 		return nil
 	}
 	input := buildContentModerationInput(c, apiKey, subject, protocol, model, body)
+	input.KeywordScan = keywordScan
 	if reqLog != nil {
-		reqLog.Info("content_moderation.gateway_check_start",
+		reqLog.Debug("content_moderation.gateway_check_start",
 			zap.String("request_id", input.RequestID),
 			zap.Int64("user_id", input.UserID),
 			zap.Int64("api_key_id", input.APIKeyID),
@@ -66,7 +67,7 @@ func runContentModeration(c *gin.Context, reqLog *zap.Logger, svc *service.Conte
 		return nil
 	}
 	if reqLog != nil && decision != nil {
-		reqLog.Info("content_moderation.gateway_check_done",
+		reqLog.Debug("content_moderation.gateway_check_done",
 			zap.String("request_id", input.RequestID),
 			zap.Bool("allowed", decision.Allowed),
 			zap.Bool("blocked", decision.Blocked),

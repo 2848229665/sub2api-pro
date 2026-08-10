@@ -48,6 +48,7 @@ func (h *OpenAIGatewayHandler) checkOpenAISecurityAuditStage(c *gin.Context, req
 		return nil
 	}
 	blockKey := ""
+	var keywordScan *service.ContentModerationKeywordScan
 	if keywordSessionBlockingProtocol(protocol) && h.gatewayService != nil && h.contentModerationService != nil &&
 		apiKey != nil && c != nil && c.Request != nil {
 		sessionKey := service.OpenAISessionBlockKey(apiKey.ID, c, body)
@@ -59,6 +60,7 @@ func (h *OpenAIGatewayHandler) checkOpenAISecurityAuditStage(c *gin.Context, req
 		input := buildContentModerationInput(c, apiKey, subject, protocol, model, body)
 		policy := h.contentModerationService.KeywordSessionPolicy(c.Request.Context(), input)
 		if policy.Active {
+			keywordScan = policy.Scan
 			blockKey = service.OpenAIKeywordSessionBlockKey(sessionKey, policy.Version)
 			if h.gatewayService.IsKeywordSessionBlocked(c.Request.Context(), blockKey) {
 				return keywordSessionBlockedDecision(policy.ErrorCode)
@@ -72,7 +74,7 @@ func (h *OpenAIGatewayHandler) checkOpenAISecurityAuditStage(c *gin.Context, req
 		}
 	}
 
-	return runSecurityAudit(c, reqLog, h.securityAuditCoordinator, h.contentModerationService, apiKey, subject, protocol, model, body, stage)
+	return runSecurityAuditWithScan(c, reqLog, h.securityAuditCoordinator, h.contentModerationService, apiKey, subject, protocol, model, body, stage, keywordScan)
 }
 
 func keywordSessionBlockingProtocol(protocol string) bool {
@@ -110,6 +112,10 @@ func keywordSessionBlockedDecision(errorCode string) *securityaudit.Decision {
 }
 
 func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securityaudit.Coordinator, legacy *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol, model string, body []byte, stage string) *securityaudit.Decision {
+	return runSecurityAuditWithScan(c, reqLog, coordinator, legacy, apiKey, subject, protocol, model, body, stage, nil)
+}
+
+func runSecurityAuditWithScan(c *gin.Context, reqLog *zap.Logger, coordinator *securityaudit.Coordinator, legacy *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol, model string, body []byte, stage string, keywordScan *service.ContentModerationKeywordScan) *securityaudit.Decision {
 	if c == nil || c.Request == nil {
 		return nil
 	}
@@ -120,7 +126,7 @@ func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securitya
 		}
 	}
 	if coordinator == nil {
-		legacyDecision := runContentModeration(c, reqLog, legacy, apiKey, subject, protocol, model, body)
+		legacyDecision := runContentModeration(c, reqLog, legacy, apiKey, subject, protocol, model, body, keywordScan)
 		if legacyDecision == nil {
 			return nil
 		}
@@ -143,8 +149,9 @@ func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securitya
 		return &decision
 	}
 	request := buildSecurityAuditRequest(c, apiKey, subject, protocol, model, body, stage)
+	request.KeywordScan = keywordScan
 	if reqLog != nil {
-		reqLog.Info("security_audit.gateway_check_start",
+		reqLog.Debug("security_audit.gateway_check_start",
 			zap.String("request_id", request.RequestID), zap.Int64("user_id", request.UserID),
 			zap.Int64("api_key_id", request.APIKeyID), zap.Int64p("group_id", request.GroupID),
 			zap.String("endpoint", request.Endpoint), zap.String("provider", request.Provider),
@@ -156,7 +163,7 @@ func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securitya
 		c.Set(securityAuditCompletedContextKey, true)
 	}
 	if reqLog != nil {
-		reqLog.Info("security_audit.gateway_check_done",
+		reqLog.Debug("security_audit.gateway_check_done",
 			zap.String("request_id", request.RequestID), zap.String("decision", string(decision.Kind)),
 			zap.String("error_code", decision.ErrorCode), zap.Bool("allow_next_stage", decision.AllowNextStage),
 			zap.String("stage", request.Stage))
