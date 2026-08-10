@@ -52,8 +52,6 @@ func (h *OpenAIGatewayHandler) writeOpenAIContentPolicyError(c *gin.Context, cod
 	}})
 }
 
-
-
 func (h *GatewayHandler) openAISecurityAuditError(c *gin.Context, decision *securityaudit.Decision) {
 	if decision == nil {
 		return

@@ -73,7 +73,7 @@ const (
 	defaultContentModerationViolationWindowHours = 720
 	defaultContentModerationBlockHTTPStatus      = http.StatusForbidden
 	defaultContentModerationBlockMessage         = "内容审计命中风险规则，请调整输入后重试"
-	defaultContentModerationBlockErrorCode = "cyber_policy"
+	defaultContentModerationBlockErrorCode       = "cyber_policy"
 	defaultContentModerationRetryCount           = 2
 	maxContentModerationRetryCount               = 5
 	defaultContentModerationHitRetentionDays     = 180

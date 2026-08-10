@@ -49,6 +49,11 @@ func TestBuildSystemSettingsUpdates_PersistsAccountSchedulingThresholds(t *testi
 			PlatformAnthropic: 88,
 			PlatformGrok:      77,
 		},
+		OpenAIPrioritySaturationAffinityReservePercent: DefaultOpenAIPrioritySaturationAffinityReservePercent,
+		OpenAIPrioritySaturationAccountSharePercent:    DefaultOpenAIPrioritySaturationAccountSharePercent,
+		OpenAIPrioritySaturationAPIKeySharePercent:     DefaultOpenAIPrioritySaturationAPIKeySharePercent,
+		OpenAIPrioritySaturationEnterHighLoadPercent:   DefaultOpenAIPrioritySaturationEnterHighLoadPercent,
+		OpenAIPrioritySaturationExitHighLoadPercent:    DefaultOpenAIPrioritySaturationExitHighLoadPercent,
 	})
 	require.NoError(t, err)
 	require.JSONEq(t, `{"openai":91,"anthropic":88,"grok":77}`, updates[SettingKeyAccountSchedulingThresholds])
