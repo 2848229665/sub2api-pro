@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // normalizeOpenAIResponsesLiteTools applies the Responses Lite request
@@ -208,9 +211,43 @@ func normalizeOpenAIResponsesLiteToolsPayload(body []byte) ([]byte, bool, error)
 	if err != nil || !changed {
 		return body, false, err
 	}
+	// The map transform only restructures tools/input when the request carries
+	// top-level namespace tools; otherwise its sole change is forcing
+	// reasoning.context=all_turns. In that common case re-marshalling the whole
+	// body would alphabetically reorder every object key (Go map encoding),
+	// which rewrites the instructions/tools/input prompt prefix byte-for-byte
+	// and defeats OpenAI prompt caching. Patch just reasoning.context onto the
+	// raw body so the cached prefix stays identical to what Codex emitted.
+	if !openAIResponsesLiteBodyHasNamespaceTools(body) {
+		patched, patchErr := sjson.SetBytes(body, "reasoning.context", "all_turns")
+		if patchErr != nil {
+			return body, false, fmt.Errorf("patch responses Lite reasoning context: %w", patchErr)
+		}
+		return patched, true, nil
+	}
 	rebuilt, err := marshalOpenAIUpstreamJSON(requestBody)
 	if err != nil {
 		return body, false, fmt.Errorf("encode responses Lite request body: %w", err)
 	}
 	return rebuilt, true, nil
+}
+
+// openAIResponsesLiteBodyHasNamespaceTools reports whether the raw request
+// carries a top-level namespace tool, which is the only trigger for the
+// tools/input restructuring path. When absent, the lite transform's only effect
+// is reasoning.context, so the body can be patched byte-preservingly.
+func openAIResponsesLiteBodyHasNamespaceTools(body []byte) bool {
+	tools := gjson.GetBytes(body, "tools")
+	if !tools.IsArray() {
+		return false
+	}
+	found := false
+	tools.ForEach(func(_, tool gjson.Result) bool {
+		if strings.TrimSpace(tool.Get("type").String()) == "namespace" {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
