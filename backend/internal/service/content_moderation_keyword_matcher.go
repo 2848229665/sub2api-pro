@@ -188,7 +188,7 @@ func (m *contentModerationKeywordMatcher) Match(text string) (string, bool) {
 		} else {
 			r, size := utf8.DecodeRuneInString(text[index:])
 			lowered := unicode.ToLower(r)
-			if lowered == r && !(r == utf8.RuneError && size == 1) {
+			if lowered == r && (r != utf8.RuneError || size != 1) {
 				for end := index + size; index < end; index++ {
 					state = m.step(state, text[index])
 					bestKeyword = minKeywordIndex(bestKeyword, m.nodes[state].bestKeyword)
