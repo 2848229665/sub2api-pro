@@ -2,6 +2,8 @@ package service
 
 import (
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 type contentModerationKeywordMatcher struct {
@@ -164,27 +166,43 @@ func minKeywordIndex(left, right int32) int32 {
 	return right
 }
 
+// Match lowercases the text on the fly while walking the automaton, avoiding
+// the full-copy allocation of strings.ToLower. The byte stream fed to the
+// automaton is identical to scanning strings.ToLower(text): each rune is
+// lowered via unicode.ToLower and invalid UTF-8 bytes are replaced by U+FFFD,
+// matching the pattern side which is built from strings.ToLower(keyword).
 func (m *contentModerationKeywordMatcher) Match(text string) (string, bool) {
 	if m == nil || text == "" || len(m.nodes) == 0 || len(m.keywords) == 0 {
 		return "", false
 	}
-	lower := strings.ToLower(text)
 	state := int32(0)
 	bestKeyword := int32(-1)
-	for index := 0; index < len(lower); index++ {
-		label := lower[index]
-		for {
-			next := m.next(state, label)
-			if next != 0 {
-				state = next
-				break
+	for index := 0; index < len(text); {
+		if c := text[index]; c < utf8.RuneSelf {
+			index++
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
 			}
-			if state == 0 {
-				break
+			state = m.step(state, c)
+			bestKeyword = minKeywordIndex(bestKeyword, m.nodes[state].bestKeyword)
+		} else {
+			r, size := utf8.DecodeRuneInString(text[index:])
+			lowered := unicode.ToLower(r)
+			if lowered == r && (r != utf8.RuneError || size != 1) {
+				for end := index + size; index < end; index++ {
+					state = m.step(state, text[index])
+					bestKeyword = minKeywordIndex(bestKeyword, m.nodes[state].bestKeyword)
+				}
+			} else {
+				index += size
+				var encoded [utf8.UTFMax]byte
+				width := utf8.EncodeRune(encoded[:], lowered)
+				for i := 0; i < width; i++ {
+					state = m.step(state, encoded[i])
+					bestKeyword = minKeywordIndex(bestKeyword, m.nodes[state].bestKeyword)
+				}
 			}
-			state = m.nodes[state].failure
 		}
-		bestKeyword = minKeywordIndex(bestKeyword, m.nodes[state].bestKeyword)
 		if bestKeyword == 0 {
 			return m.keywords[0], true
 		}
@@ -193,6 +211,20 @@ func (m *contentModerationKeywordMatcher) Match(text string) (string, bool) {
 		return "", false
 	}
 	return m.keywords[bestKeyword], true
+}
+
+// step advances the automaton by one lowered byte, following failure links.
+func (m *contentModerationKeywordMatcher) step(state int32, label byte) int32 {
+	for {
+		next := m.next(state, label)
+		if next != 0 {
+			return next
+		}
+		if state == 0 {
+			return 0
+		}
+		state = m.nodes[state].failure
+	}
 }
 
 func (m *contentModerationKeywordMatcher) next(state int32, label byte) int32 {

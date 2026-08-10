@@ -186,6 +186,20 @@ type ContentModerationKeywordSessionPolicy struct {
 	Active     bool
 	WouldBlock bool
 	ErrorCode  string
+	// Scan carries the extraction and match result so the moderation Check on
+	// the same request can reuse it instead of re-extracting and re-scanning.
+	Scan *ContentModerationKeywordScan
+}
+
+// ContentModerationKeywordScan is a keyword-scan result computed earlier in the
+// same request lifecycle. Check reuses it only when Version matches the current
+// runtime snapshot for the same provider/protocol; the scan always travels next
+// to the body it was computed from, so a result can never outlive its body.
+type ContentModerationKeywordScan struct {
+	Version string
+	Text    string
+	Keyword string
+	Hit     bool
 }
 
 type ContentModerationConfigView struct {
@@ -335,6 +349,10 @@ type ContentModerationCheckInput struct {
 	Model      string
 	Protocol   string
 	Body       []byte
+	// KeywordScan, when non-nil, is a keyword scan already computed for this
+	// exact request body (e.g. by KeywordSessionPolicy). Check revalidates its
+	// Version against the current runtime snapshot before reuse.
+	KeywordScan *ContentModerationKeywordScan
 }
 
 type ContentModerationInput struct {
@@ -908,7 +926,7 @@ func (s *ContentModerationService) TestAPIKeys(ctx context.Context, input TestCo
 func (s *ContentModerationService) Check(ctx context.Context, input ContentModerationCheckInput) (*ContentModerationDecision, error) {
 	allow := &ContentModerationDecision{Allowed: true, Action: ContentModerationActionAllow}
 	if s == nil || s.settingRepo == nil || s.repo == nil {
-		slog.Info("content_moderation.skip_unavailable",
+		slog.Debug("content_moderation.skip_unavailable",
 			"user_id", input.UserID,
 			"api_key_id", input.APIKeyID,
 			"group_id", contentModerationLogGroupID(input.GroupID),
@@ -928,7 +946,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		return allow, nil
 	}
 	if !runtimeSnapshot.riskControlEnabled {
-		slog.Info("content_moderation.skip_feature_disabled",
+		slog.Debug("content_moderation.skip_feature_disabled",
 			"user_id", input.UserID,
 			"api_key_id", input.APIKeyID,
 			"group_id", contentModerationLogGroupID(input.GroupID),
@@ -939,7 +957,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 	cfg := runtimeSnapshot.config
 	inGroupScope := cfg.includesGroup(input.GroupID)
 	inModelScope := cfg.includesModel(input.Model)
-	slog.Info("content_moderation.config_loaded",
+	slog.Debug("content_moderation.config_loaded",
 		"user_id", input.UserID,
 		"api_key_id", input.APIKeyID,
 		"group_id", contentModerationLogGroupID(input.GroupID),
@@ -961,7 +979,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		"pre_hash_check_enabled", cfg.PreHashCheckEnabled,
 		"record_non_hits", cfg.RecordNonHits)
 	if !cfg.Enabled {
-		slog.Info("content_moderation.skip_config_disabled",
+		slog.Debug("content_moderation.skip_config_disabled",
 			"user_id", input.UserID,
 			"api_key_id", input.APIKeyID,
 			"group_id", contentModerationLogGroupID(input.GroupID),
@@ -970,7 +988,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		return allow, nil
 	}
 	if cfg.Mode == ContentModerationModeOff {
-		slog.Info("content_moderation.skip_mode_off",
+		slog.Debug("content_moderation.skip_mode_off",
 			"user_id", input.UserID,
 			"api_key_id", input.APIKeyID,
 			"group_id", contentModerationLogGroupID(input.GroupID),
@@ -979,7 +997,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		return allow, nil
 	}
 	if !inGroupScope {
-		slog.Info("content_moderation.skip_group_out_of_scope",
+		slog.Debug("content_moderation.skip_group_out_of_scope",
 			"user_id", input.UserID,
 			"api_key_id", input.APIKeyID,
 			"group_id", contentModerationLogGroupID(input.GroupID),
@@ -991,7 +1009,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		return allow, nil
 	}
 	if !inModelScope {
-		slog.Info("content_moderation.skip_model_out_of_scope",
+		slog.Debug("content_moderation.skip_model_out_of_scope",
 			"user_id", input.UserID,
 			"api_key_id", input.APIKeyID,
 			"group_id", contentModerationLogGroupID(input.GroupID),
@@ -1003,13 +1021,21 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			"configured_models", cfg.ModelFilter.Models)
 		return allow, nil
 	}
+	reusedScan := input.KeywordScan
+	if reusedScan != nil && reusedScan.Version != runtimeSnapshot.keywordScanVersion(input.Provider, input.Protocol) {
+		reusedScan = nil
+	}
 	content := ExtractContentModerationInput(input.Protocol, input.Body)
 	keywordText := content.Text
 	if strings.EqualFold(strings.TrimSpace(input.Provider), PlatformOpenAI) && usesExtendedOpenAIKeywordText(input.Protocol) {
-		keywordText = extractOpenAIKeywordText(input.Protocol, input.Body)
+		if reusedScan != nil {
+			keywordText = reusedScan.Text
+		} else {
+			keywordText = extractOpenAIKeywordText(input.Protocol, input.Body)
+		}
 	}
 	if content.IsEmpty() && strings.TrimSpace(keywordText) == "" {
-		slog.Info("content_moderation.skip_empty_input",
+		slog.Debug("content_moderation.skip_empty_input",
 			"user_id", input.UserID,
 			"api_key_id", input.APIKeyID,
 			"group_id", contentModerationLogGroupID(input.GroupID),
@@ -1019,7 +1045,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		return allow, nil
 	}
 	content.Normalize()
-	slog.Info("content_moderation.input_extracted",
+	slog.Debug("content_moderation.input_extracted",
 		"user_id", input.UserID,
 		"api_key_id", input.APIKeyID,
 		"group_id", contentModerationLogGroupID(input.GroupID),
@@ -1030,7 +1056,14 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 	hashText := content.Hash()
 	if cfg.Mode == ContentModerationModePreBlock {
 		if cfg.KeywordBlockingMode != ContentModerationKeywordModeAPIOnly && len(cfg.BlockedKeywords) > 0 {
-			if keyword, hit := runtimeSnapshot.matchBlockedKeyword(keywordText); hit {
+			var keyword string
+			var hit bool
+			if reusedScan != nil {
+				keyword, hit = reusedScan.Keyword, reusedScan.Hit
+			} else {
+				keyword, hit = runtimeSnapshot.matchBlockedKeyword(keywordText)
+			}
+			if hit {
 				s.recordPreBlockSyncMetric(0, ContentModerationActionKeywordBlock)
 				slog.Info("content_moderation.keyword_block",
 					"user_id", input.UserID,
@@ -1060,7 +1093,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		}
 		if cfg.KeywordBlockingMode == ContentModerationKeywordModeKeywordOnly {
 			s.recordPreBlockSyncMetric(0, ContentModerationActionAllow)
-			slog.Info("content_moderation.skip_api_keyword_only",
+			slog.Debug("content_moderation.skip_api_keyword_only",
 				"user_id", input.UserID,
 				"api_key_id", input.APIKeyID,
 				"group_id", contentModerationLogGroupID(input.GroupID),
@@ -1070,7 +1103,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		}
 	}
 	if content.IsEmpty() {
-		slog.Info("content_moderation.skip_empty_moderation_input",
+		slog.Debug("content_moderation.skip_empty_moderation_input",
 			"user_id", input.UserID,
 			"api_key_id", input.APIKeyID,
 			"group_id", contentModerationLogGroupID(input.GroupID),
@@ -1116,7 +1149,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		if cfg.Mode == ContentModerationModePreBlock {
 			s.recordPreBlockSyncMetric(0, ContentModerationActionAllow)
 		}
-		slog.Info("content_moderation.skip_sample_rate",
+		slog.Debug("content_moderation.skip_sample_rate",
 			"user_id", input.UserID,
 			"api_key_id", input.APIKeyID,
 			"group_id", contentModerationLogGroupID(input.GroupID),
@@ -1138,7 +1171,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		return allow, nil
 	}
 	if cfg.Mode == ContentModerationModeObserve {
-		slog.Info("content_moderation.enqueue_observe",
+		slog.Debug("content_moderation.enqueue_observe",
 			"user_id", input.UserID,
 			"api_key_id", input.APIKeyID,
 			"group_id", contentModerationLogGroupID(input.GroupID),
@@ -1798,23 +1831,41 @@ func (s *ContentModerationService) KeywordSessionPolicy(ctx context.Context, inp
 		!cfg.includesGroup(input.GroupID) || !cfg.includesModel(input.Model) {
 		return ContentModerationKeywordSessionPolicy{}
 	}
-	digest := sha256.New()
-	_, _ = digest.Write(snapshot.configDigest[:])
-	_, _ = digest.Write([]byte{0})
-	_, _ = digest.Write([]byte(input.Provider))
-	_, _ = digest.Write([]byte{0})
-	_, _ = digest.Write([]byte(input.Protocol))
-	keywordText := ExtractContentModerationInput(input.Protocol, input.Body).Text
+	version := snapshot.keywordScanVersion(input.Provider, input.Protocol)
+	var keywordText string
 	if strings.EqualFold(strings.TrimSpace(input.Provider), PlatformOpenAI) && usesExtendedOpenAIKeywordText(input.Protocol) {
 		keywordText = extractOpenAIKeywordText(input.Protocol, input.Body)
+	} else {
+		keywordText = ExtractContentModerationInput(input.Protocol, input.Body).Text
 	}
-	_, wouldBlock := snapshot.matchBlockedKeyword(keywordText)
+	keyword, wouldBlock := snapshot.matchBlockedKeyword(keywordText)
 	return ContentModerationKeywordSessionPolicy{
-		Version:    hex.EncodeToString(digest.Sum(nil)),
+		Version:    version,
 		Active:     true,
 		WouldBlock: wouldBlock,
 		ErrorCode:  cfg.BlockErrorCode,
+		Scan: &ContentModerationKeywordScan{
+			Version: version,
+			Text:    keywordText,
+			Keyword: keyword,
+			Hit:     wouldBlock,
+		},
 	}
+}
+
+// keywordScanVersion identifies the keyword-scan semantics for a provider and
+// protocol under this snapshot. It must stay byte-identical to the historical
+// KeywordSessionPolicy version computation: the value feeds
+// OpenAIKeywordSessionBlockKey, so changing it would orphan existing session
+// blocks in Redis.
+func (s *contentModerationRuntimeSnapshot) keywordScanVersion(provider, protocol string) string {
+	digest := sha256.New()
+	_, _ = digest.Write(s.configDigest[:])
+	_, _ = digest.Write([]byte{0})
+	_, _ = digest.Write([]byte(provider))
+	_, _ = digest.Write([]byte{0})
+	_, _ = digest.Write([]byte(protocol))
+	return hex.EncodeToString(digest.Sum(nil))
 }
 
 func (s *ContentModerationService) isRiskControlEnabled(ctx context.Context) bool {

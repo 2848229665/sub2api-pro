@@ -21,6 +21,13 @@ func TestContentModerationKeywordMatcherMatchesLegacyBehavior(t *testing.T) {
 		{name: "unicode", text: "这里包含敏感词和世界", keywords: []string{"世界", "敏感词"}},
 		{name: "duplicates", text: "duplicate", keywords: []string{"duplicate", "DUPLICATE"}},
 		{name: "empty entries", text: "blocked", keywords: []string{"", "blocked"}},
+		{name: "kelvin sign lowers to ascii k", text: "leaKed data", keywords: []string{"leaked"}},
+		{name: "fullwidth uppercase", text: "密码是ＡＢＣ123", keywords: []string{"ａｂｃ"}},
+		{name: "accented uppercase", text: "CAFÉ MENU", keywords: []string{"café"}},
+		{name: "mixed case unicode boundary", text: "前缀Éxploit后缀", keywords: []string{"éxploit"}},
+		{name: "invalid utf8 replaced by replacement rune", text: "bad\xffbyte", keywords: []string{"bad�byte"}},
+		{name: "invalid utf8 does not bridge match", text: "bad\xffbyte", keywords: []string{"badbyte"}},
+		{name: "literal replacement rune in text", text: "has � marker", keywords: []string{"� marker"}},
 	}
 
 	for _, tt := range tests {
@@ -55,5 +62,37 @@ func TestContentModerationKeywordMatcherRandomizedParity(t *testing.T) {
 		gotKeyword, gotHit := newContentModerationKeywordMatcher(keywords).Match(text.String())
 		require.Equal(t, wantHit, gotHit, "iteration %d", iteration)
 		require.Equal(t, wantKeyword, gotKeyword, "iteration %d", iteration)
+	}
+}
+
+func TestContentModerationKeywordMatcherRandomizedUnicodeParity(t *testing.T) {
+	rng := rand.New(rand.NewSource(20260809))
+	pieces := []string{
+		"a", "B", "z", "0", " ",
+		"世", "界", "敏", "感",
+		"Ä", "é", "É", "ß",
+		"K",            // Kelvin sign, lowers to ASCII k
+		"Ａ",            // fullwidth A, lowers to fullwidth a
+		"�",            // literal replacement rune
+		"\xff", "\xc3", // invalid / truncated UTF-8 bytes
+	}
+	for iteration := 0; iteration < 500; iteration++ {
+		keywords := make([]string, 1+rng.Intn(10))
+		for index := range keywords {
+			var value strings.Builder
+			for range 1 + rng.Intn(4) {
+				_, _ = value.WriteString(pieces[rng.Intn(len(pieces))])
+			}
+			keywords[index] = value.String()
+		}
+		var text strings.Builder
+		for range 5 + rng.Intn(60) {
+			_, _ = text.WriteString(pieces[rng.Intn(len(pieces))])
+		}
+
+		wantKeyword, wantHit := matchBlockedKeyword(text.String(), keywords)
+		gotKeyword, gotHit := newContentModerationKeywordMatcher(keywords).Match(text.String())
+		require.Equal(t, wantHit, gotHit, "iteration %d text %q keywords %q", iteration, text.String(), keywords)
+		require.Equal(t, wantKeyword, gotKeyword, "iteration %d text %q keywords %q", iteration, text.String(), keywords)
 	}
 }
