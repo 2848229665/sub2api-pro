@@ -282,7 +282,7 @@ func TestOpenAIGatewayServiceForward_NormalizesResponsesLiteToolsForOAuth(t *tes
 						"data: [DONE]\n\n",
 				)),
 			}}
-			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{OpenAIResponsesRectifierEnabled: true}}, httpUpstream: upstream}
 			account := &Account{
 				ID: 501, Name: "responses-lite", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
 				Concurrency: 1, Status: StatusActive, Schedulable: true, RateMultiplier: f64p(1),
@@ -291,6 +291,7 @@ func TestOpenAIGatewayServiceForward_NormalizesResponsesLiteToolsForOAuth(t *tes
 			}
 			body := []byte(`{
 				"model":"gpt-5.6-terra","stream":true,"instructions":"test",
+				"parallel_tool_calls":true,
 				"reasoning":{"effort":"high","context":"current_turn"},
 				"tools":[
 					{"type":"function","name":"shell","parameters":{"type":"object"}},
@@ -307,6 +308,8 @@ func TestOpenAIGatewayServiceForward_NormalizesResponsesLiteToolsForOAuth(t *tes
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			require.Equal(t, "true", upstream.lastReq.Header.Get(responsesLiteHeader))
+			require.Equal(t, "false", gjson.GetBytes(upstream.lastBody, "parallel_tool_calls").Raw,
+				"responses-lite must force parallel_tool_calls=false")
 			require.Equal(t, "high", gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
 			require.Equal(t, "all_turns", gjson.GetBytes(upstream.lastBody, "reasoning.context").String())
 			require.False(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="namespace")`).Exists())

@@ -624,6 +624,7 @@ export interface SystemSettings {
   rewrite_message_cache_control: boolean;
   enable_client_dateline_normalization: boolean;
   openai_codex_prompt_cache_optimization_enabled: boolean;
+  openai_responses_rectifier_enabled: boolean;
   antigravity_user_agent_version: string;
   openai_codex_user_agent: string;
   openai_codex_client_version: string;
@@ -945,6 +946,7 @@ export interface UpdateSettingsRequest {
   rewrite_message_cache_control?: boolean;
   enable_client_dateline_normalization?: boolean;
   openai_codex_prompt_cache_optimization_enabled?: boolean;
+  openai_responses_rectifier_enabled?: boolean;
   antigravity_user_agent_version?: string;
   openai_codex_user_agent?: string;
   openai_codex_client_version?: string;

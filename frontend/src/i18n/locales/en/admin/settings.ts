@@ -454,6 +454,8 @@ export default {
       gatewayForwarding: {
         codexPromptCacheOptimization: 'Codex Prompt Cache Optimizer',
         codexPromptCacheOptimizationHint: 'Enabled by default. Uses minimal JSON patches for official Codex native Responses requests to preserve stable instructions, tools, input, and text prefixes. Disable it to use the upstream compatibility translator.',
+        responsesRectifier: 'Responses Request Rectifier',
+        responsesRectifierHint: 'Enabled by default. Forces parallel_tool_calls=false on responses-lite forwarding, and retries after deleting parameters the upstream explicitly rejects (reasoning_effort, background, reasoning.summary, item_reference, spark content overflow). Disabling restores the legacy max_output_tokens/namespace-only behavior.',
         title: 'Request Forwarding',
         description: 'Control how requests are forwarded to upstream OAuth accounts',
         grokDefaultTextModel: 'Default Grok text model',

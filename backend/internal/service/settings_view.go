@@ -236,6 +236,7 @@ type SystemSettings struct {
 	EnableClientDatelineNormalization         bool   // 是否对 Anthropic OAuth/SetupToken 请求体做客户端 dateline 归一化（默认 true）
 	RewriteMessageCacheControl                bool   // 是否改写 messages[*].content[*].cache_control（默认 false）
 	OpenAICodexPromptCacheOptimizationEnabled bool   // 是否对官方 Codex 原生 Responses 启用 Prompt Cache 优化翻译器（默认取配置）
+	OpenAIResponsesRectifierEnabled           bool   // 是否启用 /v1/responses 请求整流器（默认取配置）
 	AntigravityUserAgentVersion               string // Antigravity 上游 User-Agent 版本号；空值使用配置/默认值
 	OpenAICodexUserAgent                      string // OpenAI Codex 上游完整 User-Agent；空值由 Codex 客户端版本号拼出标准 TUI UA
 	OpenAICodexClientVersion                  string // 出站声明的 Codex 客户端版本号（管理员覆写）；空值跟随自动同步值

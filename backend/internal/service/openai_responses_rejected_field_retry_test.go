@@ -60,7 +60,7 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRejectsAmbiguousErrors(t 
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, tt.body, tt.responseBody)
+			retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, tt.body, tt.responseBody, true)
 			require.NoError(t, err)
 			require.False(t, changed)
 			require.Nil(t, retryBody)
@@ -72,7 +72,7 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyFindsNamespacePathInMessa
 	body := []byte(`{"input":[{"type":"function_call","namespace":"keep","arguments":"{}"},{"type":"function_call","namespace":"remove","arguments":"{}"}]}`)
 	responseBody := []byte(`{"error":{"code":"unknown_parameter","message":"input[0] was accepted; Unknown parameter: 'input[1].namespace'."}}`)
 
-	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
+	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody, true)
 
 	require.NoError(t, err)
 	require.True(t, changed)
@@ -84,7 +84,7 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyBindsNamespacePathToRejec
 	body := []byte(`{"input":[{"type":"function_call","namespace":"keep","arguments":"{}"},{"type":"function_call","namespace":"remove","arguments":"{}"}]}`)
 	responseBody := []byte(`{"error":{"code":"unknown_parameter","message":"input[0].namespace is supported; Unknown parameter: input[1].namespace."}}`)
 
-	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
+	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody, true)
 
 	require.NoError(t, err)
 	require.True(t, changed)
@@ -96,7 +96,7 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyDoesNotTreatMaxOutputToke
 	body := []byte(`{"max_tokens":4096,"max_output_tokens":2048}`)
 	responseBody := []byte(`{"error":{"code":"unknown_parameter","message":"Unknown parameter: max_tokens. Use max_output_tokens instead."}}`)
 
-	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
+	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody, true)
 
 	require.NoError(t, err)
 	require.False(t, changed)
@@ -107,11 +107,155 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyBindsMaxOutputTokensToRej
 	body := []byte(`{"max_output_tokens":2048}`)
 	responseBody := []byte(`{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: max_output_tokens."}}`)
 
-	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
+	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody, true)
 
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.False(t, gjson.GetBytes(retryBody, "max_output_tokens").Exists())
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyDeletesRejectedTopLevelParams(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         []byte
+		responseBody []byte
+		deletedPath  string
+	}{
+		{
+			name:         "reasoning_effort from message only",
+			body:         []byte(`{"model":"gpt-5.5","reasoning_effort":"high"}`),
+			responseBody: []byte(`{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: reasoning_effort"}}`),
+			deletedPath:  "reasoning_effort",
+		},
+		{
+			name:         "reasoning summary via param",
+			body:         []byte(`{"model":"gpt-5.3-codex-spark","reasoning":{"effort":"low","summary":"auto"}}`),
+			responseBody: []byte(`{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: 'reasoning.summary' is not supported with the 'gpt-5.3-codex-spark' model.","param":"reasoning.summary"}}`),
+			deletedPath:  "reasoning.summary",
+		},
+		{
+			name:         "background via message",
+			body:         []byte(`{"model":"gpt-5.5","background":true}`),
+			responseBody: []byte(`{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: background"}}`),
+			deletedPath:  "background",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, tt.body, tt.responseBody, true)
+			require.NoError(t, err)
+			require.True(t, changed)
+			require.False(t, gjson.GetBytes(retryBody, tt.deletedPath).Exists())
+		})
+	}
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyKeepsSiblingReasoningFields(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.3-codex-spark","reasoning":{"effort":"low","summary":"auto"}}`)
+	responseBody := []byte(`{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: 'reasoning.summary'.","param":"reasoning.summary"}}`)
+
+	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody, true)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "low", gjson.GetBytes(retryBody, "reasoning.effort").String())
+	require.False(t, gjson.GetBytes(retryBody, "reasoning.summary").Exists())
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyHandlesItemReference(t *testing.T) {
+	t.Run("deletes item_reference field", func(t *testing.T) {
+		body := []byte(`{"input":[{"type":"message","role":"user","content":"hi"},{"type":"message","item_reference":"rs_123","role":"user","content":"again"}]}`)
+		responseBody := []byte(`{"error":{"code":"unknown_parameter","message":"Unknown parameter: 'input[1].item_reference'.","param":"input[1].item_reference"}}`)
+
+		retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody, true)
+
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.False(t, gjson.GetBytes(retryBody, "input.1.item_reference").Exists())
+		require.Equal(t, "again", gjson.GetBytes(retryBody, "input.1.content").String())
+	})
+
+	t.Run("removes item_reference typed item", func(t *testing.T) {
+		body := []byte(`{"input":[{"type":"item_reference","id":"rs_123"},{"type":"message","role":"user","content":"hi"}]}`)
+		responseBody := []byte(`{"error":{"code":"unknown_parameter","message":"Unknown parameter: 'input[0].item_reference'."}}`)
+
+		retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody, true)
+
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, int64(1), gjson.GetBytes(retryBody, "input.#").Int())
+		require.Equal(t, "message", gjson.GetBytes(retryBody, "input.0.type").String())
+	})
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyEmptiesContentOnMaxLengthZero(t *testing.T) {
+	body := []byte(`{"input":[{"type":"message","role":"user","content":"hi"},{"type":"reasoning","content":[{"type":"reasoning_text","text":"thought"}],"summary":[]}]}`)
+	responseBody := []byte(`{"error":{"code":"invalid_value","message":"Invalid 'input[1].content': array too long. Expected an array with maximum length 0, but got an array with length 1 instead.","param":"input[1].content"}}`)
+
+	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody, true)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, int64(0), gjson.GetBytes(retryBody, "input.1.content.#").Int())
+	require.True(t, gjson.GetBytes(retryBody, "input.1.content").IsArray())
+	require.Equal(t, "hi", gjson.GetBytes(retryBody, "input.0.content").String())
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyIgnoresNonZeroContentMaxLength(t *testing.T) {
+	body := []byte(`{"input":[{"type":"message","content":[{"type":"input_text","text":"a"},{"type":"input_text","text":"b"}]}]}`)
+	responseBody := []byte(`{"error":{"code":"invalid_value","message":"Invalid 'input[0].content': array too long. Expected an array with maximum length 1, but got an array with length 2 instead."}}`)
+
+	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody, true)
+
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Nil(t, retryBody)
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRestrictsLegacyBehaviorWhenRectifierDisabled(t *testing.T) {
+	t.Run("legacy max_output_tokens still handled", func(t *testing.T) {
+		body := []byte(`{"max_output_tokens":2048}`)
+		responseBody := []byte(`{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: max_output_tokens."}}`)
+
+		retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody, false)
+
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.False(t, gjson.GetBytes(retryBody, "max_output_tokens").Exists())
+	})
+
+	t.Run("extended params ignored", func(t *testing.T) {
+		tests := []struct {
+			name         string
+			body         []byte
+			responseBody []byte
+		}{
+			{
+				name:         "reasoning_effort",
+				body:         []byte(`{"reasoning_effort":"high"}`),
+				responseBody: []byte(`{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: reasoning_effort"}}`),
+			},
+			{
+				name:         "item_reference",
+				body:         []byte(`{"input":[{"type":"item_reference","id":"rs_123"}]}`),
+				responseBody: []byte(`{"error":{"code":"unknown_parameter","message":"Unknown parameter: 'input[0].item_reference'."}}`),
+			},
+			{
+				name:         "content too long",
+				body:         []byte(`{"input":[{"type":"reasoning","content":[{"type":"reasoning_text","text":"t"}]}]}`),
+				responseBody: []byte(`{"error":{"code":"invalid_value","message":"Invalid 'input[0].content': array too long. Expected an array with maximum length 0, but got an array with length 1 instead."}}`),
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, tt.body, tt.responseBody, false)
+				require.NoError(t, err)
+				require.False(t, changed)
+				require.Nil(t, retryBody)
+			})
+		}
+	})
 }
 
 func TestOpenAIGatewayService_APIKeyStripsAllIndexedNamespacesBeforeFirstForward(t *testing.T) {
@@ -218,9 +362,12 @@ func TestOpenAIGatewayService_ComposesProactiveNamespaceStripWithRejectedFieldRe
 
 func newOpenAIRejectedFieldTestService(upstream *httpUpstreamRecorder) *OpenAIGatewayService {
 	return &OpenAIGatewayService{
-		cfg: &config.Config{Security: config.SecurityConfig{
-			URLAllowlist: config.URLAllowlistConfig{Enabled: false},
-		}},
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+			Gateway: config.GatewayConfig{OpenAIResponsesRectifierEnabled: true},
+		},
 		httpUpstream: upstream,
 	}
 }

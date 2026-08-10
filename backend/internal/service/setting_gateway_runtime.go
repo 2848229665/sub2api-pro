@@ -63,6 +63,7 @@ type cachedGatewayForwardingSettings struct {
 	rewriteMessageCacheControl         bool
 	clientDatelineNormalization        bool
 	openAICodexPromptCacheOptimization bool
+	openAIResponsesRectifier           bool
 	expiresAt                          int64 // unix nano
 }
 
@@ -709,6 +710,7 @@ type gatewayForwardingSettingsResult struct {
 	fp, mp, cch, claudeOAuthSystemPromptInjection, cacheTTL1h, rewriteMessageCacheControl bool
 	clientDatelineNormalization                                                           bool
 	openAICodexPromptCacheOptimization                                                    bool
+	openAIResponsesRectifier                                                              bool
 	claudeOAuthSystemPrompt, claudeOAuthSystemPromptBlocks                                string
 }
 
@@ -726,6 +728,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				rewriteMessageCacheControl:         cached.rewriteMessageCacheControl,
 				clientDatelineNormalization:        cached.clientDatelineNormalization,
 				openAICodexPromptCacheOptimization: cached.openAICodexPromptCacheOptimization,
+				openAIResponsesRectifier:           cached.openAIResponsesRectifier,
 			}
 		}
 	}
@@ -743,6 +746,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 					rewriteMessageCacheControl:         cached.rewriteMessageCacheControl,
 					clientDatelineNormalization:        cached.clientDatelineNormalization,
 					openAICodexPromptCacheOptimization: cached.openAICodexPromptCacheOptimization,
+					openAIResponsesRectifier:           cached.openAIResponsesRectifier,
 				}, nil
 			}
 		}
@@ -759,6 +763,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			SettingKeyRewriteMessageCacheControl,
 			SettingKeyEnableClientDatelineNormalization,
 			SettingKeyOpenAICodexPromptCacheOptimizationEnabled,
+			SettingKeyOpenAIResponsesRectifierEnabled,
 		})
 		if err != nil {
 			slog.Warn("failed to get gateway forwarding settings", "error", err)
@@ -771,6 +776,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				rewriteMessageCacheControl:         s.defaultRewriteMessageCacheControl(),
 				clientDatelineNormalization:        true,
 				openAICodexPromptCacheOptimization: s.defaultOpenAICodexPromptCacheOptimizationEnabled(),
+				openAIResponsesRectifier:           s.defaultOpenAIResponsesRectifierEnabled(),
 				expiresAt:                          time.Now().Add(gatewayForwardingErrorTTL).UnixNano(),
 			})
 			return gatewayForwardingSettingsResult{
@@ -779,6 +785,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				rewriteMessageCacheControl:         s.defaultRewriteMessageCacheControl(),
 				clientDatelineNormalization:        true,
 				openAICodexPromptCacheOptimization: s.defaultOpenAICodexPromptCacheOptimizationEnabled(),
+				openAIResponsesRectifier:           s.defaultOpenAIResponsesRectifierEnabled(),
 			}, nil
 		}
 		fp := true
@@ -806,6 +813,10 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		if v, ok := values[SettingKeyOpenAICodexPromptCacheOptimizationEnabled]; ok && v != "" {
 			openAICodexPromptCacheOptimization = v == "true"
 		}
+		openAIResponsesRectifier := s.defaultOpenAIResponsesRectifierEnabled()
+		if v, ok := values[SettingKeyOpenAIResponsesRectifierEnabled]; ok && v != "" {
+			openAIResponsesRectifier = v == "true"
+		}
 		gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{
 			fingerprintUnification:             fp,
 			metadataPassthrough:                mp,
@@ -817,6 +828,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			rewriteMessageCacheControl:         rewriteMessageCacheControl,
 			clientDatelineNormalization:        clientDatelineNormalization,
 			openAICodexPromptCacheOptimization: openAICodexPromptCacheOptimization,
+			openAIResponsesRectifier:           openAIResponsesRectifier,
 			expiresAt:                          time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
 		})
 		return gatewayForwardingSettingsResult{
@@ -830,6 +842,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			rewriteMessageCacheControl:         rewriteMessageCacheControl,
 			clientDatelineNormalization:        clientDatelineNormalization,
 			openAICodexPromptCacheOptimization: openAICodexPromptCacheOptimization,
+			openAIResponsesRectifier:           openAIResponsesRectifier,
 		}, nil
 	})
 	if r, ok := val.(gatewayForwardingSettingsResult); ok {
@@ -840,6 +853,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		claudeOAuthSystemPromptInjection:   true,
 		clientDatelineNormalization:        true,
 		openAICodexPromptCacheOptimization: s.defaultOpenAICodexPromptCacheOptimizationEnabled(),
+		openAIResponsesRectifier:           s.defaultOpenAIResponsesRectifierEnabled(),
 	}
 }
 
@@ -871,6 +885,11 @@ func (s *SettingService) IsClientDatelineNormalizationEnabled(ctx context.Contex
 // native Responses requests should use the prompt-cache preserving translator.
 func (s *SettingService) IsOpenAICodexPromptCacheOptimizationEnabled(ctx context.Context) bool {
 	return s.getGatewayForwardingSettingsCached(ctx).openAICodexPromptCacheOptimization
+}
+
+// IsOpenAIResponsesRectifierEnabled 检查是否启用 /v1/responses 请求整流器。
+func (s *SettingService) IsOpenAIResponsesRectifierEnabled(ctx context.Context) bool {
+	return s.getGatewayForwardingSettingsCached(ctx).openAIResponsesRectifier
 }
 
 // GetClaudeOAuthSystemPromptInjectionSettings returns the Claude OAuth mimic

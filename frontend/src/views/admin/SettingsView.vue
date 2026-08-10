@@ -236,6 +236,33 @@
             </div>
           </div>
 
+          <!-- OpenAI Responses Request Rectifier -->
+          <div class="card" data-testid="responses-rectifier-settings">
+            <div
+              class="flex flex-col items-stretch gap-4 px-6 py-5 sm:flex-row sm:items-center sm:justify-between sm:gap-6"
+            >
+              <div class="min-w-0">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                  {{
+                    t("admin.settings.gatewayForwarding.responsesRectifier")
+                  }}
+                </h2>
+                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  {{
+                    t(
+                      "admin.settings.gatewayForwarding.responsesRectifierHint",
+                    )
+                  }}
+                </p>
+              </div>
+              <Toggle
+                v-model="form.openai_responses_rectifier_enabled"
+                class="self-end sm:self-auto"
+                data-testid="responses-rectifier-toggle"
+              />
+            </div>
+          </div>
+
           <!-- OpenAI Priority Saturation Scheduler -->
           <div class="card" data-testid="openai-priority-saturation-settings">
             <div
@@ -10046,6 +10073,7 @@ const form = reactive<SettingsForm>({
   rewrite_message_cache_control: false,
   enable_client_dateline_normalization: true,
   openai_codex_prompt_cache_optimization_enabled: true,
+  openai_responses_rectifier_enabled: true,
   antigravity_user_agent_version: "",
   openai_codex_user_agent: "",
   openai_codex_client_version: "",
@@ -11711,6 +11739,8 @@ async function saveSettings() {
         form.enable_client_dateline_normalization,
       openai_codex_prompt_cache_optimization_enabled:
         form.openai_codex_prompt_cache_optimization_enabled,
+      openai_responses_rectifier_enabled:
+        form.openai_responses_rectifier_enabled,
       antigravity_user_agent_version:
         form.antigravity_user_agent_version?.trim() || "",
       openai_codex_user_agent:
