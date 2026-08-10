@@ -15,9 +15,21 @@ import (
 const maxOpenAIResponsesRejectedFieldRetries = 6
 
 var (
-	openAIResponsesRejectedNamespaceParamPattern = regexp.MustCompile(`(?i)^input\[(\d+)\]\.namespace$`)
-	openAIResponsesRejectedMessageParamPattern   = regexp.MustCompile(`(?i)(?:unknown|unsupported)[ _-]+parameter\s*(?::|=|is)?\s*["']?(max_output_tokens|input\[\d+\]\.namespace)(?:["']|\b)`)
+	openAIResponsesRejectedIndexedParamPattern  = regexp.MustCompile(`(?i)^input\[(\d+)\]\.(namespace|item_reference)$`)
+	openAIResponsesRejectedMessageParamPattern  = regexp.MustCompile(`(?i)(?:unknown|unsupported)[ _-]+parameter\s*(?::|=|is)?\s*["']?(max_output_tokens|reasoning_effort|background|reasoning\.summary|input\[\d+\]\.(?:namespace|item_reference))(?:["']|\b)`)
+	openAIResponsesContentTooLongMessagePattern = regexp.MustCompile(`(?i)invalid '?input\[(\d+)\]\.content'?:\s*array too long\.\s*expected an array with maximum length 0`)
 )
+
+// openAIResponsesRejectedTopLevelParams maps explicitly rejected
+// unknown/unsupported parameters to the body path deleted before the bounded
+// retry. Values are gjson/sjson paths, so "reasoning.summary" targets the
+// nested reasoning object field.
+var openAIResponsesRejectedTopLevelParams = map[string]string{
+	"max_output_tokens": "max_output_tokens",
+	"reasoning_effort":  "reasoning_effort",
+	"background":        "background",
+	"reasoning.summary": "reasoning.summary",
+}
 
 type openAIResponsesRejectedFieldRetryState struct {
 	attempts       int
@@ -62,23 +74,31 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 
 	code := strings.ToLower(strings.TrimSpace(extractUpstreamErrorCode(responseBody)))
 	message := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(responseBody)))
-	if !isExplicitOpenAIResponsesFieldRejection(code, message) {
+	if isExplicitOpenAIResponsesFieldRejection(code, message) {
+		param := strings.ToLower(strings.TrimSpace(gjson.GetBytes(responseBody, "error.param").String()))
+		if param == "" {
+			param = openAIResponsesRejectedParamFromMessage(message)
+		}
+		if index, field, ok := openAIResponsesRejectedIndexedParam(param); ok {
+			switch field {
+			case "namespace":
+				return removeOpenAIResponsesRejectedNamespaceAtIndex(body, index)
+			case "item_reference":
+				return removeOpenAIResponsesRejectedItemReferenceAtIndex(body, index)
+			}
+			return nil, "", false, nil
+		}
+		if path, ok := openAIResponsesRejectedTopLevelParams[param]; ok && gjson.GetBytes(body, path).Exists() {
+			retryBody, err := sjson.DeleteBytes(body, path)
+			if err != nil {
+				return nil, "", false, fmt.Errorf("delete rejected %s: %w", path, err)
+			}
+			return retryBody, path + " parameter rejection", true, nil
+		}
 		return nil, "", false, nil
 	}
-
-	param := strings.ToLower(strings.TrimSpace(gjson.GetBytes(responseBody, "error.param").String()))
-	if param == "" {
-		param = openAIResponsesRejectedParamFromMessage(message)
-	}
-	if index, ok := openAIResponsesRejectedNamespaceIndex(param); ok {
-		return removeOpenAIResponsesRejectedNamespaceAtIndex(body, index)
-	}
-	if param == "max_output_tokens" && gjson.GetBytes(body, "max_output_tokens").Exists() {
-		retryBody, err := sjson.DeleteBytes(body, "max_output_tokens")
-		if err != nil {
-			return nil, "", false, fmt.Errorf("delete rejected max_output_tokens: %w", err)
-		}
-		return retryBody, "max_output_tokens parameter rejection", true, nil
+	if index, ok := openAIResponsesContentTooLongIndex(message); ok {
+		return emptyOpenAIResponsesRejectedContentAtIndex(body, index)
 	}
 	return nil, "", false, nil
 }
@@ -100,16 +120,28 @@ func openAIResponsesRejectedParamFromMessage(message string) string {
 	return strings.ToLower(strings.TrimSpace(match[1]))
 }
 
-func openAIResponsesRejectedNamespaceIndex(param string) (int, bool) {
-	match := openAIResponsesRejectedNamespaceParamPattern.FindStringSubmatch(strings.TrimSpace(param))
+func openAIResponsesRejectedIndexedParam(param string) (int, string, bool) {
+	match := openAIResponsesRejectedIndexedParamPattern.FindStringSubmatch(strings.TrimSpace(param))
+	if len(match) != 3 {
+		return 0, "", false
+	}
+	index, err := strconv.Atoi(match[1])
+	if err != nil || index < 0 {
+		return 0, "", false
+	}
+	return index, strings.ToLower(match[2]), true
+}
+
+func openAIResponsesContentTooLongIndex(message string) (int, bool) {
+	match := openAIResponsesContentTooLongMessagePattern.FindStringSubmatch(strings.TrimSpace(message))
 	if len(match) != 2 {
 		return 0, false
 	}
 	index, err := strconv.Atoi(match[1])
-	if err == nil && index >= 0 {
-		return index, true
+	if err != nil || index < 0 {
+		return 0, false
 	}
-	return 0, false
+	return index, true
 }
 
 func removeOpenAIResponsesRejectedNamespaceAtIndex(body []byte, index int) ([]byte, string, bool, error) {
@@ -130,4 +162,43 @@ func removeOpenAIResponsesRejectedNamespaceAtIndex(body []byte, index int) ([]by
 		return nil, "", false, fmt.Errorf("delete rejected namespace at input[%d]: %w", index, err)
 	}
 	return retryBody, "indexed namespace parameter rejection", true, nil
+}
+
+func removeOpenAIResponsesRejectedItemReferenceAtIndex(body []byte, index int) ([]byte, string, bool, error) {
+	itemPath := fmt.Sprintf("input.%d", index)
+	item := gjson.GetBytes(body, itemPath)
+	if !item.Exists() {
+		return nil, "", false, nil
+	}
+	if item.Get("item_reference").Exists() {
+		retryBody, err := sjson.DeleteBytes(body, itemPath+".item_reference")
+		if err != nil {
+			return nil, "", false, fmt.Errorf("delete rejected item_reference at input[%d]: %w", index, err)
+		}
+		return retryBody, "indexed item_reference parameter rejection", true, nil
+	}
+	if strings.EqualFold(strings.TrimSpace(item.Get("type").String()), "item_reference") {
+		retryBody, err := sjson.DeleteBytes(body, itemPath)
+		if err != nil {
+			return nil, "", false, fmt.Errorf("remove rejected item_reference item at input[%d]: %w", index, err)
+		}
+		return retryBody, "indexed item_reference item rejection", true, nil
+	}
+	return nil, "", false, nil
+}
+
+// emptyOpenAIResponsesRejectedContentAtIndex rewrites input[N].content to an
+// empty array when the upstream rejected it with "array too long. Expected an
+// array with maximum length 0" (a codex-spark history-item constraint).
+func emptyOpenAIResponsesRejectedContentAtIndex(body []byte, index int) ([]byte, string, bool, error) {
+	contentPath := fmt.Sprintf("input.%d.content", index)
+	content := gjson.GetBytes(body, contentPath)
+	if !content.IsArray() || len(content.Array()) == 0 {
+		return nil, "", false, nil
+	}
+	retryBody, err := sjson.SetRawBytes(body, contentPath, []byte("[]"))
+	if err != nil {
+		return nil, "", false, fmt.Errorf("empty rejected content at input[%d]: %w", index, err)
+	}
+	return retryBody, "indexed content max-length rejection", true, nil
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // Forward forwards request to OpenAI API
@@ -84,6 +85,15 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		if changed {
 			body = liteBody
+		}
+		// responses-lite 上游硬性要求 parallel_tool_calls=false（否则 400），
+		// 缺省或其它取值一律显式改写。
+		if gjson.GetBytes(body, "parallel_tool_calls").Raw != "false" {
+			parallelBody, parallelErr := sjson.SetBytes(body, "parallel_tool_calls", false)
+			if parallelErr != nil {
+				return nil, fmt.Errorf("force parallel_tool_calls=false for responses-lite: %w", parallelErr)
+			}
+			body = parallelBody
 		}
 	}
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
@@ -403,7 +413,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			return nil, decodeErr
 		}
 		if err := validateCodexSparkInput(decoded, upstreamModel); err != nil {
-			setOpsUpstreamError(c, http.StatusBadRequest, err.Error(), "")
+			// 本地能力校验拒绝，不是上游错误：用 client business limited 标记，
+			// 避免 ops 把网关自身的 400 归类成 provider/upstream P2 告警。
+			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error(), "param": "input"}})
 			return nil, err
 		}
