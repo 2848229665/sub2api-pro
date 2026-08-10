@@ -222,6 +222,34 @@ func TestNormalizeOpenAIResponsesLiteTools_RejectsUnsupportedTools(t *testing.T)
 	}
 }
 
+func TestNormalizeOpenAIResponsesLiteToolsPayload_PreservesPrefixBytesWhenOnlyReasoningContextChanges(t *testing.T) {
+	// No namespace tools: the sole change is reasoning.context=all_turns. The
+	// instructions/tools/input prompt prefix must stay byte-identical so OpenAI
+	// prompt caching keeps hitting across turns.
+	body := []byte(`{"model":"gpt-5.6-terra","instructions":"stable prefix","tools":[{"type":"function","name":"shell","parameters":{"type":"object","properties":{}}},{"type":"tool_search"}],"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"reasoning":{"effort":"high","context":"current_turn"},"text":{"verbosity":"low"}}`)
+
+	updated, changed, err := normalizeOpenAIResponsesLiteToolsPayload(body)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "all_turns", gjson.GetBytes(updated, "reasoning.context").String())
+	require.Equal(t, "high", gjson.GetBytes(updated, "reasoning.effort").String())
+	for _, field := range []string{"model", "instructions", "tools", "input", "text"} {
+		require.Equal(t, gjson.GetBytes(body, field).Raw, gjson.GetBytes(updated, field).Raw,
+			"prefix field %q must stay byte-identical", field)
+	}
+}
+
+func TestNormalizeOpenAIResponsesLiteToolsPayload_NoChangeWhenReasoningContextAlreadyAllTurns(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-terra","instructions":"stable","tools":[{"type":"function","name":"shell"}],"input":[],"reasoning":{"effort":"high","context":"all_turns"}}`)
+
+	updated, changed, err := normalizeOpenAIResponsesLiteToolsPayload(body)
+
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, body, updated)
+}
+
 func TestNormalizeOpenAIResponsesLiteToolsPayload_PreservesResponseCreateShape(t *testing.T) {
 	body := []byte(`{
 		"type":"response.create",
