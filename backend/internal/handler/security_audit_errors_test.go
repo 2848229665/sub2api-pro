@@ -158,36 +158,37 @@ func TestPromptGuardWebSocketCloseMappingGolden(t *testing.T) {
 }
 
 func TestKeywordModerationUsesCodexTerminalHTTPError(t *testing.T) {
+	defaultCode := service.DefaultContentModerationBlockErrorCode()
 	legacy := &securityaudit.Decision{
 		Kind: securityaudit.DecisionBlock, HTTPStatus: http.StatusForbidden,
-		ErrorCode: "content_policy_violation", ClientMessage: "keyword blocked",
+		ErrorCode: defaultCode, ClientMessage: "keyword blocked",
 		Legacy: &securityaudit.LegacyDecision{
-			Blocked: true, StatusCode: http.StatusForbidden, ErrorCode: "content_policy_violation",
+			Blocked: true, StatusCode: http.StatusForbidden, ErrorCode: defaultCode,
 			Message: "keyword blocked", Action: "keyword_block",
 		},
 	}
 	c, recorder := securityAuditErrorTestContext(t)
 	(&OpenAIGatewayHandler{}).openAISecurityAuditError(c, legacy)
 
-	requireSecurityAuditSLAExclusion(t, c, "content_policy_violation")
+	requireSecurityAuditSLAExclusion(t, c, defaultCode)
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
 	errorObject := requireObject(t, decodeErrorJSON(t, recorder)["error"])
 	require.Equal(t, "invalid_request_error", errorObject["type"])
-	require.Equal(t, "content_policy_violation", errorObject["code"])
+	require.Equal(t, defaultCode, errorObject["code"])
 	require.Equal(t, "keyword blocked", errorObject["message"])
 }
 
 func TestKeywordSessionBlockUsesCodexTerminalHTTPError(t *testing.T) {
-	decision := keywordSessionBlockedDecision()
+	decision := keywordSessionBlockedDecision("")
 	c, recorder := securityAuditErrorTestContext(t)
 	(&OpenAIGatewayHandler{}).openAISecurityAuditError(c, decision)
 
-	requireSecurityAuditSLAExclusion(t, c, keywordSessionBlockedErrorCode)
+	requireSecurityAuditSLAExclusion(t, c, service.DefaultContentModerationBlockErrorCode())
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.Equal(t, coderws.StatusPolicyViolation, securityAuditWSCloseStatus(decision))
 	errorObject := requireObject(t, decodeErrorJSON(t, recorder)["error"])
-	require.Equal(t, keywordSessionBlockedErrorCode, errorObject["code"])
+	require.Equal(t, service.DefaultContentModerationBlockErrorCode(), errorObject["code"])
 	require.Equal(t, keywordSessionBlockedClientMsg, errorObject["message"])
 }
 
@@ -203,21 +204,21 @@ func TestKeywordContentPolicyReturnsHTTPErrorOnUncommittedStream(t *testing.T) {
 			name: "first keyword block",
 			decision: &securityaudit.Decision{
 				Kind: securityaudit.DecisionBlock, HTTPStatus: http.StatusForbidden,
-				ErrorCode: "content_policy_violation", ClientMessage: "keyword blocked",
+				ErrorCode: service.DefaultContentModerationBlockErrorCode(), ClientMessage: "keyword blocked",
 				Legacy: &securityaudit.LegacyDecision{
-					Blocked: true, StatusCode: http.StatusForbidden, ErrorCode: "content_policy_violation",
+					Blocked: true, StatusCode: http.StatusForbidden, ErrorCode: service.DefaultContentModerationBlockErrorCode(),
 					Message: "keyword blocked", Action: service.ContentModerationActionKeywordBlock,
 				},
 			},
-			internalCode: "content_policy_violation",
-			expectedCode: "content_policy_violation",
+			internalCode: service.DefaultContentModerationBlockErrorCode(),
+			expectedCode: service.DefaultContentModerationBlockErrorCode(),
 			message:      "keyword blocked",
 		},
 		{
 			name:         "historical session block",
-			decision:     keywordSessionBlockedDecision(),
-			internalCode: keywordSessionBlockedErrorCode,
-			expectedCode: keywordSessionBlockedErrorCode,
+			decision:     keywordSessionBlockedDecision(""),
+			internalCode: service.DefaultContentModerationBlockErrorCode(),
+			expectedCode: service.DefaultContentModerationBlockErrorCode(),
 			message:      keywordSessionBlockedClientMsg,
 		},
 	}
@@ -246,13 +247,13 @@ func TestKeywordContentPolicyBodySignalCompactReturnsHTTPError(t *testing.T) {
 	setOpsRequestContext(c, "gpt-5", false)
 	service.MarkOpenAICompactClientStream(c)
 
-	(&OpenAIGatewayHandler{}).openAISecurityAuditError(c, keywordSessionBlockedDecision())
+	(&OpenAIGatewayHandler{}).openAISecurityAuditError(c, keywordSessionBlockedDecision(""))
 
-	requireSecurityAuditSLAExclusion(t, c, keywordSessionBlockedErrorCode)
+	requireSecurityAuditSLAExclusion(t, c, service.DefaultContentModerationBlockErrorCode())
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	errorObject := requireObject(t, decodeErrorJSON(t, recorder)["error"])
 	require.Equal(t, "invalid_request_error", errorObject["type"])
-	require.Equal(t, keywordSessionBlockedErrorCode, errorObject["code"])
+	require.Equal(t, service.DefaultContentModerationBlockErrorCode(), errorObject["code"])
 	require.Equal(t, keywordSessionBlockedClientMsg, errorObject["message"])
 }
 
@@ -273,11 +274,12 @@ func TestNonKeywordSecurityAuditOnStreamingResponsesKeepsHTTPError(t *testing.T)
 }
 
 func TestKeywordContentPolicyOnStreamingChatKeepsHTTPError(t *testing.T) {
+	defaultCode := service.DefaultContentModerationBlockErrorCode()
 	decision := &securityaudit.Decision{
 		Kind: securityaudit.DecisionBlock, HTTPStatus: http.StatusForbidden,
-		ErrorCode: "content_policy_violation", ClientMessage: "keyword blocked",
+		ErrorCode: defaultCode, ClientMessage: "keyword blocked",
 		Legacy: &securityaudit.LegacyDecision{
-			Blocked: true, StatusCode: http.StatusForbidden, ErrorCode: "content_policy_violation",
+			Blocked: true, StatusCode: http.StatusForbidden, ErrorCode: defaultCode,
 			Message: "keyword blocked", Action: service.ContentModerationActionKeywordBlock,
 		},
 	}
@@ -287,12 +289,12 @@ func TestKeywordContentPolicyOnStreamingChatKeepsHTTPError(t *testing.T) {
 
 	(&OpenAIGatewayHandler{}).openAISecurityAuditError(c, decision)
 
-	requireSecurityAuditSLAExclusion(t, c, "content_policy_violation")
+	requireSecurityAuditSLAExclusion(t, c, defaultCode)
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.NotContains(t, recorder.Header().Get("Content-Type"), "text/event-stream")
 	errorObject := requireObject(t, decodeErrorJSON(t, recorder)["error"])
 	require.Equal(t, "invalid_request_error", errorObject["type"])
-	require.Equal(t, "content_policy_violation", errorObject["code"])
+	require.Equal(t, defaultCode, errorObject["code"])
 }
 
 func TestLegacyModerationErrorKeepsExistingClientPriority(t *testing.T) {

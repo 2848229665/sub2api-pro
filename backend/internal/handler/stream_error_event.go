@@ -60,14 +60,10 @@ func writeResponsesFailedSSE(c *gin.Context, errType, message string) bool {
 	})
 }
 
-// writeResponsesInvalidPromptSSE emits the exact terminal error shape Codex
-// treats as a deterministic invalid request. Keyword-policy blocks use this
-// wire code even when their internal reason is more specific, because unknown
-// response.failed codes may be retried by Codex clients.
-func writeResponsesInvalidPromptSSE(c *gin.Context, message string) bool {
+func writeResponsesContentPolicySSE(c *gin.Context, code, message string) bool {
 	return writeResponsesFailedSSEError(c, responsesFailedError{
 		Type:    "invalid_request_error",
-		Code:    keywordPolicyCodexWireErrorCode,
+		Code:    code,
 		Message: message,
 	})
 }
