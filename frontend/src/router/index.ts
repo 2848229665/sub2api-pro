@@ -426,6 +426,21 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    // Standalone detail page: opened in a new browser tab from the ops
+    // dashboard so each detail (error list / single error / request list)
+    // gets its own tab. Renders the same dialog bodies in embedded mode.
+    path: '/admin/ops/detail',
+    name: 'AdminOpsDetail',
+    component: () => import('@/views/admin/ops/OpsDetailView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Ops Detail',
+      titleKey: 'admin.ops.title',
+      descriptionKey: 'admin.ops.description'
+    }
+  },
+  {
     path: '/admin/audit-logs',
     name: 'AdminAuditLogs',
     component: () => import('@/views/admin/AuditLogView.vue'),

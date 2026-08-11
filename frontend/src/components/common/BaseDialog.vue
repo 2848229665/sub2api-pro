@@ -1,5 +1,26 @@
 <template>
-  <Teleport to="body">
+  <!-- Embedded mode: render as standalone page content (no overlay / no teleport),
+       used when a detail dialog is opened as its own browser tab. -->
+  <div
+    v-if="embedded"
+    class="flex min-h-screen flex-col bg-gray-50 dark:bg-dark-950"
+    :aria-labelledby="dialogId"
+    role="region"
+  >
+    <div class="flex items-center border-b border-gray-200 px-4 py-3 dark:border-dark-700 md:px-6">
+      <h3 :id="dialogId" class="text-lg font-semibold text-gray-900 dark:text-dark-100">
+        {{ title }}
+      </h3>
+    </div>
+    <div class="flex-1 overflow-auto p-4 md:p-6">
+      <slot></slot>
+    </div>
+    <div v-if="$slots.footer" class="border-t border-gray-200 p-4 dark:border-dark-700 md:px-6">
+      <slot name="footer"></slot>
+    </div>
+  </div>
+
+  <Teleport v-else to="body">
     <Transition name="modal">
       <div
         v-if="show"
@@ -65,6 +86,9 @@ interface Props {
   closeOnClickOutside?: boolean
   showCloseButton?: boolean
   zIndex?: number
+  // When true, render inline as standalone page content instead of a modal
+  // overlay. Used to present a dialog's body as its own browser tab.
+  embedded?: boolean
 }
 
 interface Emits {
@@ -76,7 +100,8 @@ const props = withDefaults(defineProps<Props>(), {
   closeOnEscape: true,
   closeOnClickOutside: false,
   showCloseButton: true,
-  zIndex: 50
+  zIndex: 50,
+  embedded: false
 })
 
 const emit = defineEmits<Emits>()
@@ -116,6 +141,9 @@ const handleEscape = (event: KeyboardEvent) => {
 watch(
   () => props.show,
   async (isOpen) => {
+    // Embedded mode renders inline as page content; skip overlay-only behaviors
+    // (body scroll lock, focus trap).
+    if (props.embedded) return
     if (isOpen) {
       // 保存当前焦点元素
       previousActiveElement = document.activeElement as HTMLElement

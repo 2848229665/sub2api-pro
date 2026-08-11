@@ -171,6 +171,7 @@ import OpsSystemLogTable from './components/OpsSystemLogTable.vue'
 import OpsRequestDetailsModal, { type OpsRequestDetailsPreset } from './components/OpsRequestDetailsModal.vue'
 import OpsSettingsDialog from './components/OpsSettingsDialog.vue'
 import OpsAlertRulesCard from './components/OpsAlertRulesCard.vue'
+import { openOpsDetailTab } from './utils/opsDetailLink'
 
 const route = useRoute()
 const router = useRouter()
@@ -441,27 +442,31 @@ function handleThroughputSelectGroup(nextGroupId: number) {
   groupId.value = id
 }
 
+// Detail views open in their own browser tab (see OpsDetailView.vue), carrying
+// the current time range / platform / group / custom-time filters forward.
+function currentDetailScope() {
+  return {
+    timeRange: timeRange.value,
+    platform: platform.value,
+    groupId: groupId.value,
+    customStartTime: customStartTime.value,
+    customEndTime: customEndTime.value
+  }
+}
+
 function handleOpenRequestDetails(preset?: OpsRequestDetailsPreset) {
   const basePreset: OpsRequestDetailsPreset = {
     title: t('admin.ops.requestDetails.title'),
     kind: 'all',
     sort: 'created_at_desc'
   }
-
-  requestDetailsPreset.value = { ...basePreset, ...(preset ?? {}) }
-  if (!requestDetailsPreset.value.title) requestDetailsPreset.value.title = basePreset.title
-  // Ensure only one modal visible at a time.
-  showErrorDetails.value = false
-  showErrorModal.value = false
-  showRequestDetails.value = true
+  const merged = { ...basePreset, ...(preset ?? {}) }
+  if (!merged.title) merged.title = basePreset.title
+  openOpsDetailTab(router, { kind: 'request', requestPreset: merged, ...currentDetailScope() })
 }
 
 function openErrorDetails(kind: 'request' | 'upstream') {
-  errorDetailsType.value = kind
-  // Ensure only one modal visible at a time.
-  showRequestDetails.value = false
-  showErrorModal.value = false
-  showErrorDetails.value = true
+  openOpsDetailTab(router, { kind: 'error-details', errorType: kind, ...currentDetailScope() })
 }
 
 function onTimeRangeChange(v: string | number | boolean | null) {
@@ -507,11 +512,7 @@ function onQueryModeChange(v: string | number | boolean | null) {
 }
 
 function openError(id: number) {
-  selectedErrorId.value = id
-  // Ensure only one modal visible at a time.
-  showErrorDetails.value = false
-  showRequestDetails.value = false
-  showErrorModal.value = true
+  openOpsDetailTab(router, { kind: 'error', errorId: id, errorType: errorDetailsType.value, ...currentDetailScope() })
 }
 
 function buildApiParams() {
