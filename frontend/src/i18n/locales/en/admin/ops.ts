@@ -2,6 +2,9 @@ export default {
     ops: {
       title: 'Ops Monitoring',
       description: 'Operational monitoring and troubleshooting',
+      detail: {
+        invalidLink: 'This detail link is invalid or incomplete.'
+      },
       // Dashboard
       systemHealth: 'System Health',
       overview: 'Overview',

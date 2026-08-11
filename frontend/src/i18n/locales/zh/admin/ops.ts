@@ -2,6 +2,9 @@ export default {
     ops: {
       title: '运维监控',
       description: '运维监控与排障',
+      detail: {
+        invalidLink: '详情链接无效或不完整。'
+      },
       // Dashboard
       systemHealth: '系统健康',
       overview: '概览',

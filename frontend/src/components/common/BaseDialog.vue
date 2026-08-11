@@ -1,8 +1,9 @@
 <template>
   <!-- Embedded mode: render as standalone page content (no overlay / no teleport),
-       used when a detail dialog is opened as its own browser tab. -->
+       used when a detail dialog is opened as its own browser tab. `show` still
+       gates visibility so the prop contract matches the modal branch. -->
   <div
-    v-if="embedded"
+    v-if="embedded && show"
     class="flex min-h-screen flex-col bg-gray-50 dark:bg-dark-950"
     :aria-labelledby="dialogId"
     role="region"

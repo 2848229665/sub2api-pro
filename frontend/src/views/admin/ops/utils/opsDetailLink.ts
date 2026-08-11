@@ -29,7 +29,7 @@ export const OPS_DETAIL_QUERY = {
   customEnd: 'ce',
   errorType: 'error_type',
   errorId: 'error_id',
-  rdTitle: 'rd_title',
+  rdTitleKey: 'rd_title_key',
   rdKind: 'rd_kind',
   rdSort: 'rd_sort',
   rdMin: 'rd_min',
@@ -47,7 +47,10 @@ export function buildOpsDetailQuery(o: OpsDetailLinkOptions): Record<string, str
   if (typeof o.errorId === 'number' && o.errorId > 0) q[OPS_DETAIL_QUERY.errorId] = String(o.errorId)
   if (o.requestPreset) {
     const p = o.requestPreset
-    if (p.title) q[OPS_DETAIL_QUERY.rdTitle] = p.title
+    // Only the i18n key crosses the URL boundary — never localized text — so a
+    // shared link renders in the viewer's locale and the detail view can
+    // validate the key against the message catalog.
+    if (p.titleKey) q[OPS_DETAIL_QUERY.rdTitleKey] = p.titleKey
     if (p.kind) q[OPS_DETAIL_QUERY.rdKind] = String(p.kind)
     if (p.sort) q[OPS_DETAIL_QUERY.rdSort] = String(p.sort)
     if (typeof p.min_duration_ms === 'number') q[OPS_DETAIL_QUERY.rdMin] = String(p.min_duration_ms)

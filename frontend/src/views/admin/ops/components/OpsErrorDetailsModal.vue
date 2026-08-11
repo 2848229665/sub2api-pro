@@ -160,7 +160,10 @@ watch(
     page.value = 1
     pageSize.value = 10
     resetFilters()
-  }
+  },
+  // Embedded detail tabs mount with show=true, so there is no false->true
+  // transition; fire immediately to run the initial fetch.
+  { immediate: true }
 )
 
 watch(

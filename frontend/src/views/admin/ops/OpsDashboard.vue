@@ -110,29 +110,6 @@
         <BaseDialog :show="showAlertRulesCard" :title="t('admin.ops.alertRules.title')" width="extra-wide" @close="showAlertRulesCard = false">
           <OpsAlertRulesCard />
         </BaseDialog>
-
-        <OpsErrorDetailsModal
-          :show="showErrorDetails"
-          :time-range="timeRange"
-          :custom-start-time="customStartTime"
-          :custom-end-time="customEndTime"
-          :platform="platform"
-          :group-id="groupId"
-          :error-type="errorDetailsType"
-          @update:show="showErrorDetails = $event"
-          @openErrorDetail="openError"
-        />
-
-        <OpsErrorDetailModal v-model:show="showErrorModal" :error-id="selectedErrorId" :error-type="errorDetailsType" />
-
-        <OpsRequestDetailsModal
-          v-model="showRequestDetails"
-          :time-range="timeRange"
-          :preset="requestDetailsPreset"
-          :platform="platform"
-          :group-id="groupId"
-          @openErrorDetail="openError"
-        />
       </template>
     </div>
   </component>
@@ -158,9 +135,7 @@ import { useAdminSettingsStore, useAppStore } from '@/stores'
 import OpsDashboardHeader from './components/OpsDashboardHeader.vue'
 import OpsDashboardSkeleton from './components/OpsDashboardSkeleton.vue'
 import OpsConcurrencyCard from './components/OpsConcurrencyCard.vue'
-import OpsErrorDetailModal from './components/OpsErrorDetailModal.vue'
 import OpsErrorDistributionChart from './components/OpsErrorDistributionChart.vue'
-import OpsErrorDetailsModal from './components/OpsErrorDetailsModal.vue'
 import OpsErrorTrendChart from './components/OpsErrorTrendChart.vue'
 import OpsLatencyChart from './components/OpsLatencyChart.vue'
 import OpsThroughputTrendChart from './components/OpsThroughputTrendChart.vue'
@@ -168,10 +143,11 @@ import OpsSwitchRateTrendChart from './components/OpsSwitchRateTrendChart.vue'
 import OpsAlertEventsCard from './components/OpsAlertEventsCard.vue'
 import OpsOpenAITokenStatsCard from './components/OpsOpenAITokenStatsCard.vue'
 import OpsSystemLogTable from './components/OpsSystemLogTable.vue'
-import OpsRequestDetailsModal, { type OpsRequestDetailsPreset } from './components/OpsRequestDetailsModal.vue'
+import { type OpsRequestDetailsPreset } from './components/OpsRequestDetailsModal.vue'
 import OpsSettingsDialog from './components/OpsSettingsDialog.vue'
 import OpsAlertRulesCard from './components/OpsAlertRulesCard.vue'
-import { openOpsDetailTab } from './utils/opsDetailLink'
+import { buildOpsDetailQuery, openOpsDetailTab } from './utils/opsDetailLink'
+import { readRouteQueryString, readRouteQueryNumber } from './utils/routeQuery'
 
 const route = useRoute()
 const router = useRouter()
@@ -261,19 +237,8 @@ function abortDashboardFetch() {
   }
 }
 
-const readQueryString = (key: string): string => {
-  const value = route.query[key]
-  if (typeof value === 'string') return value
-  if (Array.isArray(value) && typeof value[0] === 'string') return value[0]
-  return ''
-}
-
-const readQueryNumber = (key: string): number | null => {
-  const raw = readQueryString(key)
-  if (!raw) return null
-  const n = Number.parseInt(raw, 10)
-  return Number.isFinite(n) ? n : null
-}
+const readQueryString = (key: string): string => readRouteQueryString(route.query, key)
+const readQueryNumber = (key: string): number | null => readRouteQueryNumber(route.query, key)
 
 const applyRouteQueryToState = () => {
   const nextTimeRange = readQueryString(QUERY_KEYS.timeRange)
@@ -307,9 +272,22 @@ const applyRouteQueryToState = () => {
 
   const openErr = readQueryString(QUERY_KEYS.openErrorDetails)
   if (openErr === '1' || openErr === 'true') {
+    // Deep link: present the same detail view the click paths open, but in
+    // this tab (replacing the dashboard) — a new tab cannot be opened without
+    // a user gesture.
     const typ = readQueryString(QUERY_KEYS.errorType)
-    errorDetailsType.value = typ === 'upstream' ? 'upstream' : 'request'
-    showErrorDetails.value = true
+    void router.replace({
+      name: 'AdminOpsDetail',
+      query: buildOpsDetailQuery({
+        kind: 'error-details',
+        errorType: typ === 'upstream' ? 'upstream' : 'request',
+        timeRange: timeRange.value,
+        platform: platform.value,
+        groupId: groupId.value,
+        customStartTime: customStartTime.value,
+        customEndTime: customEndTime.value
+      })
+    })
   }
 }
 
@@ -364,19 +342,6 @@ const loadingErrorTrend = ref(false)
 
 const errorDistribution = ref<OpsErrorDistributionResponse | null>(null)
 const loadingErrorDistribution = ref(false)
-
-const selectedErrorId = ref<number | null>(null)
-const showErrorModal = ref(false)
-
-const showErrorDetails = ref(false)
-const errorDetailsType = ref<'request' | 'upstream'>('request')
-
-const showRequestDetails = ref(false)
-const requestDetailsPreset = ref<OpsRequestDetailsPreset>({
-  title: '',
-  kind: 'all',
-  sort: 'created_at_desc'
-})
 
 const showSettingsDialog = ref(false)
 const showAlertRulesCard = ref(false)
@@ -456,13 +421,11 @@ function currentDetailScope() {
 
 function handleOpenRequestDetails(preset?: OpsRequestDetailsPreset) {
   const basePreset: OpsRequestDetailsPreset = {
-    title: t('admin.ops.requestDetails.title'),
+    titleKey: 'admin.ops.requestDetails.title',
     kind: 'all',
     sort: 'created_at_desc'
   }
-  const merged = { ...basePreset, ...(preset ?? {}) }
-  if (!merged.title) merged.title = basePreset.title
-  openOpsDetailTab(router, { kind: 'request', requestPreset: merged, ...currentDetailScope() })
+  openOpsDetailTab(router, { kind: 'request', requestPreset: { ...basePreset, ...(preset ?? {}) }, ...currentDetailScope() })
 }
 
 function openErrorDetails(kind: 'request' | 'upstream') {
@@ -509,10 +472,6 @@ function onQueryModeChange(v: string | number | boolean | null) {
   if (typeof v !== 'string') return
   if (!allowedQueryModes.has(v as QueryMode)) return
   queryMode.value = v as QueryMode
-}
-
-function openError(id: number) {
-  openOpsDetailTab(router, { kind: 'error', errorId: id, errorType: errorDetailsType.value, ...currentDetailScope() })
 }
 
 function buildApiParams() {

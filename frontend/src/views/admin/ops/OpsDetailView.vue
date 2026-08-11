@@ -16,6 +16,8 @@
     embedded
     :model-value="true"
     :time-range="timeRange"
+    :custom-start-time="customStartTime"
+    :custom-end-time="customEndTime"
     :preset="requestPreset"
     :platform="platform"
     :group-id="groupId"
@@ -29,36 +31,28 @@
     :error-type="errorType"
   />
   <div v-else class="p-6 text-sm text-gray-500 dark:text-dark-400">
-    {{ t('common.notFound') }}
+    {{ t('admin.ops.detail.invalidLink') }}
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
+import type { OpsRequestDetailsKind, OpsRequestDetailsSort } from '@/api/admin/ops'
 import OpsErrorDetailsModal from './components/OpsErrorDetailsModal.vue'
 import OpsErrorDetailModal from './components/OpsErrorDetailModal.vue'
 import OpsRequestDetailsModal, { type OpsRequestDetailsPreset } from './components/OpsRequestDetailsModal.vue'
 import { OPS_DETAIL_QUERY, openOpsDetailTab, type OpsDetailKind } from './utils/opsDetailLink'
+import { readRouteQueryString, readRouteQueryNumber } from './utils/routeQuery'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const route = useRoute()
 const router = useRouter()
 
-const qs = (key: string): string => {
-  const v = route.query[key]
-  if (typeof v === 'string') return v
-  if (Array.isArray(v) && typeof v[0] === 'string') return v[0]
-  return ''
-}
-const qn = (key: string): number | null => {
-  const raw = qs(key)
-  if (!raw) return null
-  const n = Number.parseInt(raw, 10)
-  return Number.isFinite(n) ? n : null
-}
+const qs = (key: string): string => readRouteQueryString(route.query, key)
+const qn = (key: string): number | null => readRouteQueryNumber(route.query, key)
 
 const kind = computed<OpsDetailKind | ''>(() => {
   const k = qs(OPS_DETAIL_QUERY.kind)
@@ -75,19 +69,43 @@ const errorType = computed<'request' | 'upstream'>(() =>
 )
 const errorId = computed(() => qn(OPS_DETAIL_QUERY.errorId))
 
+// URL params are untrusted: only whitelisted values reach the API, and only
+// i18n keys present in the message catalog reach the title.
+const allowedRequestKinds = new Set<OpsRequestDetailsKind>(['all', 'success', 'error'])
+const allowedRequestSorts = new Set<OpsRequestDetailsSort>(['created_at_desc', 'duration_desc'])
+
 const requestPreset = computed<OpsRequestDetailsPreset>(() => {
-  const preset: OpsRequestDetailsPreset = {
-    title: qs(OPS_DETAIL_QUERY.rdTitle) || t('admin.ops.requestDetails.title')
-  }
+  const preset: OpsRequestDetailsPreset = {}
+  const titleKey = qs(OPS_DETAIL_QUERY.rdTitleKey)
+  if (titleKey && te(titleKey)) preset.titleKey = titleKey
   const k = qs(OPS_DETAIL_QUERY.rdKind)
-  if (k) preset.kind = k as OpsRequestDetailsPreset['kind']
+  if (allowedRequestKinds.has(k as OpsRequestDetailsKind)) preset.kind = k as OpsRequestDetailsKind
   const sort = qs(OPS_DETAIL_QUERY.rdSort)
-  if (sort) preset.sort = sort as OpsRequestDetailsPreset['sort']
+  if (allowedRequestSorts.has(sort as OpsRequestDetailsSort)) preset.sort = sort as OpsRequestDetailsSort
   const min = qn(OPS_DETAIL_QUERY.rdMin)
   if (min !== null) preset.min_duration_ms = min
   const max = qn(OPS_DETAIL_QUERY.rdMax)
   if (max !== null) preset.max_duration_ms = max
   return preset
+})
+
+const pageTitle = computed(() => {
+  switch (kind.value) {
+    case 'error-details':
+      return errorType.value === 'upstream'
+        ? t('admin.ops.errorDetails.upstreamErrors')
+        : t('admin.ops.errorDetails.requestErrors')
+    case 'request':
+      return requestPreset.value.titleKey ? t(requestPreset.value.titleKey) : t('admin.ops.requestDetails.title')
+    case 'error':
+      return t('admin.ops.errorDetail.title')
+    default:
+      return t('admin.ops.title')
+  }
+})
+
+watchEffect(() => {
+  document.title = pageTitle.value
 })
 
 // A single error clicked from an embedded list opens as its own new tab,
@@ -104,9 +122,4 @@ function openErrorTab(id: number) {
     customEndTime: customEndTime.value
   })
 }
-
-onMounted(() => {
-  const title = qs(OPS_DETAIL_QUERY.rdTitle)
-  if (title) document.title = title
-})
 </script>
