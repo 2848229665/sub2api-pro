@@ -1,5 +1,5 @@
 <template>
-  <BaseDialog :show="show" :title="title" width="full" :close-on-click-outside="true" @close="close">
+  <BaseDialog :show="show" :title="title" width="full" :close-on-click-outside="true" :embedded="embedded" @close="close">
     <div v-if="loading" class="flex items-center justify-center py-16">
       <div class="flex flex-col items-center gap-3">
         <div class="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600"></div>
@@ -216,13 +216,14 @@ interface Props {
   show: boolean
   errorId: number | null
   errorType?: 'request' | 'upstream'
+  embedded?: boolean
 }
 
 interface Emits {
   (e: 'update:show', value: boolean): void
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { embedded: false })
 const emit = defineEmits<Emits>()
 
 const { t } = useI18n()

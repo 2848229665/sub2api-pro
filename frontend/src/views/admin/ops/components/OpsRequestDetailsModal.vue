@@ -10,7 +10,10 @@ import { opsAPI, type OpsRequestDetailsParams, type OpsRequestDetail } from '@/a
 import { parseTimeRangeMinutes, formatDateTime } from '../utils/opsFormatters'
 
 export interface OpsRequestDetailsPreset {
-  title: string
+  // Prefer titleKey: it survives being carried through a URL (opsDetailLink)
+  // without baking in the sharer's locale. `title` remains for direct callers.
+  title?: string
+  titleKey?: string
   kind?: OpsRequestDetailsParams['kind']
   sort?: OpsRequestDetailsParams['sort']
   min_duration_ms?: number
@@ -21,17 +24,20 @@ interface Props {
   modelValue: boolean
   timeRange: string
   preset: OpsRequestDetailsPreset
+  customStartTime?: string | null
+  customEndTime?: string | null
   platform?: string
   groupId?: number | null
+  embedded?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { embedded: false })
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
   (e: 'openErrorDetail', errorId: number): void
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const appStore = useAppStore()
 const { copyToClipboard } = useClipboard()
 
@@ -46,13 +52,32 @@ const pageSize = ref(10)
 
 const close = () => emit('update:modelValue', false)
 
+const dialogTitle = computed(() => {
+  if (props.preset.title) return props.preset.title
+  if (props.preset.titleKey && te(props.preset.titleKey)) return t(props.preset.titleKey)
+  return t('admin.ops.requestDetails.title')
+})
+
+const hasCustomWindow = computed(
+  () => props.timeRange === 'custom' && !!props.customStartTime && !!props.customEndTime
+)
+
 const rangeLabel = computed(() => {
+  if (hasCustomWindow.value) {
+    return `${formatDateTime(props.customStartTime as string)} - ${formatDateTime(props.customEndTime as string)}`
+  }
   const minutes = parseTimeRangeMinutes(props.timeRange)
   if (minutes >= 60) return t('admin.ops.requestDetails.rangeHours', { n: Math.round(minutes / 60) })
   return t('admin.ops.requestDetails.rangeMinutes', { n: minutes })
 })
 
 function buildTimeParams(): Pick<OpsRequestDetailsParams, 'start_time' | 'end_time'> {
+  if (hasCustomWindow.value) {
+    return {
+      start_time: props.customStartTime as string,
+      end_time: props.customEndTime as string
+    }
+  }
   const minutes = parseTimeRangeMinutes(props.timeRange)
   const endTime = new Date()
   const startTime = new Date(endTime.getTime() - minutes * 60 * 1000)
@@ -102,12 +127,17 @@ watch(
       pageSize.value = 10
       fetchData()
     }
-  }
+  },
+  // Embedded detail tabs mount with modelValue=true, so there is no
+  // false->true transition; fire immediately to run the initial fetch.
+  { immediate: true }
 )
 
 watch(
   () => [
     props.timeRange,
+    props.customStartTime,
+    props.customEndTime,
     props.platform,
     props.groupId,
     props.preset.kind,
@@ -153,7 +183,7 @@ const kindBadgeClass = (kind: string) => {
 </script>
 
 <template>
-  <BaseDialog :show="modelValue" :title="props.preset.title || t('admin.ops.requestDetails.title')" width="full" @close="close">
+  <BaseDialog :show="modelValue" :title="dialogTitle" width="full" :embedded="embedded" @close="close">
     <template #default>
       <div class="flex h-full min-h-0 flex-col">
         <div class="mb-4 flex flex-shrink-0 items-center justify-between">

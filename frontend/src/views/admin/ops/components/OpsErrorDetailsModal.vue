@@ -15,9 +15,10 @@ interface Props {
   platform?: string
   groupId?: number | null
   errorType: 'request' | 'upstream'
+  embedded?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { embedded: false })
 const emit = defineEmits<{
   (e: 'update:show', value: boolean): void
   (e: 'openErrorDetail', errorId: number): void
@@ -159,7 +160,10 @@ watch(
     page.value = 1
     pageSize.value = 10
     resetFilters()
-  }
+  },
+  // Embedded detail tabs mount with show=true, so there is no false->true
+  // transition; fire immediately to run the initial fetch.
+  { immediate: true }
 )
 
 watch(
@@ -203,7 +207,7 @@ watch(
 </script>
 
 <template>
-  <BaseDialog :show="show" :title="modalTitle" width="full" @close="close">
+  <BaseDialog :show="show" :title="modalTitle" width="full" :embedded="embedded" @close="close">
     <div class="flex h-full min-h-0 flex-col">
       <!-- Filters -->
       <div class="mb-4 flex-shrink-0 border-b border-gray-200 pb-4 dark:border-dark-700">
