@@ -198,7 +198,7 @@ func (h *OpenAIGatewayHandler) CodexMemories(c *gin.Context) {
 		)
 		sessionHash = resolvedSessionHash
 		if slotResult == openAISlotAcquireProfitVetoed {
-			if !recordOpenAIProfitVeto(failedAccountIDs, account.ID, &profitVetoCount) {
+			if !recordOpenAIProfitVeto(failedAccountIDs, selection.Account.ID, &profitVetoCount) {
 				h.handleOpenAIProfitVetoExhausted(c, streamStarted, reqLog, profitVetoCount)
 				return
 			}
