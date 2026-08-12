@@ -21,7 +21,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/platform/liveattestation"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
-	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -1072,18 +1071,14 @@ func getAPIKeyIDFromContext(c *gin.Context) int64 {
 	return apiKey.ID
 }
 
-// isolateOpenAISessionID 将 apiKeyID 混入 session 标识符，
-// 确保不同 API Key 的用户即使使用相同的原始 session_id/conversation_id，
-// 到达上游的标识符也不同，防止跨用户会话碰撞。
-func isolateOpenAISessionID(apiKeyID int64, raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	h := xxhash.New()
-	_, _ = fmt.Fprintf(h, "k%d:", apiKeyID)
-	_, _ = h.WriteString(raw)
-	return fmt.Sprintf("%016x", h.Sum64())
+// isolateOpenAISessionID previously hashed the downstream API key into the
+// Codex session/thread identity so each key got an isolated upstream session.
+// Per product decision the fork dropped that per-key isolation in favor of the
+// upstream account-level fingerprint convergence, so the client-provided value
+// now passes through unchanged. The apiKeyID parameter is retained so the many
+// call sites stay unchanged.
+func isolateOpenAISessionID(_ int64, raw string) string {
+	return strings.TrimSpace(raw)
 }
 
 // setOpenAIUpstreamSessionHeaders mirrors the isolated session value into the

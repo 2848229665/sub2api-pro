@@ -149,7 +149,7 @@ func TestCreateUpstreamLiveCallPreservesSession(t *testing.T) {
 	require.True(t, HTTPUpstreamRedirectsDisabled(upstream.request.Context()))
 }
 
-func TestResolveLiveUpstreamIdentityIsStableAndAPIKeyIsolated(t *testing.T) {
+func TestResolveLiveUpstreamIdentityIsStableAndPassesThroughSession(t *testing.T) {
 	input := LiveCallIdentity{
 		APIKeyID:        77,
 		OpenAIAlpha:     "quicksilver=v1",
@@ -158,19 +158,13 @@ func TestResolveLiveUpstreamIdentityIsStableAndAPIKeyIsolated(t *testing.T) {
 	}
 	first := resolveLiveUpstreamIdentity(input)
 	second := resolveLiveUpstreamIdentity(input)
-	otherAPIKey := resolveLiveUpstreamIdentity(LiveCallIdentity{
-		APIKeyID:        78,
-		OpenAIAlpha:     "quicksilver=v1",
-		RealtimeSession: "realtime-session",
-		ThreadID:        "thread",
-	})
 
 	require.Equal(t, "quicksilver=v1", first.OpenAIAlpha)
 	require.Equal(t, first, second)
-	require.NotEqual(t, "realtime-session", first.RealtimeSession)
+	// 按 API Key 的会话隔离已移除：session 标识透传客户端原始值。
+	require.Equal(t, "realtime-session", first.RealtimeSession)
 	require.Equal(t, first.RealtimeSession, first.SessionID)
-	require.NotEqual(t, first.RealtimeSession, otherAPIKey.RealtimeSession)
-	require.NotEqual(t, first.ThreadID, otherAPIKey.ThreadID)
+	require.Equal(t, "thread", first.ThreadID)
 }
 
 func TestLiveUpstreamIdentityFromLegacyRecordUsesStableFallback(t *testing.T) {
@@ -193,8 +187,10 @@ func TestLiveUpstreamIdentityFromLegacyRecordUsesStableFallback(t *testing.T) {
 	require.NotEmpty(t, first.SessionID)
 	require.Equal(t, first.SessionID, first.RealtimeSession)
 	require.NotEmpty(t, first.ThreadID)
-	require.NotEqual(t, first.SessionID, otherAPIKey.SessionID)
-	require.NotEqual(t, first.ThreadID, otherAPIKey.ThreadID)
+	require.NotEqual(t, first.SessionID, first.ThreadID)
+	// 按 API Key 的会话隔离已移除：legacy fallback 只按 call 派生，与 apiKey 无关。
+	require.Equal(t, first.SessionID, otherAPIKey.SessionID)
+	require.Equal(t, first.ThreadID, otherAPIKey.ThreadID)
 }
 
 func TestLiveAttestationCipherRoundTripAndRejectsOtherInstanceKey(t *testing.T) {

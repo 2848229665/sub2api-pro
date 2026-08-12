@@ -3634,10 +3634,12 @@ func TestOpenAIBuildUpstreamRequestOAuthForwardsIsolatedOfficialSessionID(t *tes
 	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", true, "", true)
 	require.NoError(t, err)
 
-	want := isolateOpenAISessionID(77, "official-session")
+	// 按 API Key 的会话隔离已移除：session 头透传客户端原始值。
+	// （账号级指纹收敛发生在 Forward() 预计算 codex_fingerprint_ids 之后，
+	// 直接调用 buildUpstreamRequest 不触发。）
+	want := "official-session"
 	require.Equal(t, want, req.Header.Get(openAIOfficialSessionIDHeader))
 	require.Equal(t, want, req.Header.Get("session_id"))
-	require.NotEqual(t, "official-session", req.Header.Get(openAIOfficialSessionIDHeader))
 }
 
 func TestOpenAIBuildUpstreamRequestOAuthPassthroughForwardsIsolatedOfficialSessionID(t *testing.T) {
@@ -3659,10 +3661,10 @@ func TestOpenAIBuildUpstreamRequestOAuthPassthroughForwardsIsolatedOfficialSessi
 	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, body, "token")
 	require.NoError(t, err)
 
-	want := isolateOpenAISessionID(78, "official-passthrough-session")
+	// 按 API Key 的会话隔离已移除：session 头透传客户端原始值。
+	want := "official-passthrough-session"
 	require.Equal(t, want, req.Header.Get(openAIOfficialSessionIDHeader))
 	require.Equal(t, want, req.Header.Get("session_id"))
-	require.NotEqual(t, "official-passthrough-session", req.Header.Get(openAIOfficialSessionIDHeader))
 }
 
 func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesCompactPath(t *testing.T) {

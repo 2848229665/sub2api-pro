@@ -1000,11 +1000,11 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	require.NotNil(t, firstResult)
 	require.Empty(t, upstream.requests[0].Header.Get("x-codex-turn-state"))
 	requireOpenAIMessagesCodexIdentity(t, upstream.requests[0], codexCLIUserAgent, openai.CodexDefaultOriginator)
-	wantCacheKey := isolateOpenAISessionID(501, "stable-cache-key")
+	// 按 API Key 的会话隔离已移除：session/prompt_cache_key 透传原始值。
+	wantCacheKey := "stable-cache-key"
 	require.Equal(t, wantCacheKey, gjson.GetBytes(upstream.bodies[0], "prompt_cache_key").String())
 	require.Equal(t, wantCacheKey, upstream.requests[0].Header.Get("session_id"))
 	require.Equal(t, wantCacheKey, upstream.requests[0].Header.Get(openAIOfficialSessionIDHeader))
-	require.NotEqual(t, isolateOpenAISessionID(502, "stable-cache-key"), wantCacheKey)
 
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	secondRec := httptest.NewRecorder()
@@ -1121,10 +1121,10 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 	var firstAnthropicReq apicompat.AnthropicRequest
 	require.NoError(t, json.Unmarshal(firstBody, &firstAnthropicReq))
 	rawCacheKey := promptCacheKeyFromAnthropicDigest(buildOpenAICompatAnthropicDigestChain(&firstAnthropicReq))
-	require.Equal(t, isolateOpenAISessionID(503, rawCacheKey), firstCacheKey)
+	// 按 API Key 的会话隔离已移除：digest 派生的 key 原样透传。
+	require.Equal(t, rawCacheKey, firstCacheKey)
 	require.Equal(t, firstCacheKey, firstSessionID)
 	require.Equal(t, firstSessionID, upstream.requests[0].Header.Get(openAIOfficialSessionIDHeader))
-	require.NotEqual(t, isolateOpenAISessionID(504, rawCacheKey), firstCacheKey)
 
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	secondRec := httptest.NewRecorder()
@@ -1189,10 +1189,10 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *t
 	var firstAnthropicReq apicompat.AnthropicRequest
 	require.NoError(t, json.Unmarshal(firstBody, &firstAnthropicReq))
 	rawCacheKey := promptCacheKeyFromAnthropicMetadataSession(&firstAnthropicReq)
-	require.Equal(t, isolateOpenAISessionID(505, rawCacheKey), firstCacheKey)
+	// 按 API Key 的会话隔离已移除：metadata session 派生的 key 原样透传。
+	require.Equal(t, rawCacheKey, firstCacheKey)
 	require.Equal(t, firstCacheKey, firstSessionID)
 	require.Equal(t, firstSessionID, upstream.requests[0].Header.Get(openAIOfficialSessionIDHeader))
-	require.NotEqual(t, isolateOpenAISessionID(506, rawCacheKey), firstCacheKey)
 
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"metadata":` + metadata + `,"messages":[{"role":"user","content":"rewritten plan"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	secondRec := httptest.NewRecorder()
@@ -1256,10 +1256,10 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnch
 	var firstAnthropicReq apicompat.AnthropicRequest
 	require.NoError(t, json.Unmarshal(firstBody, &firstAnthropicReq))
 	rawCacheKey := promptCacheKeyFromAnthropicMetadataSession(&firstAnthropicReq)
-	require.Equal(t, isolateOpenAISessionID(507, rawCacheKey), firstCacheKey)
+	// 按 API Key 的会话隔离已移除：metadata session 派生的 key 原样透传。
+	require.Equal(t, rawCacheKey, firstCacheKey)
 	require.Equal(t, firstCacheKey, firstSessionID)
 	require.Equal(t, firstSessionID, upstream.requests[0].Header.Get(openAIOfficialSessionIDHeader))
-	require.NotEqual(t, isolateOpenAISessionID(508, rawCacheKey), firstCacheKey)
 
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"metadata":` + metadata + `,"system":[{"type":"text","text":"anchor two","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	secondRec := httptest.NewRecorder()

@@ -221,8 +221,10 @@ func TestOpenAIGatewayService_OAuthMessagesBridgeDoesNotInjectDefaultInstruction
 	require.Nil(t, result)
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, "", gjson.GetBytes(upstream.lastBody, "instructions").String())
-	wantSession := isolateOpenAISessionID(0, "anthropic-metadata-session-1")
-	require.Equal(t, wantSession, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
+	// 按 API Key 的会话隔离已移除：prompt_cache_key 透传原始值；
+	// OAuth 账号默认启用指纹收敛（session 模式），session 头收敛为账号级恒定值。
+	require.Equal(t, "anthropic-metadata-session-1", gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
+	wantSession := resolveConvergedSessionID(account)
 	require.NotEmpty(t, upstream.lastReq.Header.Get("Session_Id"))
 	require.Equal(t, wantSession, upstream.lastReq.Header.Get("Session_Id"))
 	require.Equal(t, upstream.lastReq.Header.Get("Session_Id"), upstream.lastReq.Header.Get(openAIOfficialSessionIDHeader))
