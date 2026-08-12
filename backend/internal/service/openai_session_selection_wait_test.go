@@ -293,3 +293,63 @@ func TestFinalizeAcquiredOpenAISelection_MigratesIneligibleWaitOwner(t *testing.
 	finalized.ReleaseFunc()
 	require.Equal(t, 1, concurrencyCache.releaseCount)
 }
+
+// A budget-limited wait plan (priority-saturation Key-pool snapshot path)
+// carries a dynamic per-request budget in MaxConcurrency, not the account's
+// static C/R/G. The handler already acquired the slot under that budget, so
+// revalidation must keep it rather than release and re-acquire under the looser
+// static G, which would silently bypass the aggregate Key-pool budget.
+func TestFinalizeAcquiredOpenAISelection_KeepsBudgetLimitedWaitPlanSlot(t *testing.T) {
+	const accountID = int64(48050)
+	fresh := openAIWaitRecheckAccount(accountID, 4)
+	// Static G at 50% reserve is 2; the dynamic budget below is deliberately 1
+	// so the "capacity changed" branch would fire and re-acquire under G if the
+	// BudgetLimited flag were ignored.
+	require.Equal(t, 2, fresh.GeneralConcurrencyLimit(50))
+	concurrencyCache := &openAIWaitRecheckConcurrencyCache{acquireResult: true}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{fresh}},
+		cache:              &stubGatewayCache{},
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+	}
+
+	stale := openAIWaitRecheckAccount(accountID, 4)
+	initialReleaseCount := 0
+	req := OpenAIAccountScheduleRequest{
+		Platform:               PlatformOpenAI,
+		SessionHash:            "budget-limited-wait",
+		AffinityReservePercent: intPtrForTest(50),
+	}
+	selection := attachOpenAISelectionRequest(&AccountSelectionResult{
+		Account:     &stale,
+		Acquired:    true,
+		ReleaseFunc: func() { initialReleaseCount++ },
+		WaitPlan: &AccountWaitPlan{
+			AccountID:      accountID,
+			MaxConcurrency: 1,
+			BudgetLimited:  true,
+			Timeout:        time.Second,
+			MaxWaiting:     2,
+		},
+	}, req)
+
+	finalized, err := svc.FinalizeAcquiredOpenAISelection(
+		context.Background(),
+		nil,
+		req.SessionHash,
+		selection,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, finalized)
+	require.True(t, finalized.Acquired)
+	require.Nil(t, finalized.WaitPlan)
+	// The originally acquired budget-limited slot is kept: no release and no
+	// re-acquire under the looser static limit.
+	require.Zero(t, initialReleaseCount)
+	require.Empty(t, concurrencyCache.acquireLimits)
+
+	finalized.ReleaseFunc()
+	require.Equal(t, 1, initialReleaseCount, "the originally acquired slot's release func is preserved")
+	require.Zero(t, concurrencyCache.releaseCount)
+}
