@@ -272,6 +272,73 @@ func TestBuildNextStoragePreserveReplaceAndClearToken(t *testing.T) {
 	require.Empty(t, cleared.Endpoints[0].TokenCiphertext)
 }
 
+// A stored endpoint credential must never silently follow the endpoint to a
+// different guard protocol or scheme/host: a config save without a fresh token
+// could otherwise exfiltrate the old key to another third-party host. Mirrors
+// the probe-path defense in resolveProbeEndpoint.
+func TestBuildNextStorageRefusesTokenReuseAcrossProtocolOrHostChange(t *testing.T) {
+	manager := &ConfigManager{encryptor: prefixEncryptor{}, encryptionKeyConfigured: true}
+	current := DefaultStorageConfig()
+	current.Endpoints = []StorageEndpoint{{ID: "one", Name: "One", Protocol: EndpointProtocolQwen3Guard, BaseURL: "http://127.0.0.1:8080", Model: DefaultGuardModel, TokenCiphertext: "enc:old", TimeoutMS: 1000, InputLimit: 1000}}
+	base := UpdateConfigRequest{ExpectedConfigVersion: 1, Strategy: "priority", WorkerCount: 1, QueueCapacity: 10, Scanners: []string{"pii"}, AllGroups: true,
+		Endpoints: []UpdateEndpoint{{ID: "one", Name: "One", Protocol: EndpointProtocolQwen3Guard, BaseURL: "http://127.0.0.1:8080", TimeoutMS: 1000, InputLimit: 1000}}}
+
+	protocolSwitch := base
+	protocolSwitch.Endpoints = append([]UpdateEndpoint(nil), base.Endpoints...)
+	protocolSwitch.Endpoints[0].Protocol = EndpointProtocolGroqSafeguard
+	protocolSwitch.Endpoints[0].BaseURL = "https://api.groq.com/openai"
+	protocolSwitch.Endpoints[0].Model = DefaultGroqSafeguardModel
+	_, err := manager.buildNextStorage(current, protocolSwitch, 9)
+	require.Error(t, err)
+	require.Equal(t, ErrorCodeTokenScopeChanged, infraerrors.Reason(err))
+
+	hostChange := base
+	hostChange.Endpoints = append([]UpdateEndpoint(nil), base.Endpoints...)
+	hostChange.Endpoints[0].BaseURL = "http://guard.attacker.example:8080"
+	_, err = manager.buildNextStorage(current, hostChange, 9)
+	require.Error(t, err)
+	require.Equal(t, ErrorCodeTokenScopeChanged, infraerrors.Reason(err))
+
+	// A path change on the same scheme/host stays within the credential scope.
+	pathChange := base
+	pathChange.Endpoints = append([]UpdateEndpoint(nil), base.Endpoints...)
+	pathChange.Endpoints[0].BaseURL = "http://127.0.0.1:8080/openai"
+	moved, err := manager.buildNextStorage(current, pathChange, 9)
+	require.NoError(t, err)
+	require.Equal(t, "enc:old", moved.Endpoints[0].TokenCiphertext)
+
+	// A fresh token or an explicit clear keeps the protocol switch available.
+	withNewToken := protocolSwitch
+	withNewToken.Endpoints = append([]UpdateEndpoint(nil), protocolSwitch.Endpoints...)
+	withNewToken.Endpoints[0].Token = "fresh"
+	replaced, err := manager.buildNextStorage(current, withNewToken, 9)
+	require.NoError(t, err)
+	require.Equal(t, "enc:fresh", replaced.Endpoints[0].TokenCiphertext)
+
+	clearedSwitch := protocolSwitch
+	clearedSwitch.Endpoints = append([]UpdateEndpoint(nil), protocolSwitch.Endpoints...)
+	clearedSwitch.Endpoints[0].ClearToken = true
+	cleared, err := manager.buildNextStorage(current, clearedSwitch, 9)
+	require.NoError(t, err)
+	require.Empty(t, cleared.Endpoints[0].TokenCiphertext)
+
+	// Records stored before the protocol field existed default to Qwen3Guard
+	// and keep their credential on unchanged saves.
+	legacy := current
+	legacy.Endpoints = append([]StorageEndpoint(nil), current.Endpoints...)
+	legacy.Endpoints[0].Protocol = ""
+	preserved, err := manager.buildNextStorage(legacy, base, 9)
+	require.NoError(t, err)
+	require.Equal(t, "enc:old", preserved.Endpoints[0].TokenCiphertext)
+
+	// An endpoint without a stored credential may change scope freely.
+	tokenless := current
+	tokenless.Endpoints = append([]StorageEndpoint(nil), current.Endpoints...)
+	tokenless.Endpoints[0].TokenCiphertext = ""
+	_, err = manager.buildNextStorage(tokenless, hostChange, 9)
+	require.NoError(t, err)
+}
+
 func TestGroqSafeguardPolicyDefaultsCustomizesAndFlowsToActiveEndpoints(t *testing.T) {
 	manager := &ConfigManager{encryptor: prefixEncryptor{}}
 	current := DefaultStorageConfig()

@@ -11355,16 +11355,21 @@ async function saveSettings() {
     form.openai_priority_saturation_api_key_share_percent;
   const accountSharePercent =
     form.openai_priority_saturation_account_share_percent;
+  // The pool share/threshold inputs only render when pool balancing is on
+  // (v-if pool_balance_enabled). Gating the validation the same way prevents a
+  // stale invalid value on a hidden field from silently blocking the whole
+  // settings save after the toggle is turned back off.
   if (
-    typeof accountSharePercent !== "number" ||
-    !Number.isInteger(accountSharePercent) ||
-    accountSharePercent < 1 ||
-    accountSharePercent > 99 ||
-    typeof apiKeySharePercent !== "number" ||
-    !Number.isInteger(apiKeySharePercent) ||
-    apiKeySharePercent < 1 ||
-    apiKeySharePercent > 99 ||
-    accountSharePercent + apiKeySharePercent !== 100
+    form.openai_priority_saturation_pool_balance_enabled &&
+    (typeof accountSharePercent !== "number" ||
+      !Number.isInteger(accountSharePercent) ||
+      accountSharePercent < 1 ||
+      accountSharePercent > 99 ||
+      typeof apiKeySharePercent !== "number" ||
+      !Number.isInteger(apiKeySharePercent) ||
+      apiKeySharePercent < 1 ||
+      apiKeySharePercent > 99 ||
+      accountSharePercent + apiKeySharePercent !== 100)
   ) {
     appStore.showError(
       t("admin.settings.openaiPrioritySaturation.poolSharePercentError"),
@@ -11376,15 +11381,16 @@ async function saveSettings() {
   const exitHighLoadPercent =
     form.openai_priority_saturation_exit_high_load_percent;
   if (
-    typeof enterHighLoadPercent !== "number" ||
-    !Number.isInteger(enterHighLoadPercent) ||
-    enterHighLoadPercent < 1 ||
-    enterHighLoadPercent > 100 ||
-    typeof exitHighLoadPercent !== "number" ||
-    !Number.isInteger(exitHighLoadPercent) ||
-    exitHighLoadPercent < 0 ||
-    exitHighLoadPercent > 99 ||
-    exitHighLoadPercent >= enterHighLoadPercent
+    form.openai_priority_saturation_pool_balance_enabled &&
+    (typeof enterHighLoadPercent !== "number" ||
+      !Number.isInteger(enterHighLoadPercent) ||
+      enterHighLoadPercent < 1 ||
+      enterHighLoadPercent > 100 ||
+      typeof exitHighLoadPercent !== "number" ||
+      !Number.isInteger(exitHighLoadPercent) ||
+      exitHighLoadPercent < 0 ||
+      exitHighLoadPercent > 99 ||
+      exitHighLoadPercent >= enterHighLoadPercent)
   ) {
     appStore.showError(
       t("admin.settings.openaiPrioritySaturation.loadThresholdPercentError"),

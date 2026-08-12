@@ -164,10 +164,8 @@ function handlePageSizeChange(next: number) {
 }
 
 async function handleCopyRequestId(requestId: string) {
-  const ok = await copyToClipboard(requestId, t('admin.ops.requestDetails.requestIdCopied'))
-  if (ok) return
-  // `useClipboard` already shows toast on failure; this keeps UX consistent with older ops modal.
-  appStore.showWarning(t('admin.ops.requestDetails.copyFailed'))
+  // useClipboard already surfaces its own failure toast; don't add a second one.
+  await copyToClipboard(requestId, t('admin.ops.requestDetails.requestIdCopied'))
 }
 
 function openErrorDetail(errorId: number | null | undefined) {

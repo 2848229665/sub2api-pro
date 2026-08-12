@@ -65,6 +65,41 @@ func TestGroqPromptBudgetPrioritizesLatestUserThenConversationHead(t *testing.T)
 	require.Equal(t, 1, chunk.OmittedMessageCount)
 }
 
+func TestGroqPromptBudgetDropsDuplicateMarkerWhenSourceIsOmitted(t *testing.T) {
+	content := strings.TrimSpace(strings.Repeat("The migration runbook keeps every rollback credential inside the vault. ", 40))
+	sourceTokens, err := countGroqTokens(content)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, sourceTokens, groqDuplicateMinTokens)
+	markerTokens, err := countGroqTokens(duplicateGroqMessageMarker(0, content))
+	require.NoError(t, err)
+
+	messages := []PromptAuditMessage{
+		{Role: "user", Content: content},
+		{Role: "user", Content: content},
+	}
+
+	// Budget fits the duplicate marker but not the source message's
+	// first-round minimum slice: the marker must not survive alone, because it
+	// would claim the duplicated content is shown elsewhere while the content
+	// is entirely absent from the scan.
+	budget := markerTokens + 4
+	require.Less(t, budget, groqMinimumMessageTokens)
+	chunk, err := buildGroqPromptScanChunk(messages, budget)
+	require.NoError(t, err)
+	require.Empty(t, chunk.Messages)
+	require.NotContains(t, chunk.Text, "duplicate omitted")
+	require.Equal(t, 2, chunk.OmittedMessageCount)
+	require.Zero(t, chunk.RetainedTokenCount)
+
+	// With room for the source's minimum slice the marker keeps its place
+	// right after its retained source.
+	chunk, err = buildGroqPromptScanChunk(messages, groqMinimumMessageTokens+markerTokens)
+	require.NoError(t, err)
+	require.Equal(t, []string{"user", "user"}, promptAuditRoles(chunk.Messages))
+	require.Contains(t, chunk.Messages[1].Content, "exact same-role duplicate omitted")
+	require.Zero(t, chunk.OmittedMessageCount)
+}
+
 func TestPromptChunkingKeepsQwenCharacterChunksAndGroqSingleCall(t *testing.T) {
 	snapshot := PromptSnapshot{
 		ScanText: "abcdef",

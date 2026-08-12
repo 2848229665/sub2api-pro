@@ -24,7 +24,7 @@
           </span>
           <div>
             <h4 class="text-sm font-semibold text-gray-900 dark:text-white">
-              {{ editingIndex < 0 ? t('admin.promptAudit.pool.add') : t('admin.promptAudit.pool.edit') }}
+              {{ editingId === null ? t('admin.promptAudit.pool.add') : t('admin.promptAudit.pool.edit') }}
             </h4>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.promptAudit.pool.editorHint') }}</p>
           </div>
@@ -86,7 +86,7 @@
           </label>
           <label class="space-y-1.5 text-sm text-gray-700 dark:text-dark-200">
             <span>{{ t('admin.promptAudit.pool.id') }}</span>
-            <input v-model.trim="editing.id" class="input w-full font-mono" required :disabled="editingIndex >= 0" :aria-label="t('admin.promptAudit.pool.id')" />
+            <input v-model.trim="editing.id" class="input w-full font-mono" required :disabled="editingId !== null" :aria-label="t('admin.promptAudit.pool.id')" />
           </label>
           <label class="space-y-1.5 text-sm text-gray-700 dark:text-dark-200 sm:col-span-2">
             <span>{{ t('admin.promptAudit.pool.baseUrl') }}</span>
@@ -283,7 +283,11 @@ const emit = defineEmits<{
 }>()
 const { t } = useI18n()
 const editing = ref<PromptAuditEndpointDraft | null>(null)
-const editingIndex = ref(-1)
+// Track the edited endpoint by its stable id, not a list position: the list
+// below stays interactive while the editor is open, so deleting an earlier
+// endpoint would invalidate a positional index (duplicate-id false positive and
+// wrong splice target on save). null means the create form.
+const editingId = ref<string | null>(null)
 
 const isGroqSafeguard = computed(() => editing.value?.protocol === 'groq_safeguard')
 const editorProbing = computed(() => Boolean(editing.value && props.probingIds.includes(editing.value.id)))
@@ -305,7 +309,7 @@ const editorError = computed(() => {
   if (!id || !endpoint.name.trim() || !endpoint.base_url.trim() || !endpoint.model.trim()) {
     return t('admin.promptAudit.pool.validation.required')
   }
-  if (props.endpoints.some((item, index) => index !== editingIndex.value && item.id.trim() === id)) {
+  if (props.endpoints.some((item) => item.id !== editingId.value && item.id.trim() === id)) {
     return t('admin.promptAudit.pool.validation.duplicateId')
   }
   if (!validURL(endpoint.base_url)) return t('admin.promptAudit.pool.validation.baseUrl')
@@ -349,12 +353,12 @@ const credentialTitle = computed(() => t(isGroqSafeguard.value ? 'admin.promptAu
 const credentialHint = computed(() => t(isGroqSafeguard.value ? 'admin.promptAudit.pool.groqCredentialHint' : 'admin.promptAudit.pool.qwenCredentialHint'))
 
 function openCreate() {
-  editingIndex.value = -1
+  editingId.value = null
   editing.value = createDefaultEndpoint(props.endpoints.length + 1)
 }
 
 function openEdit(endpoint: PromptAuditEndpointDraft) {
-  editingIndex.value = props.endpoints.findIndex((item) => item.id === endpoint.id)
+  editingId.value = endpoint.id
   editing.value = cloneData(endpoint)
   if (editing.value.protocol === 'groq_safeguard') {
     editing.value.model = DEFAULT_GROQ_SAFEGUARD_MODEL
@@ -366,7 +370,7 @@ function openEdit(endpoint: PromptAuditEndpointDraft) {
 
 function closeEditor() {
   editing.value = null
-  editingIndex.value = -1
+  editingId.value = null
 }
 
 function selectProtocol(protocol: PromptAuditEndpointProtocol) {
@@ -397,8 +401,9 @@ function saveEditor() {
     value.tpm_limit = 0
   }
   if (value.token.trim()) value.clear_token = false
-  if (editingIndex.value < 0) next.push(value)
-  else next.splice(editingIndex.value, 1, value)
+  const targetIndex = editingId.value === null ? -1 : next.findIndex((item) => item.id === editingId.value)
+  if (targetIndex < 0) next.push(value)
+  else next.splice(targetIndex, 1, value)
   emit('update:endpoints', next)
   closeEditor()
 }
