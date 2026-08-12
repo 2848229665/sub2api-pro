@@ -10,6 +10,14 @@ import (
 
 const promptAuditLeaseRefreshInterval = 30 * time.Second
 
+// promptAuditLeaseFailureTolerance is how long transient lease-refresh
+// failures (storage timeouts and the like, not definitive claim loss) are
+// tolerated before an in-flight scan is cancelled. It must stay comfortably
+// below the reclaimer's 90s processing_started_at cutoff: with 30s refresh
+// ticks this cancels after the second consecutive failure, ~25s before the
+// job could be reclaimed.
+const promptAuditLeaseFailureTolerance = 60 * time.Second
+
 type WorkerRuntime struct {
 	active           atomic.Int64
 	processed        atomic.Int64
@@ -232,7 +240,13 @@ func (r *Runner) scanWithLeaseRefresh(
 	chunk PromptScanChunk,
 ) (*NormalizedResult, error, error) {
 	if err := r.repo.RefreshLease(ctx, job.ID, job.ClaimVersion, r.clock.Now()); err != nil {
-		return nil, nil, err
+		if errors.Is(err, ErrLeaseLost) {
+			return nil, nil, err
+		}
+		// Transient storage error: the heartbeat is still fresh from the claim
+		// or the previous chunk and the refresher below keeps retrying, so a
+		// single hiccup must not burn the whole job (Groq jobs are
+		// single-attempt) before any tokens were spent.
 	}
 	scanCtx, cancelScan := context.WithCancel(ctx)
 	defer cancelScan()
@@ -251,6 +265,7 @@ func (r *Runner) scanWithLeaseRefresh(
 		defer close(stopped)
 		ticker := time.NewTicker(promptAuditLeaseRefreshInterval)
 		defer ticker.Stop()
+		lastSuccess := r.clock.Now()
 		for {
 			select {
 			case <-stop:
@@ -263,6 +278,13 @@ func (r *Runner) scanWithLeaseRefresh(
 				err := r.repo.RefreshLease(refreshCtx, job.ID, job.ClaimVersion, r.clock.Now())
 				cancelRefresh()
 				if err == nil {
+					lastSuccess = r.clock.Now()
+					continue
+				}
+				if !promptAuditLeaseRefreshFailureFatal(err, r.clock.Now().Sub(lastSuccess)) {
+					// Transient failure with a recent successful heartbeat:
+					// keep the (possibly expensive, single-attempt) model call
+					// running and retry at the next tick.
 					continue
 				}
 				select {
@@ -278,12 +300,34 @@ func (r *Runner) scanWithLeaseRefresh(
 
 	result, scanErr := scanWithFailover(scanCtx, r.scanner, scanners, endpoints, chunk, r.metrics)
 	cleanup()
+	if scanErr == nil {
+		// The scan finished. Complete's claim_version guard is the authority on
+		// whether the result may still be committed, so a pending lease-refresh
+		// failure must not discard a finished (possibly single-attempt Groq)
+		// result.
+		return result, nil, nil
+	}
 	select {
 	case err := <-leaseErr:
 		return nil, nil, err
 	default:
 		return result, scanErr, nil
 	}
+}
+
+// promptAuditLeaseRefreshFailureFatal reports whether a failed lease refresh
+// must abort the in-flight scan. Definitive claim loss always aborts; other
+// errors (storage timeouts and the like) abort only once no refresh has
+// succeeded within promptAuditLeaseFailureTolerance, staying ahead of the
+// reclaimer's processing_started_at cutoff.
+func promptAuditLeaseRefreshFailureFatal(err error, sinceLastSuccess time.Duration) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrLeaseLost) {
+		return true
+	}
+	return sinceLastSuccess >= promptAuditLeaseFailureTolerance
 }
 
 func (r *Runner) observeAsyncFailure(err error, latency time.Duration) {
@@ -398,7 +442,7 @@ func scanWithFailover(ctx context.Context, scanner PromptScanner, scanners []str
 		}
 		lastErr = err
 		var guardErr *GuardError
-		if !errors.As(err, &guardErr) || !guardErr.Retryable {
+		if !errors.As(err, &guardErr) || (!guardErr.Retryable && !guardErrorAllowsEndpointFailover(guardErr)) {
 			return nil, err
 		}
 		if index < len(endpoints)-1 && metrics != nil {
@@ -409,6 +453,16 @@ func scanWithFailover(ctx context.Context, scanner PromptScanner, scanners []str
 		lastErr = &GuardError{Code: ErrorCodeUnavailable}
 	}
 	return nil, lastErr
+}
+
+// guardErrorAllowsEndpointFailover reports whether a non-retryable error is
+// still specific to one endpoint rather than to the whole job. A request that
+// can never fit one endpoint's per-credential TPM budget says nothing about
+// lower-priority endpoints with larger budgets or without TPM limits, so the
+// pool keeps failing over; job-level retry stays disallowed because the
+// shortfall is deterministic for the endpoint that reported it.
+func guardErrorAllowsEndpointFailover(err *GuardError) bool {
+	return err != nil && err.Code == ErrorCodeTPMBudgetExceeded
 }
 
 func scanPromptScannerWithMetrics(ctx context.Context, scanner PromptScanner, endpoint ActiveEndpoint, chunk PromptScanChunk, scanners []string, metrics Metrics) (result *NormalizedResult, err error) {

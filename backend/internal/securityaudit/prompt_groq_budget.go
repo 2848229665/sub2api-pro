@@ -54,7 +54,18 @@ func buildGroqPromptScanChunk(messages []PromptAuditMessage, tokenBudget int) (P
 		if selected[index] {
 			continue
 		}
-		minimum := prepared[index].effectiveTokens
+		entry := prepared[index]
+		// A duplicate marker tells the auditor its content is shown at the
+		// source position. If the source itself was not retained, the marker
+		// must not survive alone: the duplicated content would be entirely
+		// invisible in this scan while claiming to be shown elsewhere. Sources
+		// always precede markers in the priority order, so their selection is
+		// final by the time the marker is considered.
+		if entry.duplicate &&
+			(entry.duplicateOf < 0 || entry.duplicateOf >= len(prepared) || !selected[entry.duplicateOf]) {
+			continue
+		}
+		minimum := entry.effectiveTokens
 		if minimum > groqMinimumMessageTokens {
 			minimum = groqMinimumMessageTokens
 		}

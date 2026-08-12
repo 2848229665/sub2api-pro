@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -368,6 +369,15 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 			}
 			stored.TokenCiphertext = ciphertext
 		case hadOld:
+			// Mirror the probe-path defense (resolveProbeEndpoint): a stored
+			// credential must never silently follow the endpoint to another
+			// guard protocol or scheme/host, or a config save could exfiltrate
+			// the token to a different third-party host without the admin ever
+			// re-entering it.
+			if old.TokenCiphertext != "" && !storedEndpointTokenReusable(old, stored) {
+				return storageConfig{}, infraerrors.BadRequest(ErrorCodeTokenScopeChanged,
+					"审计节点协议或目标主机已变更，出于凭据安全不继承原 API Key：请为该节点重新输入 Key，或先清除凭据")
+			}
 			stored.TokenCiphertext = old.TokenCiphertext
 		}
 		next.Endpoints = append(next.Endpoints, stored)
@@ -377,6 +387,37 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 		return storageConfig{}, err
 	}
 	return next, nil
+}
+
+// storedEndpointTokenReusable reports whether an endpoint edit may keep the
+// previously stored credential. Reuse requires the guard protocol and the
+// base URL credential scope (scheme://host[:port]) to stay unchanged; path
+// edits on the same host keep the token because the server already holds it.
+func storedEndpointTokenReusable(old, next StorageEndpoint) bool {
+	if effectiveEndpointProtocol(old.Protocol) != effectiveEndpointProtocol(next.Protocol) {
+		return false
+	}
+	return endpointCredentialScope(old.BaseURL) == endpointCredentialScope(next.BaseURL)
+}
+
+// effectiveEndpointProtocol maps the legacy empty protocol (records stored
+// before the protocol field existed) to the Qwen3Guard default.
+func effectiveEndpointProtocol(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return EndpointProtocolQwen3Guard
+	}
+	return value
+}
+
+// endpointCredentialScope reduces a normalized base URL to the boundary a
+// stored bearer token must never silently cross: scheme://host[:port].
+func endpointCredentialScope(normalizedBaseURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(normalizedBaseURL))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return strings.TrimSpace(normalizedBaseURL)
+	}
+	return strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host)
 }
 
 func (m *ConfigManager) RuntimeState() (expected int64, active int64, loadedAt *time.Time, loadError string) {
