@@ -32,6 +32,11 @@ func TestGatewayCacheLiveCallIdentityAndController(t *testing.T) {
 		RealtimeSession:       "realtime-session",
 		SessionID:             "session-id",
 		ThreadID:              "thread-id",
+		ClientRequestID:       "client-request-id",
+		ParentThreadID:        "parent-thread-id",
+		WindowID:              "window-id",
+		InstallationID:        "installation-id",
+		TurnMetadata:          `{"turn_id":"turn-id"}`,
 		CreatedAt:             time.Now(),
 		ExpiresAt:             time.Now().Add(time.Hour),
 		Controller:            service.LiveControllerPending,
@@ -47,6 +52,11 @@ func TestGatewayCacheLiveCallIdentityAndController(t *testing.T) {
 	require.Equal(t, record.RealtimeSession, loaded.RealtimeSession)
 	require.Equal(t, record.SessionID, loaded.SessionID)
 	require.Equal(t, record.ThreadID, loaded.ThreadID)
+	require.Equal(t, record.ClientRequestID, loaded.ClientRequestID)
+	require.Equal(t, record.ParentThreadID, loaded.ParentThreadID)
+	require.Equal(t, record.WindowID, loaded.WindowID)
+	require.Equal(t, record.InstallationID, loaded.InstallationID)
+	require.Equal(t, record.TurnMetadata, loaded.TurnMetadata)
 
 	claimed, err := cache.ClaimLiveController(context.Background(), record.CallHash, service.LiveControllerObserver, "observer-1")
 	require.NoError(t, err)

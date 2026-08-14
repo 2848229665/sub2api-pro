@@ -246,6 +246,8 @@ func TestForwardAsChatCompletions_OAuthDoesNotInjectDefaultInstructions(t *testi
 	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set(openAIOfficialSessionIDHeader, "chat-session")
+	c.Set("api_key", &APIKey{ID: 103, Key: "sk-chat-oauth"})
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusBadRequest,
@@ -267,6 +269,7 @@ func TestForwardAsChatCompletions_OAuthDoesNotInjectDefaultInstructions(t *testi
 			"access_token":       "oauth-token",
 			"chatgpt_account_id": "chatgpt-acc",
 		},
+		Extra: map[string]any{"openai_device_id": "chat-device"},
 	}
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.4")
@@ -276,6 +279,10 @@ func TestForwardAsChatCompletions_OAuthDoesNotInjectDefaultInstructions(t *testi
 	require.Equal(t, chatgptCodexURL, upstream.lastReq.URL.String())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "instructions").Exists())
 	require.Equal(t, "", gjson.GetBytes(upstream.lastBody, "instructions").String())
+	relayIdentity, ok := newOpenAICodexRelayIdentity(c, account)
+	require.True(t, ok)
+	require.Equal(t, relayIdentity.pseudonymize("session_id", "chat-session"), upstream.lastReq.Header.Get(openAIOfficialSessionIDHeader))
+	require.Equal(t, "chat-device", gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").String())
 	require.NotContains(t, string(upstream.lastBody), "Communicate with the user by streaming thinking")
 }
 
