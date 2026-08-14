@@ -30,9 +30,9 @@ func TestCyberSessionBlockKey(t *testing.T) {
 	k1 := CyberSessionBlockKey(101, c1, b1)
 	require.NotEmpty(t, k1)
 
-	// Same session, different apiKey → different key (isolation).
+	// 按 API Key 的会话隔离已移除：同一 session 在不同 apiKey 下得到同一个 key。
 	c2, b2 := newCyberBlockTestCtx(map[string]string{"session_id": "sess-abc"}, `{}`)
-	require.NotEqual(t, k1, CyberSessionBlockKey(202, c2, b2))
+	require.Equal(t, k1, CyberSessionBlockKey(202, c2, b2))
 
 	// Same session + same apiKey → stable key.
 	c3, b3 := newCyberBlockTestCtx(map[string]string{"session_id": "sess-abc"}, `{}`)

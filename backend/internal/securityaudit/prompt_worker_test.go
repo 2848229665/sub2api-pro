@@ -576,6 +576,68 @@ func TestWorkerRetryBackoffTerminalFailureAndFailover(t *testing.T) {
 	require.Equal(t, int64(1), metrics.Snapshot().Failovers)
 }
 
+// A TPM budget that can never fit one endpoint's per-credential limit is
+// specific to that endpoint: the pool must keep failing over to
+// lower-priority endpoints (larger budgets or no TPM limit at all) instead of
+// abandoning the job, while an all-endpoints shortfall stays non-retryable so
+// single-attempt jobs do not re-burn tokens on a deterministic failure.
+func TestScanWithFailoverContinuesPastTPMBudgetExceeded(t *testing.T) {
+	endpoints := []ActiveEndpoint{
+		{ID: "groq-small", Protocol: EndpointProtocolGroqSafeguard, Enabled: true},
+		{ID: "fallback", Protocol: EndpointProtocolQwen3Guard, Enabled: true},
+	}
+	metrics := NewAtomicMetrics()
+	scanner := PromptScannerFunc(func(_ context.Context, endpoint ActiveEndpoint, _ string, _ []string) (*NormalizedResult, error) {
+		if endpoint.ID == "groq-small" {
+			return nil, &GuardError{Code: ErrorCodeTPMBudgetExceeded, Retryable: false}
+		}
+		result := integrationResult(EventPass)
+		result.GuardEndpointID = endpoint.ID
+		return result, nil
+	})
+	result, err := scanWithFailover(context.Background(), scanner, []string{"pii"}, endpoints, PromptScanChunk{Text: "hello"}, metrics)
+	require.NoError(t, err)
+	require.Equal(t, "fallback", result.GuardEndpointID)
+	require.Equal(t, int64(1), metrics.Snapshot().Failovers)
+
+	allExceeded := PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
+		return nil, &GuardError{Code: ErrorCodeTPMBudgetExceeded, Retryable: false}
+	})
+	_, err = scanWithFailover(context.Background(), allExceeded, []string{"pii"}, endpoints, PromptScanChunk{Text: "hello"}, nil)
+	var guardErr *GuardError
+	require.ErrorAs(t, err, &guardErr)
+	require.Equal(t, ErrorCodeTPMBudgetExceeded, guardErr.Code)
+	require.False(t, guardErr.Retryable)
+}
+
+// A transient storage error on the pre-scan lease refresh must not abort the
+// job: the heartbeat is still fresh from the claim, the background refresher
+// keeps retrying, and Complete's claim_version guard remains the authority on
+// committing. Definitive claim loss (ErrLeaseLost) still aborts before any
+// tokens are spent, covered by the "lease loss" subtest above.
+func TestProcessJobToleratesTransientLeaseRefreshFailure(t *testing.T) {
+	repo := &fakeJobRepository{refreshErr: errors.New("storage timeout")}
+	payload := &fakePayloadStore{values: map[int64]string{51: "abc"}}
+	calls := 0
+	runner := NewRunner(&fakeConfigStore{cfg: asyncConfig(), active: true}, repo, payload, PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
+		calls++
+		return integrationResult(EventPass), nil
+	}), NewAtomicMetrics())
+	require.NoError(t, runner.processJob(context.Background(), 0, asyncConfig(), workerJob(1, 3)))
+	require.Equal(t, 1, calls)
+	require.Equal(t, 1, repo.completeCount)
+	require.Zero(t, repo.retried)
+	require.Zero(t, repo.failed)
+}
+
+func TestPromptAuditLeaseRefreshFailureFatal(t *testing.T) {
+	require.False(t, promptAuditLeaseRefreshFailureFatal(nil, time.Hour))
+	require.True(t, promptAuditLeaseRefreshFailureFatal(ErrLeaseLost, 0))
+	transient := errors.New("storage timeout")
+	require.False(t, promptAuditLeaseRefreshFailureFatal(transient, promptAuditLeaseFailureTolerance-time.Second))
+	require.True(t, promptAuditLeaseRefreshFailureFatal(transient, promptAuditLeaseFailureTolerance))
+}
+
 func TestWorkerPanicLeaseLossAndLifecycleAreContained(t *testing.T) {
 	t.Run("panic", func(t *testing.T) {
 		repo := &fakeJobRepository{}

@@ -22,6 +22,7 @@ const (
 	ErrorCodeEncryptionKeyRequired = "prompt_audit_encryption_key_required"
 	ErrorCodeRequiresEnabled       = "prompt_guard_requires_audit_enabled"
 	ErrorCodeTPMBudgetExceeded     = "prompt_guard_tpm_budget_exceeded"
+	ErrorCodeTokenScopeChanged     = "prompt_audit_token_scope_changed"
 
 	EndpointProtocolQwen3Guard    = "openai_compatible"
 	EndpointProtocolGroqSafeguard = "groq_safeguard"

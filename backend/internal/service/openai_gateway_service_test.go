@@ -504,6 +504,38 @@ func TestExtractOpenAIUsage_CapturesImageInputTokens(t *testing.T) {
 	require.Zero(t, tu.ImageInputTokens)
 }
 
+func TestExtractOpenAIUsage_ReadsClineDataEnvelope(t *testing.T) {
+	body := []byte(`{"data":{"choices":[{"message":{"content":"OK"}}],"usage":{"prompt_tokens":8,"completion_tokens":27,"total_tokens":35,"prompt_tokens_details":{"cached_tokens":4}}},"success":true}`)
+
+	usage, ok := extractOpenAIUsageFromJSONBytes(body)
+
+	require.True(t, ok)
+	require.Equal(t, 8, usage.InputTokens)
+	require.Equal(t, 27, usage.OutputTokens)
+	require.Equal(t, 4, usage.CacheReadInputTokens)
+}
+
+func TestExtractOpenAIUsage_ReadsWrappedResponsesDataEnvelope(t *testing.T) {
+	body := []byte(`{"data":{"response":{"usage":{"input_tokens":11,"output_tokens":5,"total_tokens":16,"input_tokens_details":{"cached_tokens":2}}}}}`)
+
+	usage, ok := extractOpenAIUsageFromJSONBytes(body)
+
+	require.True(t, ok)
+	require.Equal(t, 11, usage.InputTokens)
+	require.Equal(t, 5, usage.OutputTokens)
+	require.Equal(t, 2, usage.CacheReadInputTokens)
+}
+
+func TestExtractOpenAIUsage_PreservesResponseUsagePriority(t *testing.T) {
+	body := []byte(`{"data":{"usage":{"prompt_tokens":100,"completion_tokens":50}},"response":{"usage":{"input_tokens":11,"output_tokens":5}}}`)
+
+	usage, ok := extractOpenAIUsageFromJSONBytes(body)
+
+	require.True(t, ok)
+	require.Equal(t, 11, usage.InputTokens)
+	require.Equal(t, 5, usage.OutputTokens)
+}
+
 func TestOpenAIGatewayService_BindHTTPResponseAccount(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -2199,7 +2231,7 @@ func TestOpenAIStreamingTerminalAndClientCancellationDoNotQuarantineProxy(t *tes
 		Body: &openAIStreamReadThenErrorCloser{
 			reader: strings.NewReader(strings.Join([]string{
 				"event: response.completed",
-				`data: {"type":"response.completed","response":{"status":"completed","output":[]}}`,
+				`data: {"type":"response.completed","response":{"status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":3,"total_tokens":8}}}`,
 				"",
 			}, "\n")),
 			err: io.ErrUnexpectedEOF,
@@ -3602,10 +3634,12 @@ func TestOpenAIBuildUpstreamRequestOAuthForwardsIsolatedOfficialSessionID(t *tes
 	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", true, "", true)
 	require.NoError(t, err)
 
-	want := isolateOpenAISessionID(77, "official-session")
+	// 按 API Key 的会话隔离已移除：session 头透传客户端原始值。
+	// （账号级指纹收敛发生在 Forward() 预计算 codex_fingerprint_ids 之后，
+	// 直接调用 buildUpstreamRequest 不触发。）
+	want := "official-session"
 	require.Equal(t, want, req.Header.Get(openAIOfficialSessionIDHeader))
 	require.Equal(t, want, req.Header.Get("session_id"))
-	require.NotEqual(t, "official-session", req.Header.Get(openAIOfficialSessionIDHeader))
 }
 
 func TestOpenAIBuildUpstreamRequestOAuthPassthroughForwardsIsolatedOfficialSessionID(t *testing.T) {
@@ -3627,10 +3661,10 @@ func TestOpenAIBuildUpstreamRequestOAuthPassthroughForwardsIsolatedOfficialSessi
 	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, body, "token")
 	require.NoError(t, err)
 
-	want := isolateOpenAISessionID(78, "official-passthrough-session")
+	// 按 API Key 的会话隔离已移除：session 头透传客户端原始值。
+	want := "official-passthrough-session"
 	require.Equal(t, want, req.Header.Get(openAIOfficialSessionIDHeader))
 	require.Equal(t, want, req.Header.Get("session_id"))
-	require.NotEqual(t, "official-passthrough-session", req.Header.Get(openAIOfficialSessionIDHeader))
 }
 
 func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesCompactPath(t *testing.T) {

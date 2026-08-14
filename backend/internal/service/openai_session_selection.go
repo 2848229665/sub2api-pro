@@ -454,6 +454,15 @@ func (s *OpenAIGatewayService) revalidateAcquiredOpenAIWaitSelection(
 	freshLimit := fresh.ConcurrencyLimitForAffinity(affinity, req.affinityReservePercent())
 	selection.Account = fresh
 
+	if plan.BudgetLimited {
+		// MaxConcurrency is a dynamic per-request Key-pool budget the handler
+		// already acquired the slot under. Re-acquiring at the static C/R/G
+		// would let the aggregate Key-pool budget be bypassed on the snapshot
+		// wait path, so keep the acquired slot as-is.
+		selection.WaitPlan = nil
+		return selection, false, nil
+	}
+
 	if plan.MaxConcurrency == freshLimit {
 		selection.WaitPlan = nil
 		return selection, false, nil

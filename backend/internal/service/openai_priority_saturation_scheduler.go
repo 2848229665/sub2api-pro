@@ -510,6 +510,13 @@ func (s *prioritySaturationOpenAIAccountScheduler) selectGeneralAccountBalancedS
 		}
 		markPrioritySaturationWaitCandidateWithLimit(allWaitCandidates, accountID, fresh, limit, "selected_for_wait")
 		selection := attachOpenAISelectionRequest(s.waitPlan(fresh, limit, false), req)
+		if pool == prioritySaturationPoolAPIKey {
+			// limit is the dynamic Key-pool budget allocation, not the static
+			// GeneralConcurrencyLimit. Mark it so wait-plan revalidation keeps
+			// the acquired slot instead of re-acquiring under the looser static
+			// limit, which would bypass the aggregate Key-pool budget.
+			selection.WaitPlan.BudgetLimited = true
+		}
 		selection.WaitPlan.Reason = "balanced_pools_busy"
 		selection.WaitPlan.CandidateCount = len(allWaitCandidates)
 		selection.WaitPlan.Candidates, selection.WaitPlan.CandidatesTruncated = boundedPrioritySaturationWaitCandidates(

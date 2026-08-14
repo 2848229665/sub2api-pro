@@ -567,6 +567,14 @@ type AccountWaitPlan struct {
 	Timeout        time.Duration
 	MaxWaiting     int
 
+	// BudgetLimited marks MaxConcurrency as a dynamic per-request budget (the
+	// priority-saturation Key-pool snapshot path allocates it from the
+	// aggregate Key budget) rather than the account's static C/R/G. Wait-plan
+	// revalidation must keep the acquired slot under this budget instead of
+	// re-acquiring under the looser static limit, which would silently bypass
+	// the aggregate Key-pool budget.
+	BudgetLimited bool
+
 	// Reason and Candidates are diagnostic-only metadata. They explain why the
 	// scheduler stopped scanning the pool and pinned the request to AccountID.
 	Reason              string

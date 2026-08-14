@@ -228,9 +228,12 @@ func TestOpenAIGatewayServiceNativeCodexOAuthIdentityDoesNotDependOnOptimization
 	require.Error(t, err)
 	require.Nil(t, result)
 	require.NotNil(t, upstream.lastReq)
-	wantSession := isolateOpenAISessionID(44, "default-session")
-	wantThread := isolateOpenAISessionID(44, "default-thread")
-	require.Equal(t, wantSession, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
+	// 按 API Key 的会话隔离已移除。未命中 prompt cache 优化时，出站身份由
+	// 账号级指纹收敛（默认 session 模式）接管：session/thread 覆盖为账号级
+	// 恒定值；prompt_cache_key 不参与指纹收敛，保持透传。
+	wantSession := resolveConvergedSessionID(account)
+	wantThread := resolveConvergedThreadID(account, "default-session")
+	require.Equal(t, "default-session", gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
 	require.Equal(t, wantSession, gjson.GetBytes(upstream.lastBody, "client_metadata.session_id").String())
 	require.Equal(t, wantThread, gjson.GetBytes(upstream.lastBody, "client_metadata.thread_id").String())
 	require.Equal(t, wantSession, upstream.lastReq.Header.Get(openAIOfficialSessionIDHeader))
@@ -423,7 +426,7 @@ func TestPrepareOpenAICodexUpstreamIdentitySharesSessionAcrossRootAndChildThread
 	require.Equal(t, root.identity.ThreadID, gjson.Get(childTurnMetadata, "parent_thread_id").String())
 }
 
-func TestOpenAIGatewayServiceCodexIdentityMatchesLegacyAndPassthroughHTTP(t *testing.T) {
+func TestOpenAIGatewayServiceCodexIdentityLegacyAndPassthroughHTTP(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-5.5","instructions":"stable","tools":[{"type":"function","name":"shell","parameters":{"type":"object"}}],"tool_choice":"auto","stream":false,"prompt_cache_key":"http-session","client_metadata":{"session_id":"http-session","thread_id":"http-thread","x-codex-parent-thread-id":"http-parent-thread","x-codex-window-id":"http-thread:0","x-codex-turn-metadata":"{\"session_id\":\"http-session\",\"thread_id\":\"http-thread\",\"parent_thread_id\":\"http-parent-thread\",\"window_id\":\"http-thread:0\"}"},"input":[{"type":"message","role":"user","content":"hello"}]}`)
 	type capturedRequest struct {
@@ -477,23 +480,35 @@ func TestOpenAIGatewayServiceCodexIdentityMatchesLegacyAndPassthroughHTTP(t *tes
 
 	legacy := capture(false)
 	passthrough := capture(true)
-	wantSession := isolateOpenAISessionID(96, "http-session")
-	wantThread := isolateOpenAISessionID(96, "http-thread")
-	wantParentThread := isolateOpenAISessionID(96, "http-parent-thread")
+
+	// 与隔离/指纹收敛无关的字段：两条路径必须一致（透传原始值）。
+	// prompt_cache_key 与 parent-thread 不参与指纹收敛。
 	for _, captured := range []capturedRequest{legacy, passthrough} {
-		require.Equal(t, wantSession, gjson.GetBytes(captured.body, "prompt_cache_key").String())
-		require.Equal(t, wantSession, gjson.GetBytes(captured.body, "client_metadata.session_id").String())
-		require.Equal(t, wantThread, gjson.GetBytes(captured.body, "client_metadata.thread_id").String())
-		require.Equal(t, wantParentThread, gjson.GetBytes(captured.body, "client_metadata.x-codex-parent-thread-id").String())
+		require.Equal(t, "http-session", gjson.GetBytes(captured.body, "prompt_cache_key").String())
+		require.Equal(t, "http-parent-thread", gjson.GetBytes(captured.body, "client_metadata.x-codex-parent-thread-id").String())
 		turnMetadata := gjson.GetBytes(captured.body, "client_metadata.x-codex-turn-metadata").String()
-		require.Equal(t, wantParentThread, gjson.Get(turnMetadata, "parent_thread_id").String())
-		require.Equal(t, wantSession, captured.headers.Get(openAIOfficialSessionIDHeader))
-		require.Equal(t, wantThread, captured.headers.Get(openAIOfficialThreadIDHeader))
-		require.Equal(t, wantThread, captured.headers.Get(openAIOfficialClientRequestIDHeader))
-		require.Equal(t, wantParentThread, captured.headers.Get(openAICodexParentThreadIDHeader))
+		require.Equal(t, "http-parent-thread", gjson.Get(turnMetadata, "parent_thread_id").String())
+		require.Equal(t, "http-parent-thread", captured.headers.Get(openAICodexParentThreadIDHeader))
 		require.Equal(t, "attestation-http", captured.headers.Get("X-OAI-Attestation"))
 		require.Equal(t, "true", captured.headers.Get("X-ResponsesAPI-Include-Timing-Metrics"))
 	}
+
+	// legacy（非透传）路径命中账号级指纹收敛（默认 session 模式）：
+	// session/thread 覆盖为账号级恒定值。
+	convergedSession := resolveConvergedSessionID(&Account{ID: 801})
+	convergedThread := resolveConvergedThreadID(&Account{ID: 801}, "http-session")
+	require.Equal(t, convergedSession, gjson.GetBytes(legacy.body, "client_metadata.session_id").String())
+	require.Equal(t, convergedThread, gjson.GetBytes(legacy.body, "client_metadata.thread_id").String())
+	require.Equal(t, convergedSession, legacy.headers.Get(openAIOfficialSessionIDHeader))
+	require.Equal(t, convergedThread, legacy.headers.Get(openAIOfficialThreadIDHeader))
+	require.Equal(t, convergedThread, legacy.headers.Get(openAIOfficialClientRequestIDHeader))
+
+	// 透传路径不做指纹收敛：会话隔离移除后为原始值透传。
+	require.Equal(t, "http-session", gjson.GetBytes(passthrough.body, "client_metadata.session_id").String())
+	require.Equal(t, "http-thread", gjson.GetBytes(passthrough.body, "client_metadata.thread_id").String())
+	require.Equal(t, "http-session", passthrough.headers.Get(openAIOfficialSessionIDHeader))
+	require.Equal(t, "http-thread", passthrough.headers.Get(openAIOfficialThreadIDHeader))
+	require.Equal(t, "http-thread", passthrough.headers.Get(openAIOfficialClientRequestIDHeader))
 }
 
 func TestOpenAIGatewayServiceNativeCodexOAuthUsesStablePatchedBodyAndIdentity(t *testing.T) {
