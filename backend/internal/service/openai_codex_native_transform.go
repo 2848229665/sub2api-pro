@@ -20,18 +20,19 @@ const (
 )
 
 type openAICodexUpstreamIdentity struct {
-	InstallationID     string
-	SessionID          string
-	ThreadID           string
-	ForkedFromThreadID string
-	ParentThreadID     string
-	WindowID           string
-	TurnMetadata       string
+	RelayIdentity   openAICodexRelayIdentity
+	InstallationID  string
+	SessionID       string
+	ThreadID        string
+	ClientRequestID string
+	ParentThreadID  string
+	WindowID        string
+	TurnMetadata    string
+	TurnState       string
 }
 
 type openAICodexIdentityBodyOptions struct {
-	Compact              bool
-	CreateClientMetadata bool
+	Compact bool
 }
 
 type openAICodexPromptCacheOptimizationResult struct {
@@ -118,6 +119,9 @@ func tryTransformNativeCodexOAuthRequest(
 	account *Account,
 	body []byte,
 ) (transformed []byte, result codexTransformResult, handled bool, err error) {
+	if account == nil || !account.IsOpenAIOAuth() {
+		return body, codexTransformResult{}, false, nil
+	}
 	root := parseRawJSONView(body)
 	if !canPatchNativeCodexOAuthRequest(root) {
 		return body, codexTransformResult{}, false, nil
@@ -178,17 +182,20 @@ func tryTransformNativeCodexOAuthRequest(
 
 	identity, hasIdentity := openAICodexUpstreamIdentityFromContext(c)
 	if !hasIdentity {
-		apiKeyID := getAPIKeyIDFromContext(c)
-		identity = resolveOpenAICodexUpstreamIdentity(c, account, transformed, apiKeyID, false)
-	}
-	transformed, err = patchOpenAICodexIdentityBody(
-		transformed,
-		account,
-		identity,
-		openAICodexIdentityBodyOptions{CreateClientMetadata: true},
-	)
-	if err != nil {
-		return body, codexTransformResult{}, false, err
+		identity, err = resolveOpenAICodexUpstreamIdentity(c, account, transformed, false)
+		if err != nil {
+			return body, codexTransformResult{}, false, err
+		}
+		if identity != (openAICodexUpstreamIdentity{}) {
+			transformed, err = patchOpenAICodexIdentityBody(
+				transformed,
+				identity,
+				openAICodexIdentityBodyOptions{},
+			)
+			if err != nil {
+				return body, codexTransformResult{}, false, err
+			}
+		}
 	}
 	if c != nil && identity != (openAICodexUpstreamIdentity{}) {
 		c.Set(openAICodexUpstreamIdentityContextKey, identity)
@@ -487,32 +494,53 @@ func patchNativeCodexInput(body []byte) ([]byte, error) {
 	return next, nil
 }
 
-// prepareOpenAICodexUpstreamIdentity applies the official Codex identity
-// contract independently from the optional prompt-cache translation feature.
-// The request body is the source of truth for session identity, while thread
-// identity remains independent so root and child threads can share one cache.
+// prepareOpenAICodexUpstreamIdentity 独立于可选的 prompt cache 转换执行 Codex 身份协议。
+// 请求体字段分别按自己的原值改写；最终 session 头使用协议规定的优先级。
 func prepareOpenAICodexUpstreamIdentity(
 	c *gin.Context,
 	account *Account,
 	body []byte,
 	compact bool,
 ) ([]byte, openAICodexUpstreamIdentity, error) {
-	if account == nil || account.Type != AccountTypeOAuth {
+	if account == nil || !account.IsOpenAIOAuth() {
 		return body, openAICodexUpstreamIdentity{}, nil
 	}
-	identity := resolveOpenAICodexUpstreamIdentity(
-		c,
-		account,
-		body,
-		getAPIKeyIDFromContext(c),
-		compact,
-	)
+	identity, err := resolveOpenAICodexUpstreamIdentity(c, account, body, compact)
+	if err != nil {
+		return body, openAICodexUpstreamIdentity{}, err
+	}
+	if identity == (openAICodexUpstreamIdentity{}) {
+		return body, identity, nil
+	}
 	updated, err := patchOpenAICodexIdentityBody(
 		body,
-		account,
 		identity,
 		openAICodexIdentityBodyOptions{Compact: compact},
 	)
+	if err != nil {
+		return body, openAICodexUpstreamIdentity{}, err
+	}
+	if c != nil {
+		c.Set(openAICodexUpstreamIdentityContextKey, identity)
+	}
+	return updated, identity, nil
+}
+
+// prepareOpenAICodexAuxiliaryResponsesIdentity 为无 session seed 的 Responses bridge 改写正文。
+func prepareOpenAICodexAuxiliaryResponsesIdentity(
+	c *gin.Context,
+	account *Account,
+	body []byte,
+) ([]byte, openAICodexUpstreamIdentity, error) {
+	identity, err := resolveOpenAICodexUpstreamIdentityWithSessionID(
+		c,
+		account,
+		openAICodexInboundHeader(c, openAIOfficialSessionIDHeader),
+	)
+	if err != nil || identity == (openAICodexUpstreamIdentity{}) {
+		return body, identity, err
+	}
+	updated, err := patchOpenAICodexIdentityBody(body, identity, openAICodexIdentityBodyOptions{})
 	if err != nil {
 		return body, openAICodexUpstreamIdentity{}, err
 	}
@@ -526,212 +554,218 @@ func resolveOpenAICodexUpstreamIdentity(
 	c *gin.Context,
 	account *Account,
 	body []byte,
-	apiKeyID int64,
 	compact bool,
-) openAICodexUpstreamIdentity {
-	previousIdentity, hasPreviousIdentity := openAICodexUpstreamIdentityFromContext(c)
-	rawSessionID := explicitOpenAICodexSessionID(c, body, !compact)
+) (openAICodexUpstreamIdentity, error) {
+	rawSessionID := openAICodexRelaySessionSeed(c, body)
 	if rawSessionID == "" && compact {
 		rawSessionID = resolveOpenAICompactSessionID(c)
 	}
+	return resolveOpenAICodexUpstreamIdentityWithSessionID(c, account, rawSessionID)
+}
 
-	rawThreadID := ""
+// openAICodexRelaySessionSeed 按官方协议优先级选择最终 session header 的原始种子。
+func openAICodexRelaySessionSeed(c *gin.Context, body []byte) string {
 	if c != nil && c.Request != nil {
-		rawThreadID = strings.TrimSpace(c.Request.Header.Get(openAIOfficialThreadIDHeader))
-		if rawThreadID == "" {
-			rawThreadID = strings.TrimSpace(c.Request.Header.Get(openAIOfficialClientRequestIDHeader))
+		for _, name := range []string{
+			openAIOfficialSessionIDHeader,
+			openAIOfficialThreadIDHeader,
+			"session_id",
+			"conversation_id",
+		} {
+			if value := strings.TrimSpace(c.Request.Header.Get(name)); value != "" {
+				return value
+			}
 		}
 	}
-	if rawThreadID == "" && !compact {
-		rawThreadID = strings.TrimSpace(gjson.GetBytes(body, "client_metadata.thread_id").String())
+	return strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String())
+}
+
+// resolveOpenAICodexUpstreamIdentityWithSessionID 使用调用方按端点协议确认的会话源。
+func resolveOpenAICodexUpstreamIdentityWithSessionID(
+	c *gin.Context,
+	account *Account,
+	rawSessionID string,
+) (openAICodexUpstreamIdentity, error) {
+	relayIdentity, ok := newOpenAICodexRelayIdentity(c, account)
+	if !ok {
+		return openAICodexUpstreamIdentity{}, nil
 	}
-	bodyTurnMetadata := ""
-	if !compact {
-		bodyTurnMetadata = strings.TrimSpace(gjson.GetBytes(body, "client_metadata."+openAIWSTurnMetadataHeader).String())
+	var err error
+	previousIdentity, hasPreviousIdentity := openAICodexUpstreamIdentityFromContext(c)
+	if hasPreviousIdentity && previousIdentity.RelayIdentity != relayIdentity {
+		hasPreviousIdentity = false
 	}
-	rawForkedFromThreadID := strings.TrimSpace(gjson.Get(bodyTurnMetadata, "forked_from_thread_id").String())
-	if rawForkedFromThreadID == "" && c != nil && c.Request != nil {
-		headerTurnMetadata := strings.TrimSpace(c.Request.Header.Get(openAIWSTurnMetadataHeader))
-		rawForkedFromThreadID = strings.TrimSpace(gjson.Get(headerTurnMetadata, "forked_from_thread_id").String())
+
+	rawThreadID := ""
+	rawClientRequestID := ""
+	if c != nil && c.Request != nil {
+		rawThreadID = strings.TrimSpace(c.Request.Header.Get(openAIOfficialThreadIDHeader))
+		rawClientRequestID = strings.TrimSpace(c.Request.Header.Get(openAIOfficialClientRequestIDHeader))
 	}
 	rawParentThreadID := ""
 	if c != nil && c.Request != nil {
 		rawParentThreadID = strings.TrimSpace(c.Request.Header.Get(openAICodexParentThreadIDHeader))
 	}
-	if rawParentThreadID == "" && !compact {
-		rawParentThreadID = strings.TrimSpace(gjson.GetBytes(body, "client_metadata."+openAICodexParentThreadIDHeader).String())
-		if rawParentThreadID == "" {
-			rawParentThreadID = strings.TrimSpace(gjson.Get(bodyTurnMetadata, "parent_thread_id").String())
-		}
+	rawInstallationID := ""
+	rawWindowID := ""
+	if c != nil && c.Request != nil {
+		rawInstallationID = strings.TrimSpace(c.Request.Header.Get("x-codex-installation-id"))
+		rawWindowID = strings.TrimSpace(c.Request.Header.Get("x-codex-window-id"))
 	}
 
 	identity := openAICodexUpstreamIdentity{
-		SessionID:          isolateOpenAISessionID(apiKeyID, rawSessionID),
-		ThreadID:           isolateOpenAISessionID(apiKeyID, rawThreadID),
-		ForkedFromThreadID: isolateOpenAISessionID(apiKeyID, rawForkedFromThreadID),
-		ParentThreadID:     isolateOpenAISessionID(apiKeyID, rawParentThreadID),
-	}
-	if account != nil {
-		identity.InstallationID = strings.TrimSpace(account.GetOpenAIDeviceID())
+		RelayIdentity:   relayIdentity,
+		InstallationID:  relayIdentity.installationID(rawInstallationID),
+		SessionID:       relayIdentity.pseudonymize("session_id", rawSessionID),
+		ThreadID:        relayIdentity.pseudonymize("thread_id", rawThreadID),
+		ClientRequestID: relayIdentity.pseudonymize("thread_id", rawClientRequestID),
+		ParentThreadID:  relayIdentity.pseudonymize("thread_id", rawParentThreadID),
+		WindowID:        relayIdentity.pseudonymize("window_id", rawWindowID),
 	}
 	// A Responses WebSocket session reuses one gin context across turns. Current
 	// Codex clients may omit prompt_cache_key/client_metadata on follow-up
 	// response.create frames, so carry forward the already-isolated identity
 	// instead of silently dropping the cache/session headers after turn one.
 	if hasPreviousIdentity {
+		if identity.InstallationID == "" {
+			identity.InstallationID = previousIdentity.InstallationID
+		}
 		if identity.SessionID == "" {
 			identity.SessionID = previousIdentity.SessionID
 		}
 		if identity.ThreadID == "" {
 			identity.ThreadID = previousIdentity.ThreadID
 		}
-		if identity.ForkedFromThreadID == "" {
-			identity.ForkedFromThreadID = previousIdentity.ForkedFromThreadID
+		if identity.ClientRequestID == "" {
+			identity.ClientRequestID = previousIdentity.ClientRequestID
 		}
 		if identity.ParentThreadID == "" {
 			identity.ParentThreadID = previousIdentity.ParentThreadID
 		}
-	}
-	if !compact {
-		rawWindowID := strings.TrimSpace(gjson.GetBytes(body, "client_metadata.x-codex-window-id").String())
-		if rawWindowID == "" && c != nil && c.Request != nil {
-			rawWindowID = strings.TrimSpace(c.Request.Header.Get("x-codex-window-id"))
-		}
-		identity.WindowID = remapNativeCodexWindowID(rawWindowID, rawThreadID, identity.ThreadID)
-		if identity.WindowID == "" && hasPreviousIdentity {
+		if identity.WindowID == "" {
 			identity.WindowID = previousIdentity.WindowID
 		}
 	}
 	if c != nil && c.Request != nil {
+		identity.TurnState = strings.TrimSpace(c.Request.Header.Get(openAIWSTurnStateHeader))
 		headerTurnMetadata := strings.TrimSpace(c.Request.Header.Get(openAIWSTurnMetadataHeader))
 		if headerTurnMetadata != "" {
-			identity.TurnMetadata = rewriteNativeCodexTurnMetadata(headerTurnMetadata, identity)
+			identity.TurnMetadata, err = relayIdentity.rewriteTurnMetadata(headerTurnMetadata)
+			if err != nil {
+				return openAICodexUpstreamIdentity{}, err
+			}
 		}
 	}
-	return identity
+	return identity, nil
 }
 
 func patchOpenAICodexIdentityBody(
 	body []byte,
-	account *Account,
 	identity openAICodexUpstreamIdentity,
 	options openAICodexIdentityBodyOptions,
 ) ([]byte, error) {
-	updated := body
-	var err error
-	if identity.SessionID != "" {
-		updated, err = sjson.SetBytes(updated, "prompt_cache_key", identity.SessionID)
-		if err != nil {
-			return body, fmt.Errorf("isolate Codex prompt_cache_key: %w", err)
-		}
+	if !gjson.ValidBytes(body) || !gjson.ParseBytes(body).IsObject() {
+		return body, fmt.Errorf("OpenAI Responses request body must be an object")
 	}
 	if options.Compact {
-		return updated, nil
+		return body, nil
+	}
+
+	updated := body
+	var err error
+	updated, err = rewriteOpenAICodexJSONBytesString(
+		updated,
+		"prompt_cache_key",
+		"session_id",
+		identity.RelayIdentity,
+	)
+	if err != nil {
+		return body, err
 	}
 
 	clientMetadata := gjson.GetBytes(updated, "client_metadata")
 	if clientMetadata.Exists() && !clientMetadata.IsObject() {
 		return body, fmt.Errorf("codex client_metadata must be an object")
 	}
-	patchClientMetadata := clientMetadata.IsObject() || options.CreateClientMetadata
-	if !patchClientMetadata {
+	needsClientMetadata := identity.RelayIdentity.deviceID != "" || identity.TurnState != ""
+	if !clientMetadata.Exists() && needsClientMetadata {
+		updated, err = sjson.SetRawBytes(updated, "client_metadata", []byte(`{}`))
+		if err != nil {
+			return body, fmt.Errorf("create Codex client_metadata: %w", err)
+		}
+		clientMetadata = gjson.GetBytes(updated, "client_metadata")
+	}
+	if !clientMetadata.IsObject() {
 		return updated, nil
 	}
-	if identity.SessionID != "" {
-		updated, err = sjson.SetBytes(updated, "client_metadata.session_id", identity.SessionID)
+
+	for _, field := range []struct {
+		name    string
+		purpose string
+	}{
+		{name: "session_id", purpose: "session_id"},
+		{name: "thread_id", purpose: "thread_id"},
+		{name: "turn_id", purpose: "turn_id"},
+		{name: "parent_thread_id", purpose: "thread_id"},
+		{name: "parent_turn_id", purpose: "turn_id"},
+		{name: "root_turn_id", purpose: "turn_id"},
+		{name: openAIOfficialClientRequestIDHeader, purpose: "thread_id"},
+		{name: "x-codex-window-id", purpose: "window_id"},
+		{name: openAICodexParentThreadIDHeader, purpose: "thread_id"},
+	} {
+		path := "client_metadata." + field.name
+		updated, err = rewriteOpenAICodexJSONBytesString(updated, path, field.purpose, identity.RelayIdentity)
 		if err != nil {
-			return body, fmt.Errorf("isolate Codex client_metadata.session_id: %w", err)
-		}
-	}
-	if identity.ThreadID != "" {
-		updated, err = sjson.SetBytes(updated, "client_metadata.thread_id", identity.ThreadID)
-		if err != nil {
-			return body, fmt.Errorf("isolate Codex client_metadata.thread_id: %w", err)
-		}
-	}
-	if identity.ParentThreadID != "" {
-		updated, err = sjson.SetBytes(updated, "client_metadata."+openAICodexParentThreadIDHeader, identity.ParentThreadID)
-		if err != nil {
-			return body, fmt.Errorf("isolate Codex client_metadata parent thread id: %w", err)
-		}
-	}
-	if identity.WindowID != "" {
-		updated, err = sjson.SetBytes(updated, "client_metadata.x-codex-window-id", identity.WindowID)
-		if err != nil {
-			return body, fmt.Errorf("isolate Codex client metadata window: %w", err)
+			return body, err
 		}
 	}
 
-	deviceID := strings.TrimSpace(identity.InstallationID)
-	if deviceID == "" && account != nil {
-		deviceID = strings.TrimSpace(account.GetOpenAIDeviceID())
+	installationPath := "client_metadata.x-codex-installation-id"
+	installationValue := gjson.GetBytes(updated, installationPath)
+	clientInstallationID := ""
+	if installationValue.Exists() && installationValue.Type != gjson.Null {
+		if installationValue.Type != gjson.String {
+			return body, fmt.Errorf("%s must be a string when provided", installationPath)
+		}
+		clientInstallationID = installationValue.String()
 	}
-	identity.InstallationID = deviceID
-	if deviceID != "" && strings.TrimSpace(gjson.GetBytes(updated, "client_metadata.x-codex-installation-id").String()) != deviceID {
-		updated, err = sjson.SetBytes(updated, "client_metadata.x-codex-installation-id", deviceID)
+	if installationID := identity.RelayIdentity.installationID(clientInstallationID); installationID != "" {
+		updated, err = sjson.SetBytes(updated, installationPath, installationID)
 		if err != nil {
-			return body, fmt.Errorf("normalize Codex installation id: %w", err)
+			return body, fmt.Errorf("rewrite %s: %w", installationPath, err)
 		}
 	}
 
-	bodyTurnMetadata := strings.TrimSpace(gjson.GetBytes(updated, "client_metadata.x-codex-turn-metadata").String())
-	if bodyTurnMetadata != "" {
-		rewritten := rewriteNativeCodexTurnMetadata(bodyTurnMetadata, identity)
-		if rewritten != bodyTurnMetadata {
+	turnMetadataPath := "client_metadata." + openAIWSTurnMetadataHeader
+	turnMetadata := gjson.GetBytes(updated, turnMetadataPath)
+	if turnMetadata.Exists() && turnMetadata.Type != gjson.Null {
+		if turnMetadata.Type != gjson.String {
+			return body, fmt.Errorf("%s must be a string when provided", turnMetadataPath)
+		}
+		rewritten, rewriteErr := identity.RelayIdentity.rewriteTurnMetadata(turnMetadata.String())
+		if rewriteErr != nil {
+			return body, rewriteErr
+		}
+		if rewritten != turnMetadata.String() {
 			updated, err = sjson.SetBytes(updated, "client_metadata.x-codex-turn-metadata", rewritten)
 			if err != nil {
-				return body, fmt.Errorf("isolate Codex body turn metadata: %w", err)
+				return body, fmt.Errorf("rewrite Codex body turn metadata: %w", err)
 			}
 		}
 	}
+
+	turnStatePath := "client_metadata." + openAIWSTurnStateHeader
+	turnState := gjson.GetBytes(updated, turnStatePath)
+	if turnState.Exists() && turnState.Type != gjson.Null && turnState.Type != gjson.String {
+		return body, fmt.Errorf("%s must be a string when provided", turnStatePath)
+	}
+	if identity.TurnState != "" {
+		updated, err = sjson.SetBytes(updated, turnStatePath, identity.TurnState)
+		if err != nil {
+			return body, fmt.Errorf("set current Codex turn state: %w", err)
+		}
+	}
 	return updated, nil
-}
-
-func remapNativeCodexWindowID(rawWindowID, rawThreadID, isolatedThreadID string) string {
-	rawWindowID = strings.TrimSpace(rawWindowID)
-	if rawWindowID == "" || isolatedThreadID == "" {
-		return ""
-	}
-	if rawWindowID == rawThreadID {
-		return isolatedThreadID
-	}
-	if rawThreadID != "" && strings.HasPrefix(rawWindowID, rawThreadID+":") {
-		return isolatedThreadID + strings.TrimPrefix(rawWindowID, rawThreadID)
-	}
-	if separator := strings.LastIndex(rawWindowID, ":"); separator >= 0 {
-		return isolatedThreadID + rawWindowID[separator:]
-	}
-	return isolatedThreadID
-}
-
-func rewriteNativeCodexTurnMetadata(raw string, identity openAICodexUpstreamIdentity) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || !gjson.Valid(raw) {
-		return raw
-	}
-	updated := raw
-	if identity.SessionID != "" && gjson.Get(raw, "prompt_cache_key").Exists() {
-		updated, _ = sjson.Set(updated, "prompt_cache_key", identity.SessionID)
-	}
-	if identity.SessionID != "" && gjson.Get(raw, "session_id").Exists() {
-		updated, _ = sjson.Set(updated, "session_id", identity.SessionID)
-	}
-	if identity.ThreadID != "" && gjson.Get(raw, "thread_id").Exists() {
-		updated, _ = sjson.Set(updated, "thread_id", identity.ThreadID)
-	}
-	if identity.InstallationID != "" && gjson.Get(raw, "installation_id").Exists() {
-		updated, _ = sjson.Set(updated, "installation_id", identity.InstallationID)
-	}
-	if identity.ForkedFromThreadID != "" && gjson.Get(raw, "forked_from_thread_id").Exists() {
-		updated, _ = sjson.Set(updated, "forked_from_thread_id", identity.ForkedFromThreadID)
-	}
-	if identity.ParentThreadID != "" && gjson.Get(raw, "parent_thread_id").Exists() {
-		updated, _ = sjson.Set(updated, "parent_thread_id", identity.ParentThreadID)
-	}
-	if identity.WindowID != "" && gjson.Get(raw, "window_id").Exists() {
-		updated, _ = sjson.Set(updated, "window_id", identity.WindowID)
-	}
-	return updated
 }
 
 func openAICodexUpstreamIdentityFromContext(c *gin.Context) (openAICodexUpstreamIdentity, bool) {
@@ -750,8 +784,20 @@ func openAICodexUpstreamIdentityFromContext(c *gin.Context) (openAICodexUpstream
 }
 
 func applyOpenAICodexUpstreamIdentityHeaders(headers http.Header, identity openAICodexUpstreamIdentity) {
-	if headers == nil {
+	if headers == nil || identity == (openAICodexUpstreamIdentity{}) {
 		return
+	}
+	for _, name := range []string{
+		"x-codex-installation-id",
+		openAIOfficialSessionIDHeader,
+		"session_id",
+		openAIOfficialThreadIDHeader,
+		openAIOfficialClientRequestIDHeader,
+		openAICodexParentThreadIDHeader,
+		"x-codex-window-id",
+		openAIWSTurnMetadataHeader,
+	} {
+		headers.Del(name)
 	}
 	if identity.InstallationID != "" {
 		headers.Set("x-codex-installation-id", identity.InstallationID)
@@ -760,7 +806,10 @@ func applyOpenAICodexUpstreamIdentityHeaders(headers http.Header, identity openA
 		setOpenAIUpstreamSessionHeaders(headers, identity.SessionID)
 	}
 	if identity.ThreadID != "" {
-		setOpenAIUpstreamThreadHeaders(headers, identity.ThreadID)
+		headers.Set(openAIOfficialThreadIDHeader, identity.ThreadID)
+	}
+	if identity.ClientRequestID != "" {
+		headers.Set(openAIOfficialClientRequestIDHeader, identity.ClientRequestID)
 	}
 	if identity.ParentThreadID != "" {
 		headers.Set(openAICodexParentThreadIDHeader, identity.ParentThreadID)
@@ -771,6 +820,16 @@ func applyOpenAICodexUpstreamIdentityHeaders(headers http.Header, identity openA
 	if identity.TurnMetadata != "" {
 		headers.Set(openAIWSTurnMetadataHeader, identity.TurnMetadata)
 	}
+}
+
+// applyOpenAICodexAuxiliaryIdentityHeaders 保留辅助端点支持的官方身份头。
+func applyOpenAICodexAuxiliaryIdentityHeaders(headers http.Header, identity openAICodexUpstreamIdentity) {
+	applyOpenAICodexUpstreamIdentityHeaders(headers, identity)
+	if headers == nil {
+		return
+	}
+	headers.Del("session_id")
+	headers.Del("conversation_id")
 }
 
 func setOpenAIUpstreamThreadHeaders(headers http.Header, value string) {

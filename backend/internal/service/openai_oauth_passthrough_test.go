@@ -192,6 +192,7 @@ func TestOpenAIGatewayService_OAuthMessagesBridgeDoesNotInjectDefaultInstruction
 	originalBody := []byte(`{"model":"gpt-5.5","stream":true,"prompt_cache_key":"anthropic-metadata-session-1","input":[{"type":"message","role":"developer","content":[{"type":"input_text","text":"<sub2api-claude-code-todo-guard>"}]},{"type":"message","role":"user","content":"hello"}]}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(originalBody))
 	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("api_key", &APIKey{ID: 455, Key: "sk-test-key-455"})
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusBadRequest,
@@ -221,10 +222,10 @@ func TestOpenAIGatewayService_OAuthMessagesBridgeDoesNotInjectDefaultInstruction
 	require.Nil(t, result)
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, "", gjson.GetBytes(upstream.lastBody, "instructions").String())
-	// 按 API Key 的会话隔离已移除：prompt_cache_key 透传原始值；
-	// OAuth 账号默认启用指纹收敛（session 模式），session 头收敛为账号级恒定值。
-	require.Equal(t, "anthropic-metadata-session-1", gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
-	wantSession := resolveConvergedSessionID(account)
+	relayIdentity, relayOK := newOpenAICodexRelayIdentity(c, account)
+	require.True(t, relayOK)
+	wantSession := relayIdentity.pseudonymize("session_id", "anthropic-metadata-session-1")
+	require.Equal(t, wantSession, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
 	require.NotEmpty(t, upstream.lastReq.Header.Get("Session_Id"))
 	require.Equal(t, wantSession, upstream.lastReq.Header.Get("Session_Id"))
 	require.Equal(t, upstream.lastReq.Header.Get("Session_Id"), upstream.lastReq.Header.Get(openAIOfficialSessionIDHeader))
@@ -241,7 +242,7 @@ func TestOpenAIGatewayService_OAuthMessagesBridgeAlignsBodyAndSessionIdentity(t 
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
-	c.Set("api_key", &APIKey{ID: 456})
+	c.Set("api_key", &APIKey{ID: 456, Key: "sk-test-key-456"})
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusBadRequest,
@@ -278,7 +279,9 @@ func TestOpenAIGatewayService_OAuthMessagesBridgeAlignsBodyAndSessionIdentity(t 
 	require.Error(t, err)
 	require.Nil(t, result)
 	require.NotNil(t, upstream.lastReq)
-	wantSession := isolateOpenAISessionID(456, "messages-session")
+	relayIdentity, relayOK := newOpenAICodexRelayIdentity(c, account)
+	require.True(t, relayOK)
+	wantSession := relayIdentity.pseudonymize("session_id", "messages-session")
 	require.Equal(t, wantSession, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
 	require.Equal(t, wantSession, upstream.lastReq.Header.Get(openAIOfficialSessionIDHeader))
 	require.Equal(t, wantSession, upstream.lastReq.Header.Get("session_id"))

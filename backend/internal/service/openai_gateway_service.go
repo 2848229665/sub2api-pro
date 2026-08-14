@@ -1071,12 +1071,9 @@ func getAPIKeyIDFromContext(c *gin.Context) int64 {
 	return apiKey.ID
 }
 
-// isolateOpenAISessionID previously hashed the downstream API key into the
-// Codex session/thread identity so each key got an isolated upstream session.
-// Per product decision the fork dropped that per-key isolation in favor of the
-// upstream account-level fingerprint convergence, so the client-provided value
-// now passes through unchanged. The apiKeyID parameter is retained so the many
-// call sites stay unchanged.
+// isolateOpenAISessionID 保留非 relay 调用点的历史 trim 行为。
+// OpenAI Codex OAuth 的出站身份由 openAICodexRelayIdentity 统一处理；此函数
+// 不得再用于该路径的设备、会话或线程身份隔离。
 func isolateOpenAISessionID(_ int64, raw string) string {
 	return strings.TrimSpace(raw)
 }

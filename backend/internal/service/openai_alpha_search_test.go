@@ -58,6 +58,14 @@ func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {
 	c.Request.Header.Set("User-Agent", codexCLIUserAgent)
 	c.Request.Header.Set("Originator", "codex_cli_rs")
 	c.Request.Header.Set("Version", "0.144.1")
+	c.Request.Header.Set("x-codex-installation-id", "alpha-installation")
+	c.Request.Header.Set(openAIOfficialSessionIDHeader, "alpha-session")
+	c.Request.Header.Set(openAIOfficialThreadIDHeader, "alpha-thread")
+	c.Request.Header.Set(openAIOfficialClientRequestIDHeader, "alpha-client-request")
+	c.Request.Header.Set(openAICodexParentThreadIDHeader, "alpha-parent-thread")
+	c.Request.Header.Set("x-codex-window-id", "alpha-window")
+	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"installation_id":"metadata-installation","session_id":"metadata-session","thread_id":"metadata-thread","turn_id":"metadata-turn","root_turn_id":"metadata-turn","workspaces":{"/private/project":{"associated_remote_urls":{"origin":"ssh://secret"}}}}`)
+	c.Set("api_key", &APIKey{ID: 701, Key: "sk-alpha-search"})
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -75,6 +83,8 @@ func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {
 			"chatgpt_account_id": "chatgpt-account",
 		},
 	}
+	relayIdentity, ok := newOpenAICodexRelayIdentity(c, account)
+	require.True(t, ok)
 
 	result, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
 
@@ -91,6 +101,19 @@ func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {
 	require.Equal(t, "application/json", upstream.lastReq.Header.Get("Accept"))
 	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("Version"))
 	require.Empty(t, upstream.lastReq.Header.Get("OpenAI-Beta"))
+	require.Equal(t, relayIdentity.pseudonymize("installation_id", "alpha-installation"), upstream.lastReq.Header.Get("x-codex-installation-id"))
+	require.Equal(t, relayIdentity.pseudonymize("session_id", "alpha-session"), upstream.lastReq.Header.Get(openAIOfficialSessionIDHeader))
+	require.Equal(t, relayIdentity.pseudonymize("thread_id", "alpha-thread"), upstream.lastReq.Header.Get(openAIOfficialThreadIDHeader))
+	require.Equal(t, relayIdentity.pseudonymize("thread_id", "alpha-client-request"), upstream.lastReq.Header.Get(openAIOfficialClientRequestIDHeader))
+	require.Equal(t, relayIdentity.pseudonymize("thread_id", "alpha-parent-thread"), upstream.lastReq.Header.Get(openAICodexParentThreadIDHeader))
+	require.Equal(t, relayIdentity.pseudonymize("window_id", "alpha-window"), upstream.lastReq.Header.Get("x-codex-window-id"))
+	turnMetadata := upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader)
+	require.Equal(t, relayIdentity.pseudonymize("installation_id", "metadata-installation"), gjson.Get(turnMetadata, "installation_id").String())
+	require.Equal(t, relayIdentity.pseudonymize("session_id", "metadata-session"), gjson.Get(turnMetadata, "session_id").String())
+	require.Equal(t, relayIdentity.pseudonymize("thread_id", "metadata-thread"), gjson.Get(turnMetadata, "thread_id").String())
+	require.Equal(t, relayIdentity.pseudonymize("turn_id", "metadata-turn"), gjson.Get(turnMetadata, "turn_id").String())
+	require.Equal(t, relayIdentity.pseudonymize("turn_id", "metadata-turn"), gjson.Get(turnMetadata, "root_turn_id").String())
+	require.False(t, gjson.Get(turnMetadata, "workspaces").Exists())
 	require.JSONEq(t, string(body), string(upstream.lastBody))
 }
 
@@ -118,7 +141,8 @@ func TestForwardAlphaSearchPATUsesResponsesWebSearchFallback(t *testing.T) {
 	c.Request.Header.Set("X-Codex-Beta-Features", "feature-a")
 	c.Request.Header.Set("X-Codex-Turn-State", "turn-state")
 	c.Request.Header.Set(responsesLiteHeaderKey, "true")
-	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"turn_id":"turn-1"}`)
+	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"turn_id":"turn-1","root_turn_id":"turn-1","workspaces":{"/private/project":{}}}`)
+	c.Set("api_key", &APIKey{ID: 702, Key: "sk-alpha-search-pat"})
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -138,6 +162,8 @@ func TestForwardAlphaSearchPATUsesResponsesWebSearchFallback(t *testing.T) {
 			"chatgpt_account_is_fedramp": true,
 		},
 	}
+	relayIdentity, ok := newOpenAICodexRelayIdentity(c, account)
+	require.True(t, ok)
 
 	result, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
 
@@ -155,14 +181,21 @@ func TestForwardAlphaSearchPATUsesResponsesWebSearchFallback(t *testing.T) {
 	require.Equal(t, "text/event-stream", upstream.lastReq.Header.Get("Accept"))
 	require.Equal(t, "responses=experimental", upstream.lastReq.Header.Get("OpenAI-Beta"))
 	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("Version"))
-	require.Equal(t, `{"turn_id":"turn-1"}`, upstream.lastReq.Header.Get("X-Codex-Turn-Metadata"))
+	turnMetadata := upstream.lastReq.Header.Get("X-Codex-Turn-Metadata")
+	require.Equal(t, relayIdentity.pseudonymize("turn_id", "turn-1"), gjson.Get(turnMetadata, "turn_id").String())
+	require.Equal(t, relayIdentity.pseudonymize("turn_id", "turn-1"), gjson.Get(turnMetadata, "root_turn_id").String())
+	require.False(t, gjson.Get(turnMetadata, "workspaces").Exists())
 	require.Equal(t, openai.CodexDefaultOriginator, upstream.lastReq.Header.Get("Originator"))
+	require.Empty(t, upstream.lastReq.Header.Get(openAIOfficialSessionIDHeader))
+	require.Empty(t, upstream.lastReq.Header.Get("Session_ID"))
+	require.Empty(t, upstream.lastReq.Header.Get("Conversation_ID"))
 	require.Empty(t, upstream.lastReq.Header.Get("X-Codex-Beta-Features"))
 	require.Empty(t, upstream.lastReq.Header.Get("X-Codex-Turn-State"))
 	require.Empty(t, upstream.lastReq.Header.Get(responsesLiteHeaderKey))
 	require.Empty(t, upstream.lastReq.Header.Get("Accept-Language"))
 	require.False(t, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "prompt_cache_retention").Exists())
+	require.Equal(t, "turn-state", gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-turn-state").String())
 	require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "store").Bool())

@@ -431,13 +431,22 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersUsesOfficialSessionID(t *testi
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	c.Request.Header.Set(openAIOfficialSessionIDHeader, "official-ws-session")
 	c.Request.Header.Set("session_id", "legacy-ws-session")
-	c.Set("api_key", &APIKey{ID: 79})
+	c.Request.Header.Set("conversation_id", "conversation-ws-session")
+	c.Request.Header.Set(openAIOfficialThreadIDHeader, "official-ws-thread")
+	c.Request.Header.Set(openAIOfficialClientRequestIDHeader, "client-ws-request")
+	c.Request.Header.Set(openAICodexParentThreadIDHeader, "parent-ws-thread")
+	c.Request.Header.Set("x-codex-window-id", "window-ws")
+	c.Request.Header.Set("x-codex-installation-id", "installation-ws")
+	turnMetadata := `{"installation_id":"metadata-installation","thread_id":"metadata-thread","turn_id":"metadata-turn","root_turn_id":"metadata-turn","workspaces":{"/private/project":{}}}`
+	c.Set("api_key", &APIKey{ID: 79, Key: "sk-test-key-79"})
 
 	svc := &OpenAIGatewayService{}
 	account := &Account{
+		ID:          8079,
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
+		Extra:       map[string]any{"openai_device_id": "device-ws"},
 	}
 	headers, resolution, err := svc.buildOpenAIWSHeaders(
 		context.Background(),
@@ -446,8 +455,8 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersUsesOfficialSessionID(t *testi
 		"token",
 		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
 		true,
-		"",
-		"",
+		"turn-state-ws",
+		turnMetadata,
 		"body-cache-key",
 		"",
 		"",
@@ -456,9 +465,23 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersUsesOfficialSessionID(t *testi
 	require.NoError(t, err)
 	require.Equal(t, "official-ws-session", resolution.SessionID)
 	require.Equal(t, "header_session_id_official", resolution.SessionSource)
-	want := isolateOpenAISessionID(79, "official-ws-session")
-	require.Equal(t, want, headers.Get(openAIOfficialSessionIDHeader))
-	require.Equal(t, want, headers.Get("session_id"))
+	relayIdentity, ok := newOpenAICodexRelayIdentity(c, account)
+	require.True(t, ok)
+	require.Equal(t, relayIdentity.pseudonymize("session_id", "official-ws-session"), headers.Get(openAIOfficialSessionIDHeader))
+	require.Equal(t, relayIdentity.pseudonymize("session_id", "legacy-ws-session"), headers.Get("session_id"))
+	require.Equal(t, relayIdentity.pseudonymize("session_id", "conversation-ws-session"), headers.Get("conversation_id"))
+	require.Equal(t, relayIdentity.pseudonymize("thread_id", "official-ws-thread"), headers.Get(openAIOfficialThreadIDHeader))
+	require.Equal(t, relayIdentity.pseudonymize("thread_id", "client-ws-request"), headers.Get(openAIOfficialClientRequestIDHeader))
+	require.Equal(t, relayIdentity.pseudonymize("thread_id", "parent-ws-thread"), headers.Get(openAICodexParentThreadIDHeader))
+	require.Equal(t, relayIdentity.pseudonymize("window_id", "window-ws"), headers.Get("x-codex-window-id"))
+	require.Equal(t, "device-ws", headers.Get("x-codex-installation-id"))
+	require.Empty(t, headers.Get(openAIWSTurnStateHeader))
+	rewrittenTurnMetadata := headers.Get(openAIWSTurnMetadataHeader)
+	require.Equal(t, "device-ws", gjson.Get(rewrittenTurnMetadata, "installation_id").String())
+	require.Equal(t, relayIdentity.pseudonymize("thread_id", "metadata-thread"), gjson.Get(rewrittenTurnMetadata, "thread_id").String())
+	require.Equal(t, relayIdentity.pseudonymize("turn_id", "metadata-turn"), gjson.Get(rewrittenTurnMetadata, "turn_id").String())
+	require.Equal(t, relayIdentity.pseudonymize("turn_id", "metadata-turn"), gjson.Get(rewrittenTurnMetadata, "root_turn_id").String())
+	require.False(t, gjson.Get(rewrittenTurnMetadata, "workspaces").Exists())
 }
 
 func TestLogOpenAIWSBindResponseAccountWarn(t *testing.T) {

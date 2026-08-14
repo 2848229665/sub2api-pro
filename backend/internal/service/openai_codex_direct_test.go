@@ -191,10 +191,12 @@ func TestForwardCodexMemoriesPreservesWireProtocol(t *testing.T) {
 	c.Request.Header.Set("X-OpenAI-Subagent", "memory")
 	c.Request.Header.Set("X-OpenAI-Memgen-Request", "true")
 	c.Request.Header.Set(openAIOfficialSessionIDHeader, "memory-session")
+	c.Request.Header.Set("session_id", "legacy-memory-session")
 	c.Request.Header.Set(openAIOfficialThreadIDHeader, "memory-thread")
+	c.Request.Header.Set(openAIOfficialClientRequestIDHeader, "memory-client-request")
 	c.Request.Header.Set(openAICodexParentThreadIDHeader, "memory-parent")
 	c.Request.Header.Set("conversation_id", "memory-conversation")
-	c.Set("api_key", &APIKey{ID: 88})
+	c.Set("api_key", &APIKey{ID: 88, Key: "sk-test-key-88"})
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -207,10 +209,11 @@ func TestForwardCodexMemoriesPreservesWireProtocol(t *testing.T) {
 	}}
 	service := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
 
+	account := newOpenAICodexDirectTestAccount(AccountTypeOAuth)
 	result, err := service.ForwardCodexMemories(
 		context.Background(),
 		c,
-		newOpenAICodexDirectTestAccount(AccountTypeOAuth),
+		account,
 		body,
 		"gpt-5.6-sol",
 		"",
@@ -223,14 +226,16 @@ func TestForwardCodexMemoriesPreservesWireProtocol(t *testing.T) {
 	require.Equal(t, openAICodexDirectMemoriesURL, upstream.lastReq.URL.String())
 	require.Equal(t, "true", upstream.lastReq.Header.Get("X-OpenAI-Memgen-Request"))
 	require.Equal(t, "memory", upstream.lastReq.Header.Get("X-OpenAI-Subagent"))
-	wantSession := isolateOpenAISessionID(88, "memory-session")
-	wantThread := isolateOpenAISessionID(88, "memory-thread")
+	relayIdentity, relayOK := newOpenAICodexRelayIdentity(c, account)
+	require.True(t, relayOK)
+	wantSession := relayIdentity.pseudonymize("session_id", "memory-session")
+	wantThread := relayIdentity.pseudonymize("thread_id", "memory-thread")
 	require.Equal(t, wantSession, upstream.lastReq.Header.Get(openAIOfficialSessionIDHeader))
-	require.Equal(t, wantSession, upstream.lastReq.Header.Get("session_id"))
-	require.Equal(t, wantSession, upstream.lastReq.Header.Get("conversation_id"))
+	require.Empty(t, upstream.lastReq.Header.Get("session_id"))
+	require.Empty(t, upstream.lastReq.Header.Get("conversation_id"))
 	require.Equal(t, wantThread, upstream.lastReq.Header.Get(openAIOfficialThreadIDHeader))
-	require.Equal(t, wantThread, upstream.lastReq.Header.Get(openAIOfficialClientRequestIDHeader))
-	require.Equal(t, isolateOpenAISessionID(88, "memory-parent"), upstream.lastReq.Header.Get(openAICodexParentThreadIDHeader))
+	require.Equal(t, relayIdentity.pseudonymize("thread_id", "memory-client-request"), upstream.lastReq.Header.Get(openAIOfficialClientRequestIDHeader))
+	require.Equal(t, relayIdentity.pseudonymize("thread_id", "memory-parent"), upstream.lastReq.Header.Get(openAICodexParentThreadIDHeader))
 	require.JSONEq(t, string(body), string(upstream.lastBody))
 	require.JSONEq(t, responseBody, recorder.Body.String())
 	require.Equal(t, "turn-state-memory", recorder.Header().Get("X-Codex-Turn-State"))

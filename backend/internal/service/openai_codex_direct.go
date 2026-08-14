@@ -259,26 +259,30 @@ func (s *OpenAIGatewayService) buildOpenAICodexDirectRequest(
 	// 与主 Responses/alpha-search 路径使用同一终态身份收口。上游已移除独立的
 	// 浏览器 UA 兜底；账号级显式 UA 仅贡献客户端与终端指纹，版本段由规范身份重建。
 	enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUA(account))
-	applyOpenAICodexDirectIdentityHeaders(c, account, req.Header)
+	if err := applyOpenAICodexDirectIdentityHeaders(c, account, req.Header); err != nil {
+		return nil, err
+	}
 	account.ApplyHeaderOverrides(req.Header)
 	return req, nil
 }
 
-func applyOpenAICodexDirectIdentityHeaders(c *gin.Context, account *Account, headers http.Header) {
+func applyOpenAICodexDirectIdentityHeaders(c *gin.Context, account *Account, headers http.Header) error {
 	if c == nil || headers == nil {
-		return
+		return nil
 	}
-	apiKeyID := getAPIKeyIDFromContext(c)
-	identity := resolveOpenAICodexUpstreamIdentity(c, account, nil, apiKeyID, false)
-	applyOpenAICodexUpstreamIdentityHeaders(headers, identity)
-
-	if rawConversationID := strings.TrimSpace(headers.Get("conversation_id")); rawConversationID != "" {
-		conversationID := isolateOpenAISessionID(apiKeyID, rawConversationID)
-		if identity.SessionID != "" {
-			conversationID = identity.SessionID
-		}
-		headers.Set("conversation_id", conversationID)
+	identity, err := resolveOpenAICodexUpstreamIdentityWithSessionID(
+		c,
+		account,
+		strings.TrimSpace(c.GetHeader(openAIOfficialSessionIDHeader)),
+	)
+	if err != nil {
+		return err
 	}
+	if identity == (openAICodexUpstreamIdentity{}) {
+		return nil
+	}
+	applyOpenAICodexAuxiliaryIdentityHeaders(headers, identity)
+	return nil
 }
 
 func isOpenAICodexDirectEndpointUnsupported(statusCode int) bool {

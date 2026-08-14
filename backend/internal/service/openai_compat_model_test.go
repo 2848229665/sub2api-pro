@@ -993,15 +993,16 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	firstCtx, _ := gin.CreateTestContext(firstRec)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
-	firstCtx.Set("api_key", &APIKey{ID: 501})
+	firstCtx.Set("api_key", &APIKey{ID: 501, Key: "sk-test-key-501"})
 
 	firstResult, err := svc.ForwardAsAnthropic(context.Background(), firstCtx, account, firstBody, "stable-cache-key", "gpt-5.4")
 	require.NoError(t, err)
 	require.NotNil(t, firstResult)
 	require.Empty(t, upstream.requests[0].Header.Get("x-codex-turn-state"))
 	requireOpenAIMessagesCodexIdentity(t, upstream.requests[0], codexCLIUserAgent, openai.CodexDefaultOriginator)
-	// 按 API Key 的会话隔离已移除：session/prompt_cache_key 透传原始值。
-	wantCacheKey := "stable-cache-key"
+	relayIdentity, relayOK := newOpenAICodexRelayIdentity(firstCtx, account)
+	require.True(t, relayOK)
+	wantCacheKey := relayIdentity.pseudonymize("session_id", "stable-cache-key")
 	require.Equal(t, wantCacheKey, gjson.GetBytes(upstream.bodies[0], "prompt_cache_key").String())
 	require.Equal(t, wantCacheKey, upstream.requests[0].Header.Get("session_id"))
 	require.Equal(t, wantCacheKey, upstream.requests[0].Header.Get(openAIOfficialSessionIDHeader))
@@ -1011,7 +1012,7 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	secondCtx, _ := gin.CreateTestContext(secondRec)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
-	secondCtx.Set("api_key", &APIKey{ID: 501})
+	secondCtx.Set("api_key", &APIKey{ID: 501, Key: "sk-test-key-501"})
 
 	secondResult, err := svc.ForwardAsAnthropic(context.Background(), secondCtx, account, secondBody, "stable-cache-key", "gpt-5.4")
 	require.NoError(t, err)
@@ -1050,6 +1051,7 @@ func TestForwardAsAnthropic_OAuthRestoresCodexIdentityHeaders(t *testing.T) {
 			c.Request.Header.Set("Content-Type", "application/json")
 			c.Request.Header.Set("User-Agent", tt.userAgent)
 			c.Request.Header.Set("originator", tt.originator)
+			c.Set("api_key", &APIKey{ID: 502, Key: "sk-test-key-502"})
 
 			upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_identity", "gpt-5.4")}
 			svc := &OpenAIGatewayService{
@@ -1107,7 +1109,7 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 	firstCtx, _ := gin.CreateTestContext(firstRec)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
-	firstCtx.Set("api_key", &APIKey{ID: 503})
+	firstCtx.Set("api_key", &APIKey{ID: 503, Key: "sk-test-key-503"})
 
 	firstResult, err := svc.ForwardAsAnthropic(context.Background(), firstCtx, account, firstBody, "", "gpt-5.4")
 	require.NoError(t, err)
@@ -1121,8 +1123,9 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 	var firstAnthropicReq apicompat.AnthropicRequest
 	require.NoError(t, json.Unmarshal(firstBody, &firstAnthropicReq))
 	rawCacheKey := promptCacheKeyFromAnthropicDigest(buildOpenAICompatAnthropicDigestChain(&firstAnthropicReq))
-	// 按 API Key 的会话隔离已移除：digest 派生的 key 原样透传。
-	require.Equal(t, rawCacheKey, firstCacheKey)
+	relayIdentity, relayOK := newOpenAICodexRelayIdentity(firstCtx, account)
+	require.True(t, relayOK)
+	require.Equal(t, relayIdentity.pseudonymize("session_id", rawCacheKey), firstCacheKey)
 	require.Equal(t, firstCacheKey, firstSessionID)
 	require.Equal(t, firstSessionID, upstream.requests[0].Header.Get(openAIOfficialSessionIDHeader))
 
@@ -1131,7 +1134,7 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 	secondCtx, _ := gin.CreateTestContext(secondRec)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
-	secondCtx.Set("api_key", &APIKey{ID: 503})
+	secondCtx.Set("api_key", &APIKey{ID: 503, Key: "sk-test-key-503"})
 
 	secondResult, err := svc.ForwardAsAnthropic(context.Background(), secondCtx, account, secondBody, "", "gpt-5.4")
 	require.NoError(t, err)
@@ -1176,7 +1179,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *t
 	firstCtx, _ := gin.CreateTestContext(firstRec)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
-	firstCtx.Set("api_key", &APIKey{ID: 505})
+	firstCtx.Set("api_key", &APIKey{ID: 505, Key: "sk-test-key-505"})
 
 	firstResult, err := svc.ForwardAsAnthropic(context.Background(), firstCtx, account, firstBody, "", "gpt-5.5")
 	require.NoError(t, err)
@@ -1189,8 +1192,9 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *t
 	var firstAnthropicReq apicompat.AnthropicRequest
 	require.NoError(t, json.Unmarshal(firstBody, &firstAnthropicReq))
 	rawCacheKey := promptCacheKeyFromAnthropicMetadataSession(&firstAnthropicReq)
-	// 按 API Key 的会话隔离已移除：metadata session 派生的 key 原样透传。
-	require.Equal(t, rawCacheKey, firstCacheKey)
+	relayIdentity, relayOK := newOpenAICodexRelayIdentity(firstCtx, account)
+	require.True(t, relayOK)
+	require.Equal(t, relayIdentity.pseudonymize("session_id", rawCacheKey), firstCacheKey)
 	require.Equal(t, firstCacheKey, firstSessionID)
 	require.Equal(t, firstSessionID, upstream.requests[0].Header.Get(openAIOfficialSessionIDHeader))
 
@@ -1199,7 +1203,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *t
 	secondCtx, _ := gin.CreateTestContext(secondRec)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
-	secondCtx.Set("api_key", &APIKey{ID: 505})
+	secondCtx.Set("api_key", &APIKey{ID: 505, Key: "sk-test-key-505"})
 
 	secondResult, err := svc.ForwardAsAnthropic(context.Background(), secondCtx, account, secondBody, "", "gpt-5.5")
 	require.NoError(t, err)
@@ -1243,7 +1247,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnch
 	firstCtx, _ := gin.CreateTestContext(firstRec)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
-	firstCtx.Set("api_key", &APIKey{ID: 507})
+	firstCtx.Set("api_key", &APIKey{ID: 507, Key: "sk-test-key-507"})
 
 	firstResult, err := svc.ForwardAsAnthropic(context.Background(), firstCtx, account, firstBody, "", "gpt-5.5")
 	require.NoError(t, err)
@@ -1256,8 +1260,9 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnch
 	var firstAnthropicReq apicompat.AnthropicRequest
 	require.NoError(t, json.Unmarshal(firstBody, &firstAnthropicReq))
 	rawCacheKey := promptCacheKeyFromAnthropicMetadataSession(&firstAnthropicReq)
-	// 按 API Key 的会话隔离已移除：metadata session 派生的 key 原样透传。
-	require.Equal(t, rawCacheKey, firstCacheKey)
+	relayIdentity, relayOK := newOpenAICodexRelayIdentity(firstCtx, account)
+	require.True(t, relayOK)
+	require.Equal(t, relayIdentity.pseudonymize("session_id", rawCacheKey), firstCacheKey)
 	require.Equal(t, firstCacheKey, firstSessionID)
 	require.Equal(t, firstSessionID, upstream.requests[0].Header.Get(openAIOfficialSessionIDHeader))
 
@@ -1266,7 +1271,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnch
 	secondCtx, _ := gin.CreateTestContext(secondRec)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
-	secondCtx.Set("api_key", &APIKey{ID: 507})
+	secondCtx.Set("api_key", &APIKey{ID: 507, Key: "sk-test-key-507"})
 
 	secondResult, err := svc.ForwardAsAnthropic(context.Background(), secondCtx, account, secondBody, "", "gpt-5.5")
 	require.NoError(t, err)

@@ -177,6 +177,7 @@ func liveCallIdentity(
 		subscriptionID = &value
 	}
 	return service.LiveCallIdentity{
+		APIKey:          apiKey,
 		APIKeyID:        apiKey.ID,
 		UserID:          userID,
 		GroupID:         apiKey.GroupID,
@@ -187,7 +188,12 @@ func liveCallIdentity(
 		OpenAIAlpha:     liveOpenAIAlpha(c, request),
 		RealtimeSession: strings.TrimSpace(c.GetHeader("x-session-id")),
 		SessionID:       strings.TrimSpace(c.GetHeader("session-id")),
-		ThreadID:        firstNonEmptyTrimmed(c.GetHeader("thread-id"), c.GetHeader("x-client-request-id")),
+		ThreadID:        strings.TrimSpace(c.GetHeader("thread-id")),
+		ClientRequestID: strings.TrimSpace(c.GetHeader("x-client-request-id")),
+		ParentThreadID:  strings.TrimSpace(c.GetHeader("x-codex-parent-thread-id")),
+		WindowID:        strings.TrimSpace(c.GetHeader("x-codex-window-id")),
+		InstallationID:  strings.TrimSpace(c.GetHeader("x-codex-installation-id")),
+		TurnMetadata:    strings.TrimSpace(c.GetHeader("x-codex-turn-metadata")),
 	}
 }
 
@@ -210,15 +216,6 @@ func liveOpenAIAlpha(c *gin.Context, request *service.LiveCallRequest) string {
 		return "quicksilver=v2"
 	}
 	return "quicksilver=v1"
-}
-
-func firstNonEmptyTrimmed(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func (h *OpenAIGatewayHandler) writeLiveCreateError(c *gin.Context, err error) {

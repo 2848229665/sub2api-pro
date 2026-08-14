@@ -85,6 +85,12 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 
 	sessionResolution := resolveOpenAIWSSessionHeaders(c, promptCacheKey)
 	codexIdentity, hasCodexIdentity := openAICodexUpstreamIdentityFromContext(c)
+	relayIdentity := codexIdentity.RelayIdentity
+	if !hasCodexIdentity {
+		var ok bool
+		relayIdentity, ok = newOpenAICodexRelayIdentity(c, account)
+		hasCodexIdentity = ok
+	}
 	if c != nil && c.Request != nil {
 		if v := strings.TrimSpace(c.Request.Header.Get("accept-language")); v != "" {
 			headers.Set("accept-language", v)
@@ -100,19 +106,15 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 			}
 		}
 	}
-	// OAuth 账号：将 apiKeyID 混入 session 标识符，防止跨用户会话碰撞。
-	if account != nil && account.Type == AccountTypeOAuth {
-		apiKeyID := getAPIKeyIDFromContext(c)
-		if sessionResolution.SessionID != "" {
-			isolatedSessionID := isolateOpenAISessionID(apiKeyID, sessionResolution.SessionID)
-			if hasCodexIdentity && codexIdentity.SessionID != "" {
-				isolatedSessionID = codexIdentity.SessionID
-			}
-			setOpenAIUpstreamSessionHeaders(headers, isolatedSessionID)
-		}
-		if sessionResolution.ConversationID != "" {
-			isolatedConversationID := isolateOpenAISessionID(apiKeyID, sessionResolution.ConversationID)
-			headers.Set("conversation_id", isolatedConversationID)
+	if account != nil && account.IsOpenAIOAuth() && hasCodexIdentity {
+		if err := applyOpenAICodexWebSocketIdentityHeaders(
+			c,
+			headers,
+			relayIdentity,
+			promptCacheKey,
+			turnMetadata,
+		); err != nil {
+			return nil, sessionResolution, err
 		}
 	} else {
 		if sessionResolution.SessionID != "" {
@@ -121,15 +123,12 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		if sessionResolution.ConversationID != "" {
 			headers.Set("conversation_id", sessionResolution.ConversationID)
 		}
-	}
-	if state := strings.TrimSpace(turnState); state != "" {
-		headers.Set(openAIWSTurnStateHeader, state)
-	}
-	if metadata := strings.TrimSpace(turnMetadata); metadata != "" {
-		headers.Set(openAIWSTurnMetadataHeader, metadata)
-	}
-	if account != nil && account.Type == AccountTypeOAuth && hasCodexIdentity {
-		applyOpenAICodexUpstreamIdentityHeaders(headers, codexIdentity)
+		if state := strings.TrimSpace(turnState); state != "" {
+			headers.Set(openAIWSTurnStateHeader, state)
+		}
+		if metadata := strings.TrimSpace(turnMetadata); metadata != "" {
+			headers.Set(openAIWSTurnMetadataHeader, metadata)
+		}
 	}
 
 	if account != nil && account.Type == AccountTypeOAuth {
@@ -180,6 +179,75 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	)
 
 	return headers, sessionResolution, nil
+}
+
+// applyOpenAICodexWebSocketIdentityHeaders 按握手中每个原始字段独立生成 relay 身份。
+func applyOpenAICodexWebSocketIdentityHeaders(
+	c *gin.Context,
+	headers http.Header,
+	identity openAICodexRelayIdentity,
+	fallbackSessionID string,
+	turnMetadata string,
+) error {
+	if headers == nil {
+		return nil
+	}
+	for _, name := range []string{
+		openAIOfficialSessionIDHeader,
+		"session_id",
+		"conversation_id",
+		openAIOfficialThreadIDHeader,
+		openAIOfficialClientRequestIDHeader,
+		openAICodexParentThreadIDHeader,
+		"x-codex-window-id",
+		"x-codex-installation-id",
+		openAIWSTurnMetadataHeader,
+		openAIWSTurnStateHeader,
+	} {
+		headers.Del(name)
+	}
+
+	hasExplicitSession := false
+	for _, field := range []struct {
+		name    string
+		purpose string
+	}{
+		{name: openAIOfficialSessionIDHeader, purpose: "session_id"},
+		{name: "session_id", purpose: "session_id"},
+		{name: "conversation_id", purpose: "session_id"},
+		{name: openAIOfficialThreadIDHeader, purpose: "thread_id"},
+		{name: openAIOfficialClientRequestIDHeader, purpose: "thread_id"},
+		{name: openAICodexParentThreadIDHeader, purpose: "thread_id"},
+		{name: "x-codex-window-id", purpose: "window_id"},
+	} {
+		raw := openAICodexInboundHeader(c, field.name)
+		if raw == "" {
+			continue
+		}
+		if field.name == openAIOfficialSessionIDHeader || field.name == "session_id" || field.name == "conversation_id" || field.name == openAIOfficialThreadIDHeader {
+			hasExplicitSession = true
+		}
+		if value := identity.pseudonymize(field.purpose, raw); value != "" {
+			headers.Set(field.name, value)
+		}
+	}
+	if !hasExplicitSession {
+		if value := identity.pseudonymize("session_id", fallbackSessionID); value != "" {
+			headers.Set(openAIOfficialSessionIDHeader, value)
+		}
+	}
+	clientInstallationID := openAICodexInboundHeader(c, "x-codex-installation-id")
+	if value := identity.installationID(clientInstallationID); value != "" {
+		headers.Set("x-codex-installation-id", value)
+	}
+	if raw := strings.TrimSpace(turnMetadata); raw != "" {
+		value, err := identity.rewriteTurnMetadata(raw)
+		if err != nil {
+			return err
+		}
+		headers.Set(openAIWSTurnMetadataHeader, value)
+	}
+	return nil
 }
 
 func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any, account *Account) map[string]any {

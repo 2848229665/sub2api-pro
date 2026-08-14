@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	coderws "github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 type liveHTTPUpstreamStub struct {
@@ -124,6 +125,11 @@ func TestCreateUpstreamLiveCallPreservesSession(t *testing.T) {
 		RealtimeSession: "realtime-session",
 		SessionID:       "session-id",
 		ThreadID:        "thread-id",
+		ClientRequestID: "client-request-id",
+		ParentThreadID:  "parent-thread-id",
+		WindowID:        "window-id",
+		InstallationID:  "installation-id",
+		TurnMetadata:    `{"turn_id":"turn-id"}`,
 	})
 	require.NoError(t, err)
 	require.Equal(t, "call_test", created.CallID)
@@ -142,8 +148,14 @@ func TestCreateUpstreamLiveCallPreservesSession(t *testing.T) {
 	require.Equal(t, `{"v":1,"s":0,"t":"v1.test"}`, upstream.request.Header.Get(liveAttestationHeader))
 	require.Equal(t, "realtime-session", upstream.request.Header.Get("X-Session-Id"))
 	require.Equal(t, "session-id", upstream.request.Header.Get("Session-Id"))
+	require.Empty(t, upstream.request.Header.Get("session_id"))
+	require.Empty(t, upstream.request.Header.Get("conversation_id"))
 	require.Equal(t, "thread-id", upstream.request.Header.Get("Thread-Id"))
-	require.Equal(t, "thread-id", upstream.request.Header.Get("X-Client-Request-Id"))
+	require.Equal(t, "client-request-id", upstream.request.Header.Get("X-Client-Request-Id"))
+	require.Equal(t, "parent-thread-id", upstream.request.Header.Get("X-Codex-Parent-Thread-Id"))
+	require.Equal(t, "window-id", upstream.request.Header.Get("X-Codex-Window-Id"))
+	require.Equal(t, "installation-id", upstream.request.Header.Get("X-Codex-Installation-Id"))
+	require.JSONEq(t, `{"turn_id":"turn-id"}`, upstream.request.Header.Get("X-Codex-Turn-Metadata"))
 	require.Empty(t, upstream.request.Header.Get("OpenAI-Beta"))
 	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(upstream.request.Context()))
 	require.True(t, HTTPUpstreamRedirectsDisabled(upstream.request.Context()))
@@ -161,10 +173,47 @@ func TestResolveLiveUpstreamIdentityIsStableAndPassesThroughSession(t *testing.T
 
 	require.Equal(t, "quicksilver=v1", first.OpenAIAlpha)
 	require.Equal(t, first, second)
-	// 按 API Key 的会话隔离已移除：session 标识透传客户端原始值。
+	// 账号尚未选定时只生成稳定原始值，不提前绑定账号作用域。
 	require.Equal(t, "realtime-session", first.RealtimeSession)
 	require.Equal(t, first.RealtimeSession, first.SessionID)
 	require.Equal(t, "thread", first.ThreadID)
+}
+
+func TestScopeLiveUpstreamIdentityUsesRelayIdentity(t *testing.T) {
+	apiKey := &APIKey{ID: 77, Key: "sk-live-key"}
+	account := &Account{
+		ID:       8077,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{"openai_device_id": "live-device"},
+	}
+	raw := liveUpstreamIdentity{
+		RealtimeSession: "realtime-session",
+		SessionID:       "session-id",
+		ThreadID:        "thread-id",
+		ClientRequestID: "client-request-id",
+		ParentThreadID:  "parent-thread-id",
+		WindowID:        "window-id",
+		InstallationID:  "client-device",
+		TurnMetadata:    `{"installation_id":"metadata-device","thread_id":"metadata-thread","turn_id":"metadata-turn","root_turn_id":"metadata-turn","workspaces":{"/private/project":{}}}`,
+	}
+
+	scoped, err := scopeLiveUpstreamIdentity(raw, apiKey, account)
+	require.NoError(t, err)
+	relayIdentity, ok := newOpenAICodexRelayIdentityForAPIKey(apiKey, account)
+	require.True(t, ok)
+	require.Equal(t, "realtime-session", scoped.RealtimeSession)
+	require.Equal(t, relayIdentity.pseudonymize("session_id", "session-id"), scoped.SessionID)
+	require.Equal(t, relayIdentity.pseudonymize("thread_id", "thread-id"), scoped.ThreadID)
+	require.Equal(t, relayIdentity.pseudonymize("thread_id", "client-request-id"), scoped.ClientRequestID)
+	require.Equal(t, relayIdentity.pseudonymize("thread_id", "parent-thread-id"), scoped.ParentThreadID)
+	require.Equal(t, relayIdentity.pseudonymize("window_id", "window-id"), scoped.WindowID)
+	require.Equal(t, "live-device", scoped.InstallationID)
+	require.Equal(t, "live-device", gjson.Get(scoped.TurnMetadata, "installation_id").String())
+	require.Equal(t, relayIdentity.pseudonymize("thread_id", "metadata-thread"), gjson.Get(scoped.TurnMetadata, "thread_id").String())
+	require.Equal(t, relayIdentity.pseudonymize("turn_id", "metadata-turn"), gjson.Get(scoped.TurnMetadata, "turn_id").String())
+	require.Equal(t, relayIdentity.pseudonymize("turn_id", "metadata-turn"), gjson.Get(scoped.TurnMetadata, "root_turn_id").String())
+	require.False(t, gjson.Get(scoped.TurnMetadata, "workspaces").Exists())
 }
 
 func TestLiveUpstreamIdentityFromLegacyRecordUsesStableFallback(t *testing.T) {

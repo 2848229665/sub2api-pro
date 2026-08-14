@@ -247,6 +247,12 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		return nil, policyErr
 	}
 	responsesBody = updatedBody
+	if account.IsOpenAIOAuth() {
+		responsesBody, _, err = prepareOpenAICodexUpstreamIdentity(c, account, responsesBody, false)
+		if err != nil {
+			return nil, fmt.Errorf("prepare chat completions Codex identity: %w", err)
+		}
+	}
 
 	// 5. Get access token
 	token, _, err := s.GetAccessToken(ctx, account)
@@ -262,7 +268,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
-	if promptCacheKey != "" {
+	if account.Type == AccountTypeAPIKey && promptCacheKey != "" {
 		apiKeyID := getAPIKeyIDFromContext(c)
 		setOpenAIUpstreamSessionHeaders(upstreamReq.Header, generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
 	}

@@ -1706,10 +1706,15 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	if err != nil {
 		return nil, err
 	}
-	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, parsed.StickySessionSeed(), false)
+	responsesBody, imageIdentity, err := prepareOpenAICodexAuxiliaryResponsesIdentity(c, account, responsesBody)
+	if err != nil {
+		return nil, fmt.Errorf("prepare images Codex identity: %w", err)
+	}
+	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, "", false)
 	if err != nil {
 		return nil, err
 	}
+	applyOpenAICodexAuxiliaryIdentityHeaders(upstreamReq.Header, imageIdentity)
 	upstreamReq.Header.Set("Content-Type", "application/json")
 	upstreamReq.Header.Set("Accept", "text/event-stream")
 
