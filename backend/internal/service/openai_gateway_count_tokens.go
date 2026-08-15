@@ -271,6 +271,24 @@ func (s *OpenAIGatewayService) buildInputTokensUpstreamRequest(
 			}
 		}
 	}
+	if account.IsOpenAIOAuth() {
+		identity, err := resolveOpenAICodexUpstreamIdentity(c, account, body, false)
+		if err != nil {
+			return nil, err
+		}
+		applyOpenAICodexUpstreamIdentityHeaders(req.Header, identity)
+		for _, name := range []string{
+			openAIOfficialSessionIDHeader,
+			"session_id",
+			"conversation_id",
+			openAIOfficialThreadIDHeader,
+			"openai-beta",
+			"originator",
+			"version",
+		} {
+			req.Header.Del(name)
+		}
+	}
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）
 	account.ApplyHeaderOverrides(req.Header)

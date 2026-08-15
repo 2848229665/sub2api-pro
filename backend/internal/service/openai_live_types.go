@@ -40,6 +40,7 @@ type LiveCallRequest struct {
 }
 
 type LiveCallIdentity struct {
+	APIKey          *APIKey
 	APIKeyID        int64
 	UserID          int64
 	GroupID         *int64
@@ -51,6 +52,11 @@ type LiveCallIdentity struct {
 	RealtimeSession string
 	SessionID       string
 	ThreadID        string
+	ClientRequestID string
+	ParentThreadID  string
+	WindowID        string
+	InstallationID  string
+	TurnMetadata    string
 }
 
 type LiveCallRecord struct {
@@ -74,6 +80,11 @@ type LiveCallRecord struct {
 	RealtimeSession string
 	SessionID       string
 	ThreadID        string
+	ClientRequestID string
+	ParentThreadID  string
+	WindowID        string
+	InstallationID  string
+	TurnMetadata    string
 	// AttestationCiphertext 仅用于让同一会话的 Sideband 复用创建时的证明。
 	AttestationCiphertext string
 }

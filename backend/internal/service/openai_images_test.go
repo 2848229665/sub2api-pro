@@ -722,10 +722,12 @@ func TestOpenAIGatewayServiceForwardImages_OAuthPassesNAndReturnsAllImages(t *te
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(openAIOfficialSessionIDHeader, "image-session")
+	req.Header.Set("session_id", "legacy-image-session")
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = req
-	c.Set("api_key", &APIKey{ID: 42})
+	c.Set("api_key", &APIKey{ID: 42, Key: "sk-image-oauth"})
 
 	svc := &OpenAIGatewayService{}
 	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
@@ -755,6 +757,7 @@ func TestOpenAIGatewayServiceForwardImages_OAuthPassesNAndReturnsAllImages(t *te
 			"access_token":       "token-123",
 			"chatgpt_account_id": "acct-123",
 		},
+		Extra: map[string]any{"openai_device_id": "image-device"},
 	}
 
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
@@ -785,6 +788,11 @@ func TestOpenAIGatewayServiceForwardImages_OAuthPassesNAndReturnsAllImages(t *te
 	require.Equal(t, "high", gjson.GetBytes(upstream.lastBody, "tools.0.quality").String())
 	require.Equal(t, int64(3), gjson.GetBytes(upstream.lastBody, "tools.0.n").Int())
 	require.Equal(t, "draw a cat", gjson.GetBytes(upstream.lastBody, "input.0.content.0.text").String())
+	require.Equal(t, "image-device", gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").String())
+	relayIdentity, relayOK := newOpenAICodexRelayIdentity(c, account)
+	require.True(t, relayOK)
+	require.Equal(t, relayIdentity.pseudonymize("session_id", "image-session"), upstream.lastReq.Header.Get(openAIOfficialSessionIDHeader))
+	require.Empty(t, upstream.lastReq.Header.Get("session_id"))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "gpt-image-2", gjson.Get(rec.Body.String(), "model").String())

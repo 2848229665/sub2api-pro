@@ -663,6 +663,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 	apiKey := &APIKey{
 		ID:      1,
 		UserID:  1,
+		Key:     "sk-test-key-1",
 		GroupID: &groupID,
 		Group: &Group{
 			ID:                   groupID,
@@ -822,18 +823,19 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 	require.False(t, gjson.Get(functionPayload, "tool_choice").Exists())
 	require.NotContains(t, gjson.Get(functionPayload, "instructions").String(), codexImageGenerationBridgeMarker)
 
-	wantSession := isolateOpenAISessionID(apiKey.ID, "ws-codex-session")
-	wantThread := isolateOpenAISessionID(apiKey.ID, "ws-codex-thread")
-	for index, payload := range []string{nonLitePayload, litePayload, functionPayload} {
-		require.Equal(t, wantSession, gjson.Get(payload, "prompt_cache_key").String(), "turn %d", index+1)
-	}
+	wantSession := gjson.Get(nonLitePayload, "prompt_cache_key").String()
+	wantThread := gjson.Get(nonLitePayload, "client_metadata.thread_id").String()
+	require.NotEqual(t, "ws-codex-session", wantSession)
+	require.NotEqual(t, "ws-codex-thread", wantThread)
 	require.Equal(t, wantSession, gjson.Get(nonLitePayload, "client_metadata.session_id").String())
 	require.Equal(t, wantThread, gjson.Get(nonLitePayload, "client_metadata.thread_id").String())
-	require.Equal(t, wantSession, gjson.Get(litePayload, "client_metadata.session_id").String())
-	require.Equal(t, wantThread, gjson.Get(litePayload, "client_metadata.thread_id").String())
+	require.False(t, gjson.Get(litePayload, "prompt_cache_key").Exists())
+	require.False(t, gjson.Get(litePayload, "client_metadata.session_id").Exists())
+	require.False(t, gjson.Get(litePayload, "client_metadata.thread_id").Exists())
+	require.False(t, gjson.Get(functionPayload, "prompt_cache_key").Exists())
 	require.Equal(t, wantSession, captureDialer.lastHeaders.Get(openAIOfficialSessionIDHeader))
-	require.Equal(t, wantThread, captureDialer.lastHeaders.Get(openAIOfficialThreadIDHeader))
-	require.Equal(t, wantThread, captureDialer.lastHeaders.Get(openAIOfficialClientRequestIDHeader))
+	require.Empty(t, captureDialer.lastHeaders.Get(openAIOfficialThreadIDHeader))
+	require.Empty(t, captureDialer.lastHeaders.Get(openAIOfficialClientRequestIDHeader))
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_DedicatedModeDoesNotReuseConnAcrossSessions(t *testing.T) {

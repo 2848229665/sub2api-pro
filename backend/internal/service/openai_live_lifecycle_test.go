@@ -434,7 +434,7 @@ func TestProxyLiveSidebandForwardsTextAndBinary(t *testing.T) {
 	require.Equal(t, "realtime-session", dialer.headers.Get("X-Session-Id"))
 	require.Equal(t, "session-id", dialer.headers.Get("Session-Id"))
 	require.Equal(t, "thread-id", dialer.headers.Get("Thread-Id"))
-	require.Equal(t, "thread-id", dialer.headers.Get("X-Client-Request-Id"))
+	require.Empty(t, dialer.headers.Get("X-Client-Request-Id"))
 	upstream.reads <- liveTestFrame{err: coderws.CloseError{Code: coderws.StatusNormalClosure}}
 	require.ErrorIs(t, <-proxyResult, ErrLiveCallNotFound)
 }

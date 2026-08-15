@@ -367,6 +367,50 @@ func TestEstimateOpenAIInputTokens_CompareWithOpenAIAPI(t *testing.T) {
 	}
 }
 
+func TestBuildInputTokensUpstreamRequestKeepsOnlyTrustedAuxiliaryIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+	c.Request.Header.Set(openAIOfficialSessionIDHeader, "count-session")
+	c.Request.Header.Set(openAIOfficialThreadIDHeader, "count-thread")
+	c.Request.Header.Set(openAIOfficialClientRequestIDHeader, "count-client-request")
+	c.Request.Header.Set(openAICodexParentThreadIDHeader, "count-parent-thread")
+	c.Request.Header.Set("x-codex-window-id", "count-window")
+	c.Request.Header.Set("x-codex-installation-id", "count-installation")
+	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"installation_id":"metadata-installation","thread_id":"metadata-thread","workspaces":{"/private/project":{}}}`)
+	c.Set("api_key", &APIKey{ID: 904, Key: "sk-count-tokens"})
+	account := &Account{
+		ID:       9004,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{"openai_device_id": "count-device"},
+	}
+
+	req, err := (&OpenAIGatewayService{}).buildInputTokensUpstreamRequest(
+		context.Background(),
+		c,
+		account,
+		[]byte(`{"model":"gpt-5.4","input":[]}`),
+		"oauth-token",
+	)
+	require.NoError(t, err)
+	relayIdentity, ok := newOpenAICodexRelayIdentity(c, account)
+	require.True(t, ok)
+	require.Equal(t, "Bearer oauth-token", req.Header.Get("authorization"))
+	require.Empty(t, req.Header.Get(openAIOfficialSessionIDHeader))
+	require.Empty(t, req.Header.Get("session_id"))
+	require.Empty(t, req.Header.Get("conversation_id"))
+	require.Empty(t, req.Header.Get(openAIOfficialThreadIDHeader))
+	require.Equal(t, relayIdentity.pseudonymize("thread_id", "count-client-request"), req.Header.Get(openAIOfficialClientRequestIDHeader))
+	require.Equal(t, relayIdentity.pseudonymize("thread_id", "count-parent-thread"), req.Header.Get(openAICodexParentThreadIDHeader))
+	require.Equal(t, relayIdentity.pseudonymize("window_id", "count-window"), req.Header.Get("x-codex-window-id"))
+	require.Equal(t, "count-device", req.Header.Get("x-codex-installation-id"))
+	turnMetadata := req.Header.Get(openAIWSTurnMetadataHeader)
+	require.Equal(t, "count-device", gjson.Get(turnMetadata, "installation_id").String())
+	require.Equal(t, relayIdentity.pseudonymize("thread_id", "metadata-thread"), gjson.Get(turnMetadata, "thread_id").String())
+	require.False(t, gjson.Get(turnMetadata, "workspaces").Exists())
+}
+
 func callOpenAIInputTokensAPIForTest(client *http.Client, apiKey string, reqBody openAIInputTokensCountRequest) (int, error) {
 	body, err := marshalOpenAIUpstreamJSON(reqBody)
 	if err != nil {

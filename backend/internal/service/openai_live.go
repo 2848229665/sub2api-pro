@@ -51,6 +51,11 @@ type liveUpstreamIdentity struct {
 	RealtimeSession string
 	SessionID       string
 	ThreadID        string
+	ClientRequestID string
+	ParentThreadID  string
+	WindowID        string
+	InstallationID  string
+	TurnMetadata    string
 }
 
 func liveSidebandReadError(err error) error {
@@ -149,7 +154,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 	if err != nil {
 		return nil, err
 	}
-	upstreamIdentity := resolveLiveUpstreamIdentity(identity)
+	clientUpstreamIdentity := resolveLiveUpstreamIdentity(identity)
 
 	excluded := make(map[int64]struct{})
 	// Live 按通话时长计费，不属于 token 利润门的语义范围：显式豁免，避免
@@ -184,6 +189,11 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 		}
 
 		account := selection.Account
+		upstreamIdentity, scopeErr := scopeLiveUpstreamIdentity(clientUpstreamIdentity, identity.APIKey, account)
+		if scopeErr != nil {
+			selection.ReleaseFunc()
+			return nil, scopeErr
+		}
 		leaseID := generateRequestID()
 		acquired, acquireErr := liveCache.AcquireLiveLease(
 			ctx,
@@ -240,6 +250,11 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			RealtimeSession:       upstreamIdentity.RealtimeSession,
 			SessionID:             upstreamIdentity.SessionID,
 			ThreadID:              upstreamIdentity.ThreadID,
+			ClientRequestID:       upstreamIdentity.ClientRequestID,
+			ParentThreadID:        upstreamIdentity.ParentThreadID,
+			WindowID:              upstreamIdentity.WindowID,
+			InstallationID:        upstreamIdentity.InstallationID,
+			TurnMetadata:          upstreamIdentity.TurnMetadata,
 			AttestationCiphertext: attestationCiphertext,
 		}
 		mappingTTL := s.liveMaxSessionDuration() + 5*time.Minute
@@ -439,7 +454,38 @@ func resolveLiveUpstreamIdentity(identity LiveCallIdentity) liveUpstreamIdentity
 		RealtimeSession: realtimeSession,
 		SessionID:       sessionID,
 		ThreadID:        threadID,
+		ClientRequestID: strings.TrimSpace(identity.ClientRequestID),
+		ParentThreadID:  strings.TrimSpace(identity.ParentThreadID),
+		WindowID:        strings.TrimSpace(identity.WindowID),
+		InstallationID:  strings.TrimSpace(identity.InstallationID),
+		TurnMetadata:    strings.TrimSpace(identity.TurnMetadata),
 	}
+}
+
+// scopeLiveUpstreamIdentity 在账号选定后隔离 Live 官方 Codex 身份字段。
+func scopeLiveUpstreamIdentity(
+	identity liveUpstreamIdentity,
+	apiKey *APIKey,
+	account *Account,
+) (liveUpstreamIdentity, error) {
+	relayIdentity, ok := newOpenAICodexRelayIdentityForAPIKey(apiKey, account)
+	if !ok {
+		return identity, nil
+	}
+	identity.SessionID = relayIdentity.pseudonymize("session_id", identity.SessionID)
+	identity.ThreadID = relayIdentity.pseudonymize("thread_id", identity.ThreadID)
+	identity.ClientRequestID = relayIdentity.pseudonymize("thread_id", identity.ClientRequestID)
+	identity.ParentThreadID = relayIdentity.pseudonymize("thread_id", identity.ParentThreadID)
+	identity.WindowID = relayIdentity.pseudonymize("window_id", identity.WindowID)
+	identity.InstallationID = relayIdentity.installationID(identity.InstallationID)
+	if identity.TurnMetadata != "" {
+		turnMetadata, err := relayIdentity.rewriteTurnMetadata(identity.TurnMetadata)
+		if err != nil {
+			return liveUpstreamIdentity{}, err
+		}
+		identity.TurnMetadata = turnMetadata
+	}
+	return identity, nil
 }
 
 func liveUpstreamIdentityFromRecord(record *LiveCallRecord) liveUpstreamIdentity {
@@ -451,6 +497,11 @@ func liveUpstreamIdentityFromRecord(record *LiveCallRecord) liveUpstreamIdentity
 		RealtimeSession: record.RealtimeSession,
 		SessionID:       record.SessionID,
 		ThreadID:        record.ThreadID,
+		ClientRequestID: record.ClientRequestID,
+		ParentThreadID:  record.ParentThreadID,
+		WindowID:        record.WindowID,
+		InstallationID:  record.InstallationID,
+		TurnMetadata:    record.TurnMetadata,
 	}
 	if identity.OpenAIAlpha == "" {
 		identity.OpenAIAlpha = "quicksilver=v2"
@@ -480,6 +531,9 @@ func liveUpstreamIdentityFromRecord(record *LiveCallRecord) liveUpstreamIdentity
 }
 
 func applyLiveUpstreamIdentityHeaders(headers http.Header, identity liveUpstreamIdentity) {
+	if headers == nil {
+		return
+	}
 	alpha := strings.ToLower(strings.TrimSpace(identity.OpenAIAlpha))
 	if alpha != "quicksilver=v1" && alpha != "quicksilver=v2" {
 		alpha = "quicksilver=v2"
@@ -487,21 +541,44 @@ func applyLiveUpstreamIdentityHeaders(headers http.Header, identity liveUpstream
 	headers.Set("OpenAI-Alpha", alpha)
 	ensureCodexIdentityHeaders(headers)
 	enforceCodexIdentityHeaders(headers)
-	sessionID := strings.TrimSpace(identity.SessionID)
-	if sessionID == "" {
-		sessionID = uuid.NewString()
+	for _, name := range []string{
+		"x-session-id",
+		openAIOfficialSessionIDHeader,
+		"session_id",
+		"conversation_id",
+		openAIOfficialThreadIDHeader,
+		openAIOfficialClientRequestIDHeader,
+		openAICodexParentThreadIDHeader,
+		"x-codex-window-id",
+		"x-codex-installation-id",
+		openAIWSTurnMetadataHeader,
+	} {
+		headers.Del(name)
 	}
-	realtimeSession := strings.TrimSpace(identity.RealtimeSession)
-	if realtimeSession == "" {
-		realtimeSession = sessionID
+	if value := strings.TrimSpace(identity.RealtimeSession); value != "" {
+		headers.Set("x-session-id", value)
 	}
-	threadID := strings.TrimSpace(identity.ThreadID)
-	if threadID == "" {
-		threadID = uuid.NewString()
+	if value := strings.TrimSpace(identity.SessionID); value != "" {
+		headers.Set(openAIOfficialSessionIDHeader, value)
 	}
-	headers.Set("x-session-id", realtimeSession)
-	setOpenAIUpstreamSessionHeaders(headers, sessionID)
-	setOpenAIUpstreamThreadHeaders(headers, threadID)
+	if value := strings.TrimSpace(identity.ThreadID); value != "" {
+		headers.Set(openAIOfficialThreadIDHeader, value)
+	}
+	if value := strings.TrimSpace(identity.ClientRequestID); value != "" {
+		headers.Set(openAIOfficialClientRequestIDHeader, value)
+	}
+	if value := strings.TrimSpace(identity.ParentThreadID); value != "" {
+		headers.Set(openAICodexParentThreadIDHeader, value)
+	}
+	if value := strings.TrimSpace(identity.WindowID); value != "" {
+		headers.Set("x-codex-window-id", value)
+	}
+	if value := strings.TrimSpace(identity.InstallationID); value != "" {
+		headers.Set("x-codex-installation-id", value)
+	}
+	if value := strings.TrimSpace(identity.TurnMetadata); value != "" {
+		headers.Set(openAIWSTurnMetadataHeader, value)
+	}
 	// Realtime/Live 不使用 Responses 的实验头。
 	headers.Del("OpenAI-Beta")
 }
