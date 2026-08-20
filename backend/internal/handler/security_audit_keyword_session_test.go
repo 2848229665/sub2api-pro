@@ -51,6 +51,12 @@ func (c *keywordSessionTestCache) ClaimGrokVideoBilled(context.Context, string, 
 func (c *keywordSessionTestCache) ReleaseGrokVideoBilled(context.Context, string) error {
 	return nil
 }
+func (c *keywordSessionTestCache) SetReasoningContent(context.Context, string, string, time.Duration) error {
+	return nil
+}
+func (c *keywordSessionTestCache) GetReasoningContent(context.Context, string) (string, error) {
+	return "", service.ErrReasoningContentNotFound
+}
 func (c *keywordSessionTestCache) ClaimKeywordSessionBlocked(_ context.Context, key string, _ time.Duration) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

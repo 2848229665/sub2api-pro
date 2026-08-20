@@ -57,6 +57,12 @@ func (c *cyberPolicyHandlerTestCache) ClaimGrokVideoBilled(context.Context, stri
 func (c *cyberPolicyHandlerTestCache) ReleaseGrokVideoBilled(context.Context, string) error {
 	return nil
 }
+func (c *cyberPolicyHandlerTestCache) SetReasoningContent(context.Context, string, string, time.Duration) error {
+	return nil
+}
+func (c *cyberPolicyHandlerTestCache) GetReasoningContent(context.Context, string) (string, error) {
+	return "", service.ErrReasoningContentNotFound
+}
 func (c *cyberPolicyHandlerTestCache) SetCyberSessionBlocked(_ context.Context, key string, ttl time.Duration) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
