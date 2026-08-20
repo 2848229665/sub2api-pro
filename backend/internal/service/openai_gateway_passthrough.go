@@ -1929,6 +1929,11 @@ func writeOpenAIPassthroughResponseHeaders(dst http.Header, src http.Header, fil
 	if dst == nil || src == nil {
 		return
 	}
+	// A retry can reuse the same response writer after an upstream account
+	// switch. Clear the previous account's turn state even when the new
+	// response omits it or the configured filter removes it.
+	turnStateKey := http.CanonicalHeaderKey(openAICodexTurnStateHeader)
+	dst.Del(turnStateKey)
 	if filter != nil {
 		responseheaders.WriteFilteredHeaders(dst, src, filter)
 		return
@@ -1966,9 +1971,20 @@ func writeOpenAIPassthroughResponseHeaders(dst http.Header, src http.Header, fil
 	// x-codex-turn-state：Codex 回合状态头，客户端会在同回合后续请求回带。
 	// 与上面的用量头不同，这里在上游缺失时也主动清除——failover 换号后残留
 	// 上一账号的 blob 会构成跨账号矛盾（openai_codex_turn_state.go）。
-	turnStateKey := http.CanonicalHeaderKey(openAICodexTurnStateHeader)
 	dst.Del(turnStateKey)
 	for _, v := range getCaseInsensitiveValues(src, openAICodexTurnStateHeader) {
 		dst.Add(turnStateKey, v)
 	}
+}
+
+func getCaseInsensitiveValues(h http.Header, key string) []string {
+	if h == nil {
+		return nil
+	}
+	for rawKey, values := range h {
+		if strings.EqualFold(rawKey, key) {
+			return values
+		}
+	}
+	return nil
 }

@@ -402,6 +402,7 @@ func TestNormalizeOpenAICompatiblePlatform_SchedulerExactMatch(t *testing.T) {
 	require.Equal(t, PlatformOpenAI, NormalizeOpenAICompatiblePlatform(""))
 	require.Equal(t, PlatformOpenAI, NormalizeOpenAICompatiblePlatform(PlatformAnthropic))
 	require.Equal(t, PlatformOpenAI, NormalizeOpenAICompatiblePlatform("something-else"))
+	require.Equal(t, PlatformKimi, normalizeOpenAICompatiblePlatform(PlatformKimi))
 }
 
 // TestGetOpenAIProtocolAPIKey_CNProviders 验证 OpenAI 协议族密钥读取覆盖国产供应商，

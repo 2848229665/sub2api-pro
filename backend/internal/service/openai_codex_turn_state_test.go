@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -244,8 +246,37 @@ func TestWriteOpenAIPassthroughResponseHeaders_RelaysAndClearsTurnState(t *testi
 	writeOpenAIPassthroughResponseHeaders(dst, src, nil)
 	require.Equal(t, "blob-P", dst.Get("X-Codex-Turn-State"))
 
+	dst = http.Header{}
+	writeOpenAIPassthroughResponseHeaders(dst, http.Header{"x-codex-turn-state": []string{"blob-lower"}}, nil)
+	require.Equal(t, "blob-lower", dst.Get("X-Codex-Turn-State"))
+
 	// 上游缺失时清除残留（failover 换号防串扰）
 	writeOpenAIPassthroughResponseHeaders(dst, http.Header{"Content-Type": []string{"application/json"}}, nil)
+	require.Empty(t, dst.Get("X-Codex-Turn-State"))
+}
+
+func TestWriteOpenAIPassthroughResponseHeaders_ClearsTurnStateWithFilter(t *testing.T) {
+	filter := responseheaders.CompileHeaderFilter(config.ResponseHeaderConfig{})
+	dst := http.Header{}
+	dst.Set("X-Codex-Turn-State", "blob-old")
+
+	writeOpenAIPassthroughResponseHeaders(dst, http.Header{}, filter)
+	require.Empty(t, dst.Get("X-Codex-Turn-State"))
+
+	dst.Set("X-Codex-Turn-State", "blob-old")
+	writeOpenAIPassthroughResponseHeaders(dst, http.Header{
+		"x-codex-turn-state": []string{"blob-new"},
+	}, filter)
+	require.Equal(t, []string{"blob-new"}, dst.Values("X-Codex-Turn-State"))
+
+	blockedFilter := responseheaders.CompileHeaderFilter(config.ResponseHeaderConfig{
+		Enabled:     true,
+		ForceRemove: []string{"x-codex-turn-state"},
+	})
+	dst.Set("X-Codex-Turn-State", "blob-old")
+	writeOpenAIPassthroughResponseHeaders(dst, http.Header{
+		"X-Codex-Turn-State": []string{"blob-blocked"},
+	}, blockedFilter)
 	require.Empty(t, dst.Get("X-Codex-Turn-State"))
 }
 
