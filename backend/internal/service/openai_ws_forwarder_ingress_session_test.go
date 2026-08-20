@@ -1182,8 +1182,9 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 		req.Header = req.Header.Clone()
 		req.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
 		req.Header.Set(openAIWSTurnStateHeader, "turn-state-1")
-		req.Header.Set(openAIWSTurnMetadataHeader, "turn-meta-1")
+		req.Header.Set(openAIWSTurnMetadataHeader, `{"installation_id":"install-1","session_id":"session-1","thread_id":"thread-1","turn_id":"turn-1","workspaces":{"/private/project":{}}}`)
 		ginCtx.Request = req
+		ginCtx.Set("api_key", &APIKey{ID: 79, Key: "sk-test-key-79"})
 
 		readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		msgType, firstMessage, readErr := conn.Read(readCtx)
@@ -1240,9 +1241,16 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 		t.Fatal("等待 passthrough websocket 结束超时")
 	}
 
-	require.Equal(t, isolateOpenAISessionID(0, "pcache_passthrough"), captureDialer.lastHeaders.Get("session_id"))
+	relayIdentity, ok := newOpenAICodexRelayIdentityForAPIKey(&APIKey{ID: 79, Key: "sk-test-key-79"}, account)
+	require.True(t, ok)
+	require.Equal(t, relayIdentity.pseudonymize("session_id", "pcache_passthrough"), captureDialer.lastHeaders.Get("session_id"))
 	require.Equal(t, "turn-state-1", captureDialer.lastHeaders.Get(openAIWSTurnStateHeader))
-	require.Equal(t, "turn-meta-1", captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader))
+	rewrittenTurnMetadata := captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader)
+	require.Equal(t, relayIdentity.pseudonymize("installation_id", "install-1"), gjson.Get(rewrittenTurnMetadata, "installation_id").String())
+	require.Equal(t, relayIdentity.pseudonymize("session_id", "session-1"), gjson.Get(rewrittenTurnMetadata, "session_id").String())
+	require.Equal(t, relayIdentity.pseudonymize("thread_id", "thread-1"), gjson.Get(rewrittenTurnMetadata, "thread_id").String())
+	require.Equal(t, relayIdentity.pseudonymize("turn_id", "turn-1"), gjson.Get(rewrittenTurnMetadata, "turn_id").String())
+	require.False(t, gjson.Get(rewrittenTurnMetadata, "workspaces").Exists())
 	require.Len(t, upstreamConn.writes, 1)
 	forwarded := requestToJSONString(upstreamConn.writes[0])
 	require.False(t, gjson.Get(forwarded, `tools.#(type=="namespace")`).Exists())

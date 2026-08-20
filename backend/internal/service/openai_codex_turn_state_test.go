@@ -39,6 +39,8 @@ func TestOpenAICodexTurnStateSeed(t *testing.T) {
 	// 无会话标识 → 不跟踪
 	cNoSession, _ := newTurnStateTestContext(t, 7, "")
 	require.Empty(t, openAICodexTurnStateSeed(cNoSession))
+	attachOpenAICodexTurnStateSessionHash(cNoSession, "prompt-cache-session-hash")
+	require.Equal(t, "7\x00ws:prompt-cache-session-hash", openAICodexTurnStateSeed(cNoSession))
 
 	require.Empty(t, openAICodexTurnStateSeed(nil))
 }
@@ -173,6 +175,17 @@ func TestGuardOpenAICodexTurnStateEcho(t *testing.T) {
 		svc.relayOpenAICodexTurnState(c, &Account{ID: 42}, upstream)
 
 		// failover 换到账号 43：blob 由 42 铸造，必须剥离
+		h := newOutbound("blob-A")
+		svc.guardOpenAICodexTurnStateEcho(c, &Account{ID: 43}, h)
+		require.Empty(t, h.Get("x-codex-turn-state"))
+	})
+
+	t.Run("foreign_account_strips_prompt_cache_only_ws_echo", func(t *testing.T) {
+		svc := &OpenAIGatewayService{}
+		c, _ := newTurnStateTestContext(t, 7, "")
+		attachOpenAICodexTurnStateSessionHash(c, "prompt-cache-session-hash")
+		svc.noteOpenAICodexTurnStateProvenance(c, &Account{ID: 42})
+
 		h := newOutbound("blob-A")
 		svc.guardOpenAICodexTurnStateEcho(c, &Account{ID: 43}, h)
 		require.Empty(t, h.Get("x-codex-turn-state"))

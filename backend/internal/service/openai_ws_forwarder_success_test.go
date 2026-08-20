@@ -481,7 +481,7 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersUsesOfficialSessionID(t *testi
 	require.Equal(t, relayIdentity.pseudonymize("thread_id", "parent-ws-thread"), headers.Get(openAICodexParentThreadIDHeader))
 	require.Equal(t, relayIdentity.pseudonymize("window_id", "window-ws"), headers.Get("x-codex-window-id"))
 	require.Equal(t, "device-ws", headers.Get("x-codex-installation-id"))
-	require.Empty(t, headers.Get(openAIWSTurnStateHeader))
+	require.Equal(t, "turn-state-ws", headers.Get(openAIWSTurnStateHeader))
 	rewrittenTurnMetadata := headers.Get(openAIWSTurnMetadataHeader)
 	require.Equal(t, "device-ws", gjson.Get(rewrittenTurnMetadata, "installation_id").String())
 	require.Equal(t, relayIdentity.pseudonymize("thread_id", "metadata-thread"), gjson.Get(rewrittenTurnMetadata, "thread_id").String())
@@ -1100,6 +1100,7 @@ func TestOpenAIGatewayService_Forward_WSv2_CodexFingerprintHandshakeBodyParityAn
 	c.Request.Header.Set("originator", "codex_cli_rs")
 	c.Request.Header.Set("session-id", "header-session")
 	c.Request.Header.Set("x-codex-turn-metadata", `{"installation_id":"header-install","session_id":"header-session","thread_id":"header-thread","turn_id":"header-turn","window_id":"header-window","sandbox":"seatbelt"}`)
+	c.Set("api_key", &APIKey{ID: 79, Key: "sk-test-key-79"})
 
 	cfg := &config.Config{}
 	cfg.Security.URLAllowlist.Enabled = false
@@ -1398,7 +1399,7 @@ func TestOpenAIGatewayService_Forward_WSv2_TurnStateAndMetadataReplayOnReconnect
 
 	sessionHash := svc.GenerateSessionHash(c1, reqBody)
 	store := svc.getOpenAIWSStateStore()
-	turnState, ok := store.GetSessionTurnState(0, sessionHash)
+	turnState, ok := store.GetSessionTurnState(0, account.ID, sessionHash)
 	require.True(t, ok)
 	require.Equal(t, "turn_state_first", turnState)
 

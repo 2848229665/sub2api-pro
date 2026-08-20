@@ -130,6 +130,9 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 			); err != nil {
 				return nil, sessionResolution, err
 			}
+			if state := strings.TrimSpace(turnState); state != "" {
+				headers.Set(openAIWSTurnStateHeader, state)
+			}
 		} else {
 			apiKeyID := getAPIKeyIDFromContext(c)
 			if sessionResolution.SessionID != "" {
@@ -137,12 +140,6 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 			}
 			if sessionResolution.ConversationID != "" {
 				headers.Set("conversation_id", isolateOpenAISessionID(apiKeyID, sessionResolution.ConversationID))
-			}
-			if state := strings.TrimSpace(turnState); state != "" {
-				headers.Set(openAIWSTurnStateHeader, state)
-			}
-			if metadata := strings.TrimSpace(turnMetadata); metadata != "" {
-				headers.Set(openAIWSTurnMetadataHeader, metadata)
 			}
 		}
 	} else {
@@ -197,6 +194,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）。
 	// 覆盖所有 WS 模式（ctx_pool/dedicated/passthrough）的握手头。
 	account.ApplyHeaderOverrides(headers)
+	s.guardOpenAICodexTurnStateEcho(c, account, headers)
 	setOpenAICodexRoutingHint(headers, account, routingModel, routingServiceTier)
 	logOpenAIRoutingDiagnostics(
 		ctx,

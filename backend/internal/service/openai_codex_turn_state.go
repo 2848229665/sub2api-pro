@@ -15,6 +15,8 @@ import (
 // codex-api/src/sse/responses.rs 与 endpoint/compact.rs）。
 const openAICodexTurnStateHeader = "x-codex-turn-state"
 
+const openAICodexTurnStateSessionHashContextKey = "openai_codex_turn_state_session_hash"
+
 // turn-state blob 是上游在"出站身份"（含 #5553 指纹收敛改写后的
 // installation/session/thread 标识）下铸造的，同账号回放自洽；跨账号回放
 // （failover 换号后客户端仍回带旧账号的 blob）是代理链独有、真实 Codex
@@ -35,9 +37,25 @@ func openAICodexTurnStateSeed(c *gin.Context) string {
 	}
 	sessionID := extractClientSessionID(c.Request.Header)
 	if sessionID == "" {
+		if sessionHash, ok := c.Get(openAICodexTurnStateSessionHashContextKey); ok {
+			if value, valueOK := sessionHash.(string); valueOK && strings.TrimSpace(value) != "" {
+				sessionID = "ws:" + strings.TrimSpace(value)
+			}
+		}
+	}
+	if sessionID == "" {
 		return ""
 	}
 	return strconv.FormatInt(getAPIKeyIDFromContext(c), 10) + "\x00" + sessionID
+}
+
+func attachOpenAICodexTurnStateSessionHash(c *gin.Context, sessionHash string) {
+	if c == nil {
+		return
+	}
+	if value := strings.TrimSpace(sessionHash); value != "" {
+		c.Set(openAICodexTurnStateSessionHashContextKey, value)
+	}
 }
 
 // relayOpenAICodexTurnState 将上游响应中的 turn-state 显式写入下游响应头，

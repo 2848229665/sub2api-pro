@@ -225,7 +225,7 @@ func TestOpenAIGatewayService_OAuthMessagesBridgeDoesNotInjectDefaultInstruction
 	relayIdentity, relayOK := newOpenAICodexRelayIdentity(c, account)
 	require.True(t, relayOK)
 	wantSession := relayIdentity.pseudonymize("session_id", "anthropic-metadata-session-1")
-	require.Equal(t, wantSession, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
+	require.Empty(t, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
 	require.NotEmpty(t, upstream.lastReq.Header.Get("Session_Id"))
 	require.Equal(t, wantSession, upstream.lastReq.Header.Get("Session_Id"))
 	require.Equal(t, upstream.lastReq.Header.Get("Session_Id"), upstream.lastReq.Header.Get(openAIOfficialSessionIDHeader))
