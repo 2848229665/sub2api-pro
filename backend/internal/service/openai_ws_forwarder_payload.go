@@ -138,6 +138,12 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 			if sessionResolution.ConversationID != "" {
 				headers.Set("conversation_id", isolateOpenAISessionID(apiKeyID, sessionResolution.ConversationID))
 			}
+			if state := strings.TrimSpace(turnState); state != "" {
+				headers.Set(openAIWSTurnStateHeader, state)
+			}
+			if metadata := strings.TrimSpace(turnMetadata); metadata != "" {
+				headers.Set(openAIWSTurnMetadataHeader, metadata)
+			}
 		}
 	} else {
 		if sessionResolution.SessionID != "" {

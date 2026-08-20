@@ -467,6 +467,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if !optimization.Applied {
 			if compatMessagesBridge {
 				codexResult = applyCodexOAuthTransformWithOptions(decoded, codexOAuthTransformOptions{IsCodexCLI: isCodexCLI, IsCompact: isCompactRequest, SkipDefaultInstructions: true, PreserveToolCallIDs: true})
+				delete(decoded, "prompt_cache_key")
 				ensureCodexOAuthInstructionsField(decoded)
 				markDecodedModified()
 			} else {
