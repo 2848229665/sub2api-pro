@@ -831,15 +831,3 @@ func applyOpenAICodexAuxiliaryIdentityHeaders(headers http.Header, identity open
 	headers.Del("session_id")
 	headers.Del("conversation_id")
 }
-
-func setOpenAIUpstreamThreadHeaders(headers http.Header, value string) {
-	if headers == nil {
-		return
-	}
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return
-	}
-	headers.Set(openAIOfficialThreadIDHeader, value)
-	headers.Set(openAIOfficialClientRequestIDHeader, value)
-}
