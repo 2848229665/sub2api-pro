@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
@@ -243,25 +242,26 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 	if turnMetadata := openAICodexInboundHeader(c, "X-Codex-Turn-Metadata"); turnMetadata != "" {
 		req.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
 	}
-	if version := openAICodexInboundHeader(c, "Version"); version != "" {
+	canonical := resolveCodexOutboundIdentity("")
+	if version := openAIAlphaSearchInboundHeader(c, "Version"); version != "" {
 		req.Header.Set("Version", version)
 	} else {
-		req.Header.Set("Version", codexCLIVersion)
+		req.Header.Set("Version", canonical.version)
 	}
 	if originator := openAICodexInboundHeader(c, "Originator"); originator != "" {
 		req.Header.Set("Originator", originator)
 	} else {
-		req.Header.Set("Originator", openai.CodexDefaultOriginator)
+		req.Header.Set("Originator", canonical.originator)
 	}
 	if customUA := account.GetOpenAIUserAgent(); customUA != "" {
 		req.Header.Set("User-Agent", customUA)
 	} else if userAgent := openAICodexInboundHeader(c, "User-Agent"); userAgent != "" {
 		req.Header.Set("User-Agent", userAgent)
 	} else {
-		req.Header.Set("User-Agent", codexCLIUserAgent)
+		req.Header.Set("User-Agent", canonical.userAgent)
 	}
 	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
-		req.Header.Set("User-Agent", codexCLIUserAgent)
+		req.Header.Set("User-Agent", canonical.userAgent)
 	}
 	if account.IsOpenAIOAuth() {
 		upstreamIdentity, resolveErr := resolveOpenAICodexUpstreamIdentityWithSessionID(
@@ -391,25 +391,26 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 		if turnMetadata := openAICodexInboundHeader(c, "X-Codex-Turn-Metadata"); turnMetadata != "" {
 			req.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
 		}
-		if version := openAICodexInboundHeader(c, "Version"); version != "" {
+		canonical := resolveCodexOutboundIdentity("")
+		if version := openAIAlphaSearchInboundHeader(c, "Version"); version != "" {
 			req.Header.Set("Version", version)
 		} else {
-			req.Header.Set("Version", codexCLIVersion)
+			req.Header.Set("Version", canonical.version)
 		}
 		if originator := openAICodexInboundHeader(c, "Originator"); originator != "" {
 			req.Header.Set("Originator", originator)
 		} else {
-			req.Header.Set("Originator", openai.CodexDefaultOriginator)
+			req.Header.Set("Originator", canonical.originator)
 		}
 		if customUA := account.GetOpenAIUserAgent(); customUA != "" {
 			req.Header.Set("User-Agent", customUA)
 		} else if userAgent := openAICodexInboundHeader(c, "User-Agent"); userAgent != "" {
 			req.Header.Set("User-Agent", userAgent)
 		} else {
-			req.Header.Set("User-Agent", codexCLIUserAgent)
+			req.Header.Set("User-Agent", canonical.userAgent)
 		}
 		if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
-			req.Header.Set("User-Agent", codexCLIUserAgent)
+			req.Header.Set("User-Agent", canonical.userAgent)
 		}
 		upstreamIdentity, resolveErr := resolveOpenAICodexUpstreamIdentityWithSessionID(
 			c,
@@ -451,6 +452,13 @@ func stripOpenAIAlphaSearchResponsesHeaders(headers http.Header) {
 	} {
 		headers.Del(key)
 	}
+}
+
+func openAIAlphaSearchInboundHeader(c *gin.Context, key string) string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.GetHeader(key))
 }
 
 var openAIAlphaSearchUnsupportedBodyFields = [...]string{
