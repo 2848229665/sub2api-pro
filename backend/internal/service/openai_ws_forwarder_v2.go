@@ -304,14 +304,25 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		handshakeTurnState != "",
 		len(handshakeTurnState),
 	)
-	if handshakeTurnState != "" {
+	turnStateHeader := http.CanonicalHeaderKey(openAIWSTurnStateHeader)
+	if c != nil && !c.Writer.Written() {
+		c.Writer.Header().Del(turnStateHeader)
+	}
+	turnStateCommitted := false
+	stageHandshakeTurnState := func() {
+		if c != nil && handshakeTurnState != "" && !c.Writer.Written() {
+			c.Header(turnStateHeader, handshakeTurnState)
+		}
+	}
+	commitHandshakeTurnState := func() {
+		if turnStateCommitted || handshakeTurnState == "" || c == nil || !c.Writer.Written() {
+			return
+		}
 		if stateStore != nil && sessionHash != "" {
 			stateStore.BindSessionTurnState(groupID, account.ID, sessionHash, handshakeTurnState, s.openAIWSSessionStickyTTL())
 		}
-		if c != nil {
-			c.Header(http.CanonicalHeaderKey(openAIWSTurnStateHeader), handshakeTurnState)
-			s.noteOpenAICodexTurnStateProvenance(c, account)
-		}
+		s.noteOpenAICodexTurnStateProvenance(c, account)
+		turnStateCommitted = true
 	}
 
 	if err := s.performOpenAIWSGeneratePrewarm(
@@ -414,8 +425,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		frame = append(frame, "data: "...)
 		frame = append(frame, message...)
 		frame = append(frame, '\n', '\n')
+		stageHandshakeTurnState()
 		_, wErr := c.Writer.Write(frame)
 		if wErr == nil {
+			commitHandshakeTurnState()
 			wroteDownstream = true
 			pendingFlushEvents++
 			flushStreamWriter(forceFlush)
@@ -728,7 +741,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			responseID = strings.TrimSpace(gjson.GetBytes(finalResponse, "id").String())
 		}
 
+		stageHandshakeTurnState()
 		c.Data(http.StatusOK, "application/json", finalResponse)
+		commitHandshakeTurnState()
 	} else {
 		flushStreamWriter(true)
 	}

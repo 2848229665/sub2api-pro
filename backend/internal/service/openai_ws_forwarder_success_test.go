@@ -1424,6 +1424,68 @@ func TestOpenAIGatewayService_Forward_WSv2_TurnStateAndMetadataReplayOnReconnect
 	require.Equal(t, "turn_state_first", secondHandshakeHeaders.Get("X-Codex-Turn-State"))
 }
 
+func TestOpenAIGatewayService_Forward_WSv2_DoesNotCommitHandshakeTurnStateBeforeFirstOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	c.Request.Header.Set("session_id", "session_failed_handshake_state")
+	c.Set("api_key", &APIKey{ID: 79, Key: "sk-test-key-79"})
+
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+
+	captureConn := &openAIWSCaptureConn{events: [][]byte{[]byte("not-json")}}
+	captureDialer := &openAIWSCaptureDialer{
+		conn:      captureConn,
+		handshake: http.Header{openAIWSTurnStateHeader: []string{"turn-state-abandoned"}},
+	}
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(captureDialer)
+
+	svc := &OpenAIGatewayService{
+		cfg:          cfg,
+		cache:        &stubGatewayCache{},
+		toolCorrector: NewCodexToolCorrector(),
+		openaiWSPool: pool,
+	}
+	account := &Account{
+		ID:          460,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "http://upstream.example"},
+	}
+	reqBody := map[string]any{
+		"model":  "gpt-5.1",
+		"stream": false,
+		"input":  []any{map[string]any{"type": "input_text", "text": "hello"}},
+	}
+
+	result, err := svc.forwardOpenAIWSV2(
+		context.Background(), c, account, reqBody, "sk-test",
+		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
+		false, false, "gpt-5.1", "gpt-5.1", time.Now(), 1, "", new(bool),
+	)
+
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.False(t, c.Writer.Written())
+	require.Empty(t, rec.Header().Get(openAIWSTurnStateHeader))
+	_, hasOrigin := svc.openaiCodexTurnStateOrigins.Load("79\x00session_failed_handshake_state")
+	require.False(t, hasOrigin)
+	sessionHash := svc.GenerateSessionHash(c, nil)
+	_, hasStoredState := svc.getOpenAIWSStateStore().GetSessionTurnState(0, account.ID, sessionHash)
+	require.False(t, hasStoredState)
+}
+
 func TestOpenAIGatewayService_Forward_WSv2_GeneratePrewarm(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
