@@ -1449,10 +1449,10 @@ func TestOpenAIGatewayService_Forward_WSv2_DoesNotCommitHandshakeTurnStateBefore
 	pool.setClientDialerForTest(captureDialer)
 
 	svc := &OpenAIGatewayService{
-		cfg:          cfg,
-		cache:        &stubGatewayCache{},
+		cfg:           cfg,
+		cache:         &stubGatewayCache{},
 		toolCorrector: NewCodexToolCorrector(),
-		openaiWSPool: pool,
+		openaiWSPool:  pool,
 	}
 	account := &Account{
 		ID:          460,
