@@ -1243,7 +1243,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 
 	relayIdentity, ok := newOpenAICodexRelayIdentityForAPIKey(&APIKey{ID: 79, Key: "sk-test-key-79"}, account)
 	require.True(t, ok)
-	require.Equal(t, relayIdentity.pseudonymize("session_id", "pcache_passthrough"), captureDialer.lastHeaders.Get(openAIOfficialSessionIDHeader))
+	require.Equal(t, relayIdentity.pseudonymize("session_id", "session-1"), captureDialer.lastHeaders.Get(openAIOfficialSessionIDHeader))
 	require.Equal(t, "turn-state-1", captureDialer.lastHeaders.Get(openAIWSTurnStateHeader))
 	rewrittenTurnMetadata := captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader)
 	require.Equal(t, relayIdentity.pseudonymize("installation_id", "install-1"), gjson.Get(rewrittenTurnMetadata, "installation_id").String())
