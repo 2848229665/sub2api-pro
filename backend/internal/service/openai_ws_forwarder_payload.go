@@ -130,6 +130,9 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 			); err != nil {
 				return nil, sessionResolution, err
 			}
+			if codexIdentity.SessionID != "" {
+				headers.Set(openAIOfficialSessionIDHeader, codexIdentity.SessionID)
+			}
 			if state := strings.TrimSpace(turnState); state != "" {
 				headers.Set(openAIWSTurnStateHeader, state)
 			}

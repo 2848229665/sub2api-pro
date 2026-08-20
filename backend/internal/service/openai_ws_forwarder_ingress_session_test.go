@@ -1164,6 +1164,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 	}
 
 	serverErrCh := make(chan error, 1)
+	upstreamSessionIDCh := make(chan string, 1)
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{
 			CompressionMode: coderws.CompressionContextTakeover,
@@ -1198,7 +1199,14 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 			return
 		}
 
-		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "oauth-token", firstMessage, nil)
+		proxyErr := svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "oauth-token", firstMessage, nil)
+		codexIdentity, ok := openAICodexUpstreamIdentityFromContext(ginCtx)
+		if !ok {
+			serverErrCh <- errors.New("missing Codex upstream identity")
+			return
+		}
+		upstreamSessionIDCh <- codexIdentity.SessionID
+		serverErrCh <- proxyErr
 	}))
 	defer wsServer.Close()
 
@@ -1241,9 +1249,14 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 		t.Fatal("等待 passthrough websocket 结束超时")
 	}
 
+	upstreamSessionID := <-upstreamSessionIDCh
 	relayIdentity, ok := newOpenAICodexRelayIdentityForAPIKey(&APIKey{ID: 79, Key: "sk-test-key-79"}, account)
 	require.True(t, ok)
-	require.Equal(t, relayIdentity.pseudonymize("session_id", "session-1"), captureDialer.lastHeaders.Get(openAIOfficialSessionIDHeader))
+	require.Equal(t, relayIdentity.pseudonymize("session_id", "pcache_passthrough"), upstreamSessionID)
+	require.NotEmpty(t, upstreamSessionID)
+	require.NotEqual(t, "pcache_passthrough", upstreamSessionID)
+	require.NotEqual(t, "session-1", upstreamSessionID)
+	require.Equal(t, upstreamSessionID, captureDialer.lastHeaders.Get(openAIOfficialSessionIDHeader))
 	require.Equal(t, "turn-state-1", captureDialer.lastHeaders.Get(openAIWSTurnStateHeader))
 	rewrittenTurnMetadata := captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader)
 	require.Equal(t, relayIdentity.pseudonymize("installation_id", "install-1"), gjson.Get(rewrittenTurnMetadata, "installation_id").String())
