@@ -16,6 +16,7 @@ interface Props {
   groupId?: number | null
   errorType: 'request' | 'upstream'
   resumeState?: boolean
+  embedded?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), { embedded: false })

@@ -29,6 +29,7 @@ interface Props {
   platform?: string
   groupId?: number | null
   resumeState?: boolean
+  embedded?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), { embedded: false })

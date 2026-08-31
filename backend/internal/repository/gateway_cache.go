@@ -17,6 +17,7 @@ import (
 const stickySessionPrefix = "sticky_session:"
 const openAIResponsesSessionWindowPrefix = "openai_responses_session_window:"
 const liveCallPrefix = "live:call:"
+const keywordSessionBlockPrefix = "keyword_session_block:"
 
 type gatewayCache struct {
 	rdb *redis.Client
@@ -78,6 +79,32 @@ func (c *gatewayCache) RefreshSessionTTL(ctx context.Context, groupID int64, ses
 func (c *gatewayCache) DeleteSessionAccountID(ctx context.Context, groupID int64, sessionHash string) error {
 	key := buildSessionKey(groupID, sessionHash)
 	return c.rdb.Del(ctx, key, sessionRollbackGuardKey(key)).Err()
+}
+
+func (c *gatewayCache) ClaimKeywordSessionBlocked(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+	if c == nil || c.rdb == nil {
+		return false, errors.New("gateway cache unavailable")
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false, errors.New("invalid keyword session block key")
+	}
+	if ttl <= 0 {
+		ttl = time.Hour
+	}
+	return c.rdb.SetNX(ctx, keywordSessionBlockPrefix+key, "1", ttl).Result()
+}
+
+func (c *gatewayCache) IsKeywordSessionBlocked(ctx context.Context, key string) (bool, error) {
+	if c == nil || c.rdb == nil {
+		return false, errors.New("gateway cache unavailable")
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false, errors.New("invalid keyword session block key")
+	}
+	n, err := c.rdb.Exists(ctx, keywordSessionBlockPrefix+key).Result()
+	return n > 0, err
 }
 
 var claimOpenAIResponsesSessionWindowScript = redis.NewScript(`

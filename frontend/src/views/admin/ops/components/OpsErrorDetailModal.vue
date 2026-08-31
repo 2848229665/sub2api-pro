@@ -246,6 +246,7 @@ interface Props {
   errorId: number | null
   errorType?: 'request' | 'upstream'
   backToList?: boolean
+  embedded?: boolean
 }
 
 interface Emits {
