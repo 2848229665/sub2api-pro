@@ -540,15 +540,15 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/admin/accounts/:id/usage-history',
-    name: 'AdminAccountUsageHistory',
-    component: () => import('@/views/admin/AccountUsageHistoryView.vue'),
+    path: '/admin/plugins',
+    name: 'AdminPlugins',
+    component: () => import('@/views/admin/PluginsView.vue'),
     meta: {
       requiresAuth: true,
       requiresAdmin: true,
-      title: 'Account Usage History',
-      titleKey: 'admin.accounts.history.title',
-      descriptionKey: 'admin.accounts.history.description'
+      title: 'Plugin Management',
+      titleKey: 'admin.plugins.title',
+      descriptionKey: 'admin.plugins.description'
     }
   },
   {

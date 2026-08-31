@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -23,221 +25,117 @@ func newCyberBlockTestCtx(headers map[string]string, body string) (*gin.Context,
 	return c, []byte(body)
 }
 
-// TestCyberSessionBlockKey verifies the explicit-session key used by both
-// cyber and keyword policy state.
-func TestCyberSessionBlockKey(t *testing.T) {
+func TestCyberSessionExplicitBlockKey(t *testing.T) {
 	c1, b1 := newCyberBlockTestCtx(map[string]string{"session_id": "sess-abc"}, `{}`)
-	k1 := CyberSessionBlockKey(101, c1, b1)
+	k1 := CyberSessionExplicitBlockKey(101, c1, b1)
 	require.NotEmpty(t, k1)
 
 	// 按 API Key 的会话隔离已移除：同一 session 在不同 apiKey 下得到同一个 key。
 	c2, b2 := newCyberBlockTestCtx(map[string]string{"session_id": "sess-abc"}, `{}`)
-	require.Equal(t, k1, CyberSessionBlockKey(202, c2, b2))
+	require.NotEqual(t, k1, CyberSessionExplicitBlockKey(202, c2, b2))
 
 	// Same session + same apiKey → stable key.
 	c3, b3 := newCyberBlockTestCtx(map[string]string{"session_id": "sess-abc"}, `{}`)
-	require.Equal(t, k1, CyberSessionBlockKey(101, c3, b3))
+	require.Equal(t, k1, CyberSessionExplicitBlockKey(101, c3, b3))
 
 	// prompt_cache_key in body counts as explicit.
 	c4, b4 := newCyberBlockTestCtx(nil, `{"prompt_cache_key":"pck-1"}`)
-	require.NotEmpty(t, CyberSessionBlockKey(101, c4, b4))
+	require.NotEmpty(t, CyberSessionExplicitBlockKey(101, c4, b4))
 
 	// The shared explicit-session primitive stays empty without an identity;
 	// CyberPolicyBlockKey adds the message fallback separately.
 	c5, b5 := newCyberBlockTestCtx(nil, `{"input":"hello world"}`)
-	require.Empty(t, CyberSessionBlockKey(101, c5, b5))
+	require.Empty(t, CyberSessionExplicitBlockKey(101, c5, b5))
 
 	// conversation_id header counts as explicit; key is stable and non-empty.
 	c6, b6 := newCyberBlockTestCtx(map[string]string{"conversation_id": "conv-xyz"}, `{}`)
-	k6 := CyberSessionBlockKey(101, c6, b6)
+	k6 := CyberSessionExplicitBlockKey(101, c6, b6)
 	require.NotEmpty(t, k6)
 	c6b, b6b := newCyberBlockTestCtx(map[string]string{"conversation_id": "conv-xyz"}, `{}`)
-	require.Equal(t, k6, CyberSessionBlockKey(101, c6b, b6b), "conversation_id key must be stable")
-
-	// Native Codex accepts client_metadata.session_id as the upstream session.
-	c7, b7 := newCyberBlockTestCtx(nil, `{"client_metadata":{"session_id":"metadata-session"}}`)
-	metadataKey := CyberSessionBlockKey(101, c7, b7)
-	require.NotEmpty(t, metadataKey)
-	c7b, b7b := newCyberBlockTestCtx(nil, `{"client_metadata":{"session_id":"metadata-session"}}`)
-	require.Equal(t, metadataKey, CyberSessionBlockKey(101, c7b, b7b))
-
-	// Match native Codex precedence: prompt_cache_key, official/legacy session
-	// headers, client_metadata.session_id, then compatibility headers.
-	c8, b8 := newCyberBlockTestCtx(map[string]string{
-		"session-id":      "header-session",
-		"conversation_id": "conversation-session",
-	}, `{"prompt_cache_key":"body-session","client_metadata":{"session_id":"metadata-session"}}`)
-	c8Body, b8Body := newCyberBlockTestCtx(nil, `{"prompt_cache_key":"body-session"}`)
-	require.Equal(t, CyberSessionBlockKey(101, c8Body, b8Body), CyberSessionBlockKey(101, c8, b8))
-
-	c9, b9 := newCyberBlockTestCtx(map[string]string{
-		"session-id": "header-session",
-	}, `{"client_metadata":{"session_id":"metadata-session"}}`)
-	c9Header, b9Header := newCyberBlockTestCtx(map[string]string{"session-id": "header-session"}, `{}`)
-	require.Equal(t, CyberSessionBlockKey(101, c9Header, b9Header), CyberSessionBlockKey(101, c9, b9))
-
-	c10, b10 := newCyberBlockTestCtx(map[string]string{
-		"conversation_id": "conversation-session",
-	}, `{"client_metadata":{"session_id":"metadata-session"}}`)
-	require.Equal(t, metadataKey, CyberSessionBlockKey(101, c10, b10))
+	require.Equal(t, k6, CyberSessionExplicitBlockKey(101, c6b, b6b), "conversation_id key must be stable")
 }
 
-func TestCyberPolicyBlockKeyFallsBackToLatestRealUserMessage(t *testing.T) {
-	tests := []struct {
-		name     string
-		protocol string
-		body     string
-		minimal  string
-		older    string
-	}{
-		{
-			name:     "responses after tool output",
-			protocol: ContentModerationProtocolOpenAIResponses,
-			body: `{"input":[
-				{"type":"message","role":"user","content":[{"type":"input_text","text":"older request"}]},
-				{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]},
-				{"type":"message","role":"user","content":[{"type":"input_text","text":"latest request"}]},
-				{"type":"function_call","name":"lookup"},
-				{"type":"function_call_output","output":"result"}
-			]}`,
-			minimal: `{"input":"latest request"}`,
-			older:   `{"input":"older request"}`,
-		},
-		{
-			name:     "responses websocket envelope",
-			protocol: ContentModerationProtocolOpenAIResponses,
-			body: `{"type":"response.create","response":{"input":[
-				{"role":"user","content":[{"type":"input_text","text":"older request"}]},
-				{"role":"user","content":[{"type":"input_text","text":"latest request"}]},
-				{"type":"function_call_output","output":"result"}
-			]}}`,
-			minimal: `{"input":"latest request"}`,
-			older:   `{"input":"older request"}`,
-		},
-		{
-			name:     "chat after tool output",
-			protocol: ContentModerationProtocolOpenAIChat,
-			body: `{"messages":[
-				{"role":"user","content":"older request"},
-				{"role":"assistant","content":"answer"},
-				{"role":"user","content":"latest request"},
-				{"role":"assistant","tool_calls":[{"function":{"name":"lookup"}}]},
-				{"role":"tool","content":"result"}
-			]}`,
-			minimal: `{"messages":[{"role":"user","content":"latest request"}]}`,
-			older:   `{"messages":[{"role":"user","content":"older request"}]}`,
-		},
-		{
-			name:     "chat responses shaped input",
-			protocol: ContentModerationProtocolOpenAIChat,
-			body: `{"input":[
-				{"role":"user","content":[{"type":"input_text","text":"older request"}]},
-				{"role":"user","content":[{"type":"input_text","text":"latest request"}]},
-				{"type":"function_call_output","output":"result"}
-			]}`,
-			minimal: `{"input":"latest request"}`,
-			older:   `{"input":"older request"}`,
-		},
-		{
-			name:     "anthropic after tool result",
-			protocol: ContentModerationProtocolAnthropicMessages,
-			body: `{"messages":[
-				{"role":"user","content":"older request"},
-				{"role":"assistant","content":"answer"},
-				{"role":"user","content":"latest request"},
-				{"role":"assistant","content":[{"type":"tool_use","name":"lookup"}]},
-				{"role":"user","content":[{"type":"tool_result","content":"result"}]}
-			]}`,
-			minimal: `{"messages":[{"role":"user","content":"latest request"}]}`,
-			older:   `{"messages":[{"role":"user","content":"older request"}]}`,
-		},
-	}
+func TestCyberTranscriptBlockKeysRequireModelGeneratedHistory(t *testing.T) {
+	first := []byte(`{"instructions":"shared","input":[{"role":"user","content":"fixed environment"},{"role":"user","content":"question one"}]}`)
+	second := []byte(`{"instructions":"shared","input":[{"role":"user","content":"fixed environment"},{"role":"user","content":"question two"}]}`)
+	firstKeys := CyberSessionTranscriptBlockKeys(77, first)
+	secondKeys := CyberSessionTranscriptBlockKeys(77, second)
+	require.Len(t, firstKeys, 1)
+	require.Len(t, secondKeys, 1)
+	require.NotEqual(t, firstKeys[0], secondKeys[0])
 
-	keys := make(map[string]string)
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c, body := newCyberBlockTestCtx(nil, tt.body)
-			key := CyberPolicyBlockKey(101, c, tt.protocol, body)
-			minimalCtx, minimalBody := newCyberBlockTestCtx(nil, tt.minimal)
-			olderCtx, olderBody := newCyberBlockTestCtx(nil, tt.older)
-
-			require.Contains(t, key, "message:v1:")
-			require.Equal(t, CyberPolicyBlockKey(101, minimalCtx, tt.protocol, minimalBody), key)
-			require.NotEqual(t, CyberPolicyBlockKey(101, olderCtx, tt.protocol, olderBody), key)
-			keys[tt.protocol] = key
-		})
-	}
-	require.NotEqual(t, keys[ContentModerationProtocolOpenAIResponses], keys[ContentModerationProtocolOpenAIChat])
-	require.NotEqual(t, keys[ContentModerationProtocolOpenAIChat], keys[ContentModerationProtocolAnthropicMessages])
+	hit := []byte(`{"messages":[{"role":"user","content":"setup"},{"role":"assistant","content":"ready"},{"role":"user","content":"trigger"}]}`)
+	continuation := []byte(`{"messages":[{"role":"user","content":"setup"},{"role":"assistant","content":"ready"},{"role":"user","content":"different trigger"},{"role":"assistant","content":"blocked"},{"role":"user","content":"continue"}]}`)
+	hitKeys := CyberSessionTranscriptBlockKeys(77, hit)
+	require.Len(t, hitKeys, 2)
+	require.Contains(t, CyberSessionTranscriptLookupKeys(77, continuation), hitKeys[1])
 }
 
-func TestCyberPolicyBlockKeyMessageFallbackIsolationAndNormalization(t *testing.T) {
-	c1, b1 := newCyberBlockTestCtx(nil, `{"input":"  repeated\n  message "}`)
-	c2, b2 := newCyberBlockTestCtx(nil, `{"input":"repeated message"}`)
-	c3, b3 := newCyberBlockTestCtx(nil, `{"input":"different"}`)
-	c4, b4 := newCyberBlockTestCtx(nil, `{"input":[{"type":"input_text","text":"roleless user input"}]}`)
-
-	key := CyberPolicyBlockKey(101, c1, ContentModerationProtocolOpenAIResponses, b1)
-	require.Equal(t, key, CyberPolicyBlockKey(101, c2, ContentModerationProtocolOpenAIResponses, b2))
-	require.NotEqual(t, key, CyberPolicyBlockKey(202, c2, ContentModerationProtocolOpenAIResponses, b2))
-	require.NotEqual(t, key, CyberPolicyBlockKey(101, c3, ContentModerationProtocolOpenAIResponses, b3))
-	require.NotEmpty(t, CyberPolicyBlockKey(101, c4, ContentModerationProtocolOpenAIResponses, b4))
+func TestCyberTranscriptBlockKeysWebSocketResponseCreate(t *testing.T) {
+	body := []byte(`{"type":"response.create","response":{"prompt_cache_key":"ws-session","input":[{"role":"user","content":"setup"},{"role":"assistant","content":"ready"},{"role":"user","content":"trigger"}]}}`)
+	c, _ := newCyberBlockTestCtx(nil, string(body))
+	require.NotEmpty(t, CyberSessionExplicitBlockKey(88, c, body))
+	require.Len(t, CyberSessionTranscriptBlockKeys(88, body), 2)
 }
 
-func TestCyberPolicyBlockKeyExplicitSessionTakesPrecedence(t *testing.T) {
-	c1, b1 := newCyberBlockTestCtx(map[string]string{"session-id": "stable-session"}, `{"input":"first message"}`)
-	c2, b2 := newCyberBlockTestCtx(map[string]string{"session-id": "stable-session"}, `{"input":"second message"}`)
-	require.Equal(t,
-		CyberSessionBlockKey(101, c1, b1),
-		CyberPolicyBlockKey(101, c1, ContentModerationProtocolOpenAIResponses, b1),
-	)
-	require.Equal(t,
-		CyberPolicyBlockKey(101, c1, ContentModerationProtocolOpenAIResponses, b1),
-		CyberPolicyBlockKey(101, c2, ContentModerationProtocolOpenAIResponses, b2),
-	)
-}
+func TestCyberTranscriptLookupKeysAreBoundedAndKeepNewestOrder(t *testing.T) {
+	messages := make([]map[string]string, maxOpenAICyberTranscriptLookupKeys+44)
+	for i := range messages {
+		messages[i] = map[string]string{"role": "user", "content": "message-" + strconv.Itoa(i)}
+	}
+	body, err := json.Marshal(map[string]any{"messages": messages})
+	require.NoError(t, err)
 
-func TestCyberPolicyBlockKeyWithoutUserTextFailsOpen(t *testing.T) {
-	tests := []struct {
-		protocol string
-		body     string
-	}{
-		{ContentModerationProtocolOpenAIResponses, `{"input":[{"type":"function_call_output","output":"result"}]}`},
-		{ContentModerationProtocolOpenAIResponses, `{"input":[{"role":"user","content":[{"type":"input_image","image_url":"https://example.com/image.png"}]}]}`},
-		{ContentModerationProtocolOpenAIChat, `{"messages":[{"role":"tool","content":"result"}]}`},
-		{ContentModerationProtocolOpenAIChat, `{"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}]}]}`},
-		{ContentModerationProtocolAnthropicMessages, `{"messages":[{"role":"user","content":[{"type":"tool_result","content":"result"}]}]}`},
-		{ContentModerationProtocolAnthropicMessages, `{"messages":[{"role":"user","content":[{"type":"image","source":{"type":"url","url":"https://example.com/image.png"}}]}]}`},
-		{ContentModerationProtocolOpenAIResponses, `not-json`},
-	}
-	for _, tt := range tests {
-		c, body := newCyberBlockTestCtx(nil, tt.body)
-		require.Empty(t, CyberPolicyBlockKey(101, c, tt.protocol, body))
-	}
+	keys := CyberSessionTranscriptLookupKeys(77, body)
+	require.Len(t, keys, maxOpenAICyberTranscriptLookupKeys)
+
+	firstRetainedBody, err := json.Marshal(map[string]any{"messages": messages[:45]})
+	require.NoError(t, err)
+	firstRetainedPrefix := CyberSessionTranscriptLookupKeys(77, firstRetainedBody)
+	require.Equal(t, firstRetainedPrefix[len(firstRetainedPrefix)-1], keys[0])
+
+	fullKey := CyberSessionTranscriptBlockKeys(77, body)[0]
+	require.Equal(t, fullKey, keys[len(keys)-1])
 }
 
 // --- fakes ---
 
 type fakeCyberBlockStore struct {
-	blocked      map[string]bool
-	lastWriteTTL time.Duration
-	lastWriteErr error
+	blocked   map[string]bool
+	scopes    map[string]bool
+	findCalls int
 }
 
 var _ CyberSessionBlockStore = (*fakeCyberBlockStore)(nil)
 
-func (f *fakeCyberBlockStore) SetCyberSessionBlocked(ctx context.Context, key string, ttl time.Duration) error {
+func (f *fakeCyberBlockStore) SetCyberSessionBlocked(_ context.Context, scopeKey string, keys []string, _ time.Duration) error {
 	if f.blocked == nil {
 		f.blocked = map[string]bool{}
 	}
-	f.blocked[key] = true
-	f.lastWriteTTL = ttl
-	f.lastWriteErr = ctx.Err()
+	for _, key := range keys {
+		f.blocked[key] = true
+	}
+	if scopeKey != "" {
+		if f.scopes == nil {
+			f.scopes = map[string]bool{}
+		}
+		f.scopes[scopeKey] = true
+	}
 	return nil
 }
 
-func (f *fakeCyberBlockStore) IsCyberSessionBlocked(_ context.Context, key string) (bool, error) {
-	return f.blocked[key], nil
+func (f *fakeCyberBlockStore) IsCyberSessionScopeActive(_ context.Context, scopeKey string) (bool, error) {
+	return f.scopes[scopeKey], nil
+}
+
+func (f *fakeCyberBlockStore) FindCyberSessionBlocked(_ context.Context, keys []string) (string, error) {
+	f.findCalls++
+	for _, key := range keys {
+		if f.blocked[key] {
+			return key, nil
+		}
+	}
+	return "", nil
 }
 
 // fakeSettingRepo is a minimal SettingRepository stub for unit tests.
@@ -322,11 +220,14 @@ func (c *comboCacheAndStore) GetReasoningContent(_ context.Context, _ string) (s
 	return "", ErrReasoningContentNotFound
 }
 
-func (c *comboCacheAndStore) SetCyberSessionBlocked(ctx context.Context, key string, ttl time.Duration) error {
-	return c.store.SetCyberSessionBlocked(ctx, key, ttl)
+func (c *comboCacheAndStore) SetCyberSessionBlocked(ctx context.Context, scopeKey string, keys []string, ttl time.Duration) error {
+	return c.store.SetCyberSessionBlocked(ctx, scopeKey, keys, ttl)
 }
-func (c *comboCacheAndStore) IsCyberSessionBlocked(ctx context.Context, key string) (bool, error) {
-	return c.store.IsCyberSessionBlocked(ctx, key)
+func (c *comboCacheAndStore) IsCyberSessionScopeActive(ctx context.Context, scopeKey string) (bool, error) {
+	return c.store.IsCyberSessionScopeActive(ctx, scopeKey)
+}
+func (c *comboCacheAndStore) FindCyberSessionBlocked(ctx context.Context, keys []string) (string, error) {
+	return c.store.FindCyberSessionBlocked(ctx, keys)
 }
 func (c *comboCacheAndStore) ClaimKeywordSessionBlocked(ctx context.Context, key string, ttl time.Duration) (bool, error) {
 	c.keywordClaimCtxErr = ctx.Err()
@@ -344,14 +245,13 @@ func (c *comboCacheAndStore) IsKeywordSessionBlocked(ctx context.Context, key st
 
 // TestIsCyberSessionBlocked_EmptyKeyAndNilService covers the fail-open paths:
 // empty key, nil service, store missing → always false / no panic.
-func TestIsCyberSessionBlocked_EmptyKeyAndNilService(t *testing.T) {
+func TestFindCyberSessionBlocked_EmptyAndNilService(t *testing.T) {
 	var nilSvc *OpenAIGatewayService
-	require.False(t, nilSvc.IsCyberSessionBlocked(context.Background(), "k"))
-	require.NotPanics(t, func() { nilSvc.MarkCyberSessionBlocked(context.Background(), "k") })
+	require.Empty(t, nilSvc.FindCyberSessionBlockedForRequest(context.Background(), 1, nil, nil, "", ""))
+	require.NotPanics(t, func() { nilSvc.MarkCyberSessionBlocked(context.Background(), "", []string{"k"}) })
 
 	svc := &OpenAIGatewayService{}
-	require.False(t, svc.IsCyberSessionBlocked(context.Background(), ""))
-	require.False(t, svc.IsCyberSessionBlocked(context.Background(), "k"), "no store + no settings → fail-open false")
+	require.Empty(t, svc.FindCyberSessionBlockedForRequest(context.Background(), 1, nil, nil, "", ""))
 }
 
 // TestCyberSessionBlock_RoundTrip exercises the type-assertion success path:
@@ -438,15 +338,70 @@ func TestCyberSessionBlock_RoundTrip(t *testing.T) {
 	ctx := context.Background()
 	const testKey = "deadbeef1234"
 
-	// Before marking: not blocked.
-	require.False(t, svc.IsCyberSessionBlocked(ctx, testKey))
+	c, body := newCyberBlockTestCtx(map[string]string{"session_id": "sess-roundtrip"}, `{}`)
+	explicitKey := CyberSessionExplicitBlockKey(1, c, body)
+	require.Empty(t, svc.FindCyberSessionBlockedForRequest(ctx, 1, c, body, "203.0.113.1", "client/1.0"))
 
-	// Mark as blocked.
-	svc.MarkCyberSessionBlocked(ctx, testKey)
+	svc.MarkCyberSessionBlocked(ctx, "", []string{explicitKey, testKey})
 
-	// After marking: blocked.
-	require.True(t, svc.IsCyberSessionBlocked(ctx, testKey))
+	require.Equal(t, explicitKey, svc.FindCyberSessionBlockedForRequest(ctx, 1, c, body, "203.0.113.1", "client/1.0"))
+}
 
-	// Different key: still not blocked.
-	require.False(t, svc.IsCyberSessionBlocked(ctx, "other-key"))
+func TestFindCyberSessionBlockedForRequestUsesScopeForTranscript(t *testing.T) {
+	settingSvc := &SettingService{settingRepo: &fakeSettingRepo{vals: map[string]string{
+		SettingKeyCyberSessionBlockEnabled:    "true",
+		SettingKeyCyberSessionBlockTTLSeconds: "60",
+	}}}
+	combo := &comboCacheAndStore{}
+	svc := &OpenAIGatewayService{cache: combo, settingService: settingSvc}
+	ctx := context.Background()
+
+	hitBody := []byte(`{"messages":[{"role":"user","content":"setup"},{"role":"assistant","content":"ready"},{"role":"user","content":"trigger"}]}`)
+	nextBody := []byte(`{"messages":[{"role":"user","content":"setup"},{"role":"assistant","content":"ready"},{"role":"user","content":"different trigger"},{"role":"assistant","content":"blocked"},{"role":"user","content":"continue"}]}`)
+	nextCtx, _ := newCyberBlockTestCtx(nil, string(nextBody))
+	const clientIP = "203.0.113.20"
+	const userAgent = "Codex CLI 1.2.3"
+	blockKey := CyberSessionTranscriptBlockKeys(9, hitBody)[1]
+
+	// Without an active source scope, transcript candidates are never blocks.
+	require.Empty(t, svc.FindCyberSessionBlockedForRequest(ctx, 9, nextCtx, nextBody, clientIP, userAgent))
+	scopeKey := CyberSessionScopeKey(9, clientIP, userAgent)
+	svc.MarkCyberSessionBlocked(ctx, scopeKey, []string{blockKey})
+	require.Equal(t, blockKey, svc.FindCyberSessionBlockedForRequest(ctx, 9, nextCtx, nextBody, clientIP, "Codex CLI 1.2.4"))
+}
+
+func TestFindCyberSessionBlockedForRequestFailsClosedOnScopedTranscriptOverflow(t *testing.T) {
+	settingSvc := &SettingService{settingRepo: &fakeSettingRepo{vals: map[string]string{
+		SettingKeyCyberSessionBlockEnabled:    "true",
+		SettingKeyCyberSessionBlockTTLSeconds: "60",
+	}}}
+	combo := &comboCacheAndStore{}
+	svc := &OpenAIGatewayService{cache: combo, settingService: settingSvc}
+	ctx := context.Background()
+	const apiKeyID = int64(9)
+	const clientIP = "203.0.113.20"
+	const userAgent = "Codex CLI 1.2.3"
+
+	messages := make([]map[string]string, maxOpenAICyberTranscriptLookupKeys+1)
+	for i := range messages {
+		messages[i] = map[string]string{"role": "user", "content": "message-" + strconv.Itoa(i)}
+	}
+	body, err := json.Marshal(map[string]any{"messages": messages})
+	require.NoError(t, err)
+	c, _ := newCyberBlockTestCtx(nil, string(body))
+	require.Empty(t, svc.FindCyberSessionBlockedForRequest(ctx, apiKeyID, c, body, clientIP, userAgent),
+		"overflow alone must not bypass the scope gate")
+	combo.store.scopes = map[string]bool{CyberSessionScopeKey(apiKeyID, clientIP, userAgent): true}
+
+	require.Equal(t, cyberSessionTranscriptLookupOverflowBlockKey,
+		svc.FindCyberSessionBlockedForRequest(ctx, apiKeyID, c, body, clientIP, userAgent))
+	require.Zero(t, combo.store.findCalls, "overflow must not issue an unbounded Redis lookup")
+}
+
+func TestCyberSessionScopeKeyNormalizesUserAgentVersion(t *testing.T) {
+	base := CyberSessionScopeKey(7, "203.0.113.10", "Codex CLI 1.2.3")
+	require.NotEmpty(t, base)
+	require.Equal(t, base, CyberSessionScopeKey(7, "203.0.113.10", "Codex CLI 1.2.4"))
+	require.NotEqual(t, base, CyberSessionScopeKey(8, "203.0.113.10", "Codex CLI 1.2.3"))
+	require.NotEqual(t, base, CyberSessionScopeKey(7, "203.0.113.11", "Codex CLI 1.2.3"))
 }

@@ -268,29 +268,17 @@ func TestWriteOpenAIPassthroughResponseHeaders_RelaysAndClearsTurnState(t *testi
 	require.Empty(t, dst.Get("X-Codex-Turn-State"))
 }
 
-func TestWriteOpenAIPassthroughResponseHeaders_ClearsTurnStateWithFilter(t *testing.T) {
-	filter := responseheaders.CompileHeaderFilter(config.ResponseHeaderConfig{})
+func TestWriteOpenAIPassthroughResponseHeaders_RelaysReasoningIncluded(t *testing.T) {
 	dst := http.Header{}
-	dst.Set("X-Codex-Turn-State", "blob-old")
+	src := http.Header{}
+	src.Set("X-Reasoning-Included", "1")
 
-	writeOpenAIPassthroughResponseHeaders(dst, http.Header{}, filter)
-	require.Empty(t, dst.Get("X-Codex-Turn-State"))
-
-	dst.Set("X-Codex-Turn-State", "blob-old")
-	writeOpenAIPassthroughResponseHeaders(dst, http.Header{
-		"x-codex-turn-state": []string{"blob-new"},
-	}, filter)
-	require.Equal(t, []string{"blob-new"}, dst.Values("X-Codex-Turn-State"))
-
-	blockedFilter := responseheaders.CompileHeaderFilter(config.ResponseHeaderConfig{
-		Enabled:     true,
-		ForceRemove: []string{"x-codex-turn-state"},
-	})
-	dst.Set("X-Codex-Turn-State", "blob-old")
-	writeOpenAIPassthroughResponseHeaders(dst, http.Header{
-		"X-Codex-Turn-State": []string{"blob-blocked"},
-	}, blockedFilter)
-	require.Empty(t, dst.Get("X-Codex-Turn-State"))
+	writeOpenAIPassthroughResponseHeaders(
+		dst,
+		src,
+		responseheaders.CompileHeaderFilter(config.ResponseHeaderConfig{}),
+	)
+	require.Equal(t, "1", dst.Get("X-Reasoning-Included"))
 }
 
 func TestEnsureOpenAIRemoteCompactionV2BetaFeature(t *testing.T) {

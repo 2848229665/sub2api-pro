@@ -15,7 +15,7 @@ interface Props {
   platform?: string
   groupId?: number | null
   errorType: 'request' | 'upstream'
-  embedded?: boolean
+  resumeState?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), { embedded: false })
@@ -168,6 +168,7 @@ watch(
   () => props.show,
   (open) => {
     if (!open) return
+    if (props.resumeState) return
     page.value = 1
     pageSize.value = 10
     resetFilters()

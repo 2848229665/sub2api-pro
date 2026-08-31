@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -9,6 +8,17 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+type openAIResponsesLiteValidationError struct {
+	param   string
+	message string
+}
+
+func (e *openAIResponsesLiteValidationError) Error() string { return e.message }
+
+func newOpenAIResponsesLiteValidationError(param, format string, args ...any) error {
+	return &openAIResponsesLiteValidationError{param: param, message: fmt.Sprintf(format, args...)}
+}
 
 // normalizeOpenAIResponsesLiteTools applies the Responses Lite request
 // contract: reasoning must cover all turns, and private namespace declarations
@@ -19,18 +29,27 @@ func normalizeOpenAIResponsesLiteTools(reqBody map[string]any) (bool, error) {
 	if reqBody == nil {
 		return false, nil
 	}
+	if parallel, exists := reqBody["parallel_tool_calls"]; exists {
+		if _, ok := parallel.(bool); !ok {
+			return false, newOpenAIResponsesLiteValidationError("parallel_tool_calls", "responses Lite requires parallel_tool_calls to be a boolean")
+		}
+	}
 	if rawReasoning, exists := reqBody["reasoning"]; exists && rawReasoning != nil {
 		if _, ok := rawReasoning.(map[string]any); !ok {
-			return false, fmt.Errorf("responses Lite requires reasoning to be an object")
+			return false, newOpenAIResponsesLiteValidationError("reasoning", "responses Lite requires reasoning to be an object")
 		}
 	}
 	rawTools, exists := reqBody["tools"]
 	if !exists || rawTools == nil {
-		return ensureOpenAIResponsesLiteReasoningContext(reqBody)
+		changed, err := ensureOpenAIResponsesLiteReasoningContext(reqBody)
+		if err != nil {
+			return false, err
+		}
+		return ensureOpenAIResponsesLiteParallelToolCalls(reqBody, changed)
 	}
 	tools, ok := rawTools.([]any)
 	if !ok {
-		return false, fmt.Errorf("responses Lite requires tools to be an array")
+		return false, newOpenAIResponsesLiteValidationError("tools", "responses Lite requires tools to be an array")
 	}
 
 	topLevelTools := make([]any, 0, len(tools))
@@ -60,7 +79,11 @@ func normalizeOpenAIResponsesLiteTools(reqBody map[string]any) (bool, error) {
 		}
 	}
 	if len(namespaceTools) == 0 {
-		return ensureOpenAIResponsesLiteReasoningContext(reqBody)
+		changed, err := ensureOpenAIResponsesLiteReasoningContext(reqBody)
+		if err != nil {
+			return false, err
+		}
+		return ensureOpenAIResponsesLiteParallelToolCalls(reqBody, changed)
 	}
 
 	input, err := appendOpenAIResponsesLiteAdditionalTools(reqBody["input"], namespaceTools)
@@ -76,6 +99,20 @@ func normalizeOpenAIResponsesLiteTools(reqBody map[string]any) (bool, error) {
 	} else {
 		reqBody["tools"] = topLevelTools
 	}
+	return ensureOpenAIResponsesLiteParallelToolCalls(reqBody, true)
+}
+
+func ensureOpenAIResponsesLiteParallelToolCalls(reqBody map[string]any, changed bool) (bool, error) {
+	parallel, exists := reqBody["parallel_tool_calls"]
+	if exists {
+		if _, ok := parallel.(bool); !ok {
+			return false, newOpenAIResponsesLiteValidationError("parallel_tool_calls", "responses Lite requires parallel_tool_calls to be a boolean")
+		}
+	}
+	if parallel == false {
+		return changed, nil
+	}
+	reqBody["parallel_tool_calls"] = false
 	return true, nil
 }
 
@@ -87,7 +124,7 @@ func ensureOpenAIResponsesLiteReasoningContext(reqBody map[string]any) (bool, er
 	}
 	reasoning, ok := rawReasoning.(map[string]any)
 	if !ok {
-		return false, fmt.Errorf("responses Lite requires reasoning to be an object")
+		return false, newOpenAIResponsesLiteValidationError("reasoning", "responses Lite requires reasoning to be an object")
 	}
 	if context, ok := reasoning["context"].(string); ok && context == "all_turns" {
 		return false, nil
@@ -204,7 +241,7 @@ func openAIResponsesLiteToolIdentityForError(rawTool any) string {
 
 func normalizeOpenAIResponsesLiteToolsPayload(body []byte) ([]byte, bool, error) {
 	var requestBody map[string]any
-	if err := json.Unmarshal(body, &requestBody); err != nil {
+	if err := decodeOpenAIJSONUseNumber(body, &requestBody); err != nil {
 		return body, false, fmt.Errorf("decode responses Lite request body: %w", err)
 	}
 	changed, err := normalizeOpenAIResponsesLiteTools(requestBody)
@@ -232,22 +269,28 @@ func normalizeOpenAIResponsesLiteToolsPayload(body []byte) ([]byte, bool, error)
 	return rebuilt, true, nil
 }
 
-// openAIResponsesLiteBodyHasNamespaceTools reports whether the raw request
-// carries a top-level namespace tool, which is the only trigger for the
-// tools/input restructuring path. When absent, the lite transform's only effect
-// is reasoning.context, so the body can be patched byte-preservingly.
-func openAIResponsesLiteBodyHasNamespaceTools(body []byte) bool {
-	tools := gjson.GetBytes(body, "tools")
-	if !tools.IsArray() {
-		return false
+func normalizeOpenAIResponsesLiteParallelToolCallsPayload(body []byte) ([]byte, bool, error) {
+	var requestBody map[string]any
+	if err := decodeOpenAIJSONUseNumber(body, &requestBody); err != nil {
+		return body, false, fmt.Errorf("decode responses Lite request body: %w", err)
 	}
-	found := false
-	tools.ForEach(func(_, tool gjson.Result) bool {
-		if strings.TrimSpace(tool.Get("type").String()) == "namespace" {
-			found = true
-			return false
-		}
-		return true
-	})
-	return found
+	changed, err := ensureOpenAIResponsesLiteParallelToolCalls(requestBody, false)
+	if err != nil || !changed {
+		return body, false, err
+	}
+	rebuilt, err := marshalOpenAIUpstreamJSON(requestBody)
+	if err != nil {
+		return body, false, fmt.Errorf("encode responses Lite request body: %w", err)
+	}
+	return rebuilt, true, nil
+}
+
+func normalizeOpenAIResponsesLitePayloadForAccount(body []byte, account *Account) ([]byte, bool, error) {
+	if account == nil || !account.IsOpenAI() {
+		return body, false, nil
+	}
+	if account.IsOpenAIOAuthLike() {
+		return normalizeOpenAIResponsesLiteToolsPayload(body)
+	}
+	return normalizeOpenAIResponsesLiteParallelToolCallsPayload(body)
 }
