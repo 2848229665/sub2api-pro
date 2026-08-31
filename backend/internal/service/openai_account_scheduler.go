@@ -737,7 +737,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	accountID := req.StickyAccountID
 	clearBinding := func() {
 		if !req.PreserveStickyBinding {
-			_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+			_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash, accountID)
 		}
 	}
 	if accountID <= 0 {
@@ -807,7 +807,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	result, acquireErr := s.service.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
 	if acquireErr == nil && result != nil && result.Acquired {
 		if !req.PreserveStickyBinding {
-			_ = s.service.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, s.service.openAIWSSessionStickyTTL())
+			_ = s.service.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, accountID, s.service.openAIWSSessionStickyTTL())
 		}
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 			Account:     account,
@@ -1702,7 +1702,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		// require_privacy_set is a group-scoped eligibility gate. Do not mutate the
 		// shared account: another group may intentionally allow accounts whose
 		// upstream privacy setting has not been confirmed.
-		if schedGroup != nil && schedGroup.RequirePrivacySet && !account.IsPrivacySet() {
+		if req.RequirePrivacySet && !account.IsPrivacySet() {
 			filterStats.exclude("privacy_not_set")
 			continue
 		}
@@ -2793,7 +2793,48 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	if strings.TrimSpace(previousResponseID) == "" {
 		guardianParentAccountID = s.resolveOpenAIGuardianParentAccountID(ctx, groupID)
 	}
-	scheduler := s.getOpenAIAccountScheduler(ctx)
+	runtimeSettings := s.openAIAdvancedSchedulerRuntimeSettings(ctx)
+	if affinityReservePercentSnapshot == nil {
+		affinityReservePercent := runtimeSettings.affinityReservePercent
+		affinityReservePercentSnapshot = &affinityReservePercent
+	}
+	requirePrivacySet, err := s.resolveOpenAISchedulingRequirePrivacySet(ctx, groupID)
+	if err != nil {
+		return nil, decision, err
+	}
+	var stickyAccountID int64
+	if sessionHash != "" && s.cache != nil {
+		if accountID, err := s.getStickySessionAccountID(ctx, groupID, sessionHash); err == nil && accountID > 0 {
+			stickyAccountID = accountID
+		}
+	}
+	baseReq := OpenAIAccountScheduleRequest{
+		GroupID:                 groupID,
+		Platform:                platform,
+		SessionHash:             sessionHash,
+		StickyAccountID:         stickyAccountID,
+		GuardianParentAccountID:  guardianParentAccountID,
+		PreserveStickyBinding:    preserveGuardianParentBinding,
+		PreviousResponseID:      previousResponseID,
+		PreviousResponseCanMove:  previousResponseCanMove,
+		CanTemporarilyOverflow:   canTemporarilyOverflow,
+		UseUpstreamTokenCost:     useUpstreamTokenCost,
+		RequestedModel:           requestedModel,
+		RequiredTransport:        requiredTransport,
+		RequiredCapability:       requiredCapability,
+		RequiredImageCapability:  requiredImageCapability,
+		RequireCompact:           requireCompact,
+		RequirePrivacySet:        requirePrivacySet,
+		ExcludedIDs:              excludedIDs,
+		AffinityReservePercent:    affinityReservePercentSnapshot,
+	}
+	scheduler := s.getOpenAIAccountSchedulerForRuntimeSettings(runtimeSettings)
+	switch scheduler.(type) {
+	case *prioritySaturationOpenAIAccountScheduler:
+		schedulerPolicy = openAIAccountSchedulerPolicyPrioritySaturation
+	case *defaultOpenAIAccountScheduler:
+		schedulerPolicy = openAIAccountSchedulerPolicyWeightedTopK
+	}
 	if scheduler == nil {
 		route, err := s.routeOpenAIAffinity(ctx, baseReq, nil)
 		applyOpenAIAffinityRouteDecision(&decision, route, baseReq)
@@ -2807,6 +2848,41 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		scheduleReq := route.Request
 		canWaitForOverflow := canWaitForOpenAIAffinityOverflow(scheduleReq, route.OverflowAccount)
 		decision.Layer = openAIAccountScheduleLayerLoadBalance
+		finalizeLegacySelection := func(selection *AccountSelectionResult, effectiveExcludedIDs map[int64]struct{}) (*AccountSelectionResult, error) {
+			if selection == nil {
+				return nil, nil
+			}
+			selection.SessionOwnerID = scheduleReq.StickyAccountID
+			selection.PreserveStickyBinding = scheduleReq.PreserveStickyBinding
+			request := scheduleReq
+			request.ExcludedIDs = effectiveExcludedIDs
+			return s.finalizeLegacyOpenAISelection(ctx, request, selection)
+		}
+		prepareLegacySelection := func(selection *AccountSelectionResult, effectiveExcludedIDs map[int64]struct{}) (*AccountSelectionResult, error) {
+			if selection != nil && selection.WaitPlan != nil && canWaitForOverflow {
+				selection = s.openAIAffinityWaitSelection(scheduleReq, route.OverflowAccount)
+				decision.AffinityWait = true
+			}
+			selection, finalizeErr := finalizeLegacySelection(selection, effectiveExcludedIDs)
+			if selection != nil && selection.Account != nil {
+				setOpenAIAccountScheduleDecisionAccount(&decision, selection.Account, scheduleReq.affinityReservePercent())
+				decision.TemporaryOverflow = route.OverflowAccount != nil &&
+					selection.Acquired &&
+					selection.Account.ID != route.OverflowAccount.ID
+			}
+			return selection, finalizeErr
+		}
+		newLegacyExcludedIDs := func() map[int64]struct{} {
+			effectiveExcludedIDs := cloneExcludedAccountIDs(excludedIDs)
+			if route.OverflowAccount != nil {
+				if effectiveExcludedIDs == nil {
+					effectiveExcludedIDs = make(map[int64]struct{})
+				}
+				effectiveExcludedIDs[route.OverflowAccount.ID] = struct{}{}
+			}
+			return effectiveExcludedIDs
+		}
+
 		if guardianParentAccountID > 0 {
 			if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
 				return nil, decision, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
@@ -2823,8 +2899,8 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 				RequiredCapability:      requiredCapability,
 				RequiredImageCapability: requiredImageCapability,
 				RequireCompact:          requireCompact,
+				RequirePrivacySet:       requirePrivacySet,
 				ExcludedIDs:             excludedIDs,
-				RequirePrivacySet:       s.openAIGroupRequiresPrivacySet(ctx, groupID),
 			})
 			if err != nil {
 				return nil, decision, err
@@ -2837,25 +2913,15 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 				return selection, decision, nil
 			}
 		}
+
 		legacySessionHash := sessionHash
 		if preserveGuardianParentBinding {
 			legacySessionHash = ""
 		}
 		if requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE {
-			effectiveExcludedIDs := cloneExcludedAccountIDs(excludedIDs)
-			if route.OverflowAccount != nil {
-				if effectiveExcludedIDs == nil {
-					effectiveExcludedIDs = make(map[int64]struct{})
-				}
-				effectiveExcludedIDs[route.OverflowAccount.ID] = struct{}{}
-			}
-			return effectiveExcludedIDs
-		}
-
-		if requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE {
 			effectiveExcludedIDs := newLegacyExcludedIDs()
 			for {
-				selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, legacySessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost)
+				selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, legacySessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost, scheduleReq.RequirePrivacySet, scheduleReq.affinityReservePercent())
 				if err != nil {
 					if canWaitForOverflow &&
 						(errors.Is(err, ErrNoAvailableAccounts) || errors.Is(err, ErrNoAvailableCompactAccounts)) {
@@ -2886,7 +2952,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 
 		effectiveExcludedIDs := newLegacyExcludedIDs()
 		for {
-			selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, legacySessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost)
+			selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, legacySessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost, scheduleReq.RequirePrivacySet, scheduleReq.affinityReservePercent())
 			if err != nil {
 				if canWaitForOverflow &&
 					(errors.Is(err, ErrNoAvailableAccounts) || errors.Is(err, ErrNoAvailableCompactAccounts)) {
@@ -2930,27 +2996,10 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		stickyPreviousAccountID = s.ResolveAccountIDByPreviousResponseIDForScheduler(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredCapability, requireCompact)
 	}
 
-	return scheduler.Select(ctx, OpenAIAccountScheduleRequest{
-		GroupID:                 groupID,
-		Platform:                platform,
-		SessionHash:             sessionHash,
-		StickyAccountID:         stickyAccountID,
-		GuardianParentAccountID: guardianParentAccountID,
-		StickyPreviousAccountID: stickyPreviousAccountID,
-		StickyWeighted:          stickyWeighted,
-		SubscriptionPriority:    subscriptionPriority,
-		PreserveStickyBinding:   preserveGuardianParentBinding,
-		RequirePrivacySet:       s.openAIGroupRequiresPrivacySet(ctx, groupID),
-		PreviousResponseID:      previousResponseID,
-		PreviousResponseCanMove: previousResponseCanMove,
-		UseUpstreamTokenCost:    useUpstreamTokenCost,
-		RequestedModel:          requestedModel,
-		RequiredTransport:       requiredTransport,
-		RequiredCapability:      requiredCapability,
-		RequiredImageCapability: requiredImageCapability,
-		RequireCompact:          requireCompact,
-		ExcludedIDs:             excludedIDs,
-	})
+	baseReq.StickyPreviousAccountID = stickyPreviousAccountID
+	baseReq.StickyWeighted = stickyWeighted
+	baseReq.SubscriptionPriority = subscriptionPriority
+	return scheduler.Select(ctx, baseReq)
 }
 
 func accountSupportsOpenAICapabilities(account *Account, requiredCapability OpenAIEndpointCapability, requiredImageCapability OpenAIImagesCapability) bool {
