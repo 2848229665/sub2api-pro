@@ -133,21 +133,30 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		if sessionResolution.ConversationID != "" {
 			headers.Set("conversation_id", sessionResolution.ConversationID)
 		}
-		if state := strings.TrimSpace(turnState); state != "" {
-			headers.Set(openAIWSTurnStateHeader, state)
-		}
-		if metadata := strings.TrimSpace(turnMetadata); metadata != "" {
-			headers.Set(openAIWSTurnMetadataHeader, metadata)
-		}
+	}
+	if state := strings.TrimSpace(turnState); state != "" {
+		headers.Set(openAIWSTurnStateHeader, state)
 	}
 	applyCodexAccountIdentityHeaders(headers, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
 	applyStagedCodexFingerprintHeaders(c, account, headers)
 
 	if account != nil && account.UsesOpenAICodexProtocol() {
+		if metadata := strings.TrimSpace(turnMetadata); metadata != "" {
+			if relayIdentity, ok := newOpenAICodexRelayIdentityForAPIKey(getAPIKeyFromContext(c), account); ok {
+				rewritten, err := relayIdentity.rewriteTurnMetadata(metadata)
+				if err != nil {
+					return nil, sessionResolution, err
+				}
+				metadata = rewritten
+			}
+			headers.Set(openAIWSTurnMetadataHeader, metadata)
+		}
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, headers, account); err != nil {
 			return nil, sessionResolution, fmt.Errorf("resolve chatgpt account headers: %w", err)
 		}
 		headers.Set("originator", resolveOpenAIUpstreamOriginator(c, isCodexCLI))
+	} else if metadata := strings.TrimSpace(turnMetadata); metadata != "" {
+		headers.Set(openAIWSTurnMetadataHeader, metadata)
 	}
 
 	betaValue := openAIWSBetaV2Value

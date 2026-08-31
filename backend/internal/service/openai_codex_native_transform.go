@@ -556,7 +556,13 @@ func resolveOpenAICodexUpstreamIdentity(
 	body []byte,
 	compact bool,
 ) (openAICodexUpstreamIdentity, error) {
-	rawSessionID := openAICodexRelaySessionSeed(c, body)
+	rawSessionID := openAICodexRelaySessionSeedFromContext(c)
+	if rawSessionID == "" {
+		rawSessionID = stagedCodexFingerprintOriginalBodySessionID(c, account)
+	}
+	if rawSessionID == "" {
+		rawSessionID = openAICodexRelaySessionSeed(c, body)
+	}
 	if rawSessionID == "" && compact {
 		rawSessionID = resolveOpenAICompactSessionID(c)
 	}
@@ -565,6 +571,9 @@ func resolveOpenAICodexUpstreamIdentity(
 
 // openAICodexRelaySessionSeed 按官方协议优先级选择最终 session header 的原始种子。
 func openAICodexRelaySessionSeed(c *gin.Context, body []byte) string {
+	if sessionSeed := strings.TrimSpace(gjson.GetBytes(body, "client_metadata.session_id").String()); sessionSeed != "" {
+		return sessionSeed
+	}
 	if c != nil && c.Request != nil {
 		for _, name := range []string{
 			openAIOfficialSessionIDHeader,

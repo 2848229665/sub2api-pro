@@ -27,6 +27,7 @@ func newTestGinContext() *gin.Context {
 type cyberPolicyHandlerTestCache struct {
 	mu      sync.Mutex
 	blocked map[string]bool
+	scopes  map[string]bool
 	ttls    map[string]time.Duration
 }
 
@@ -63,7 +64,7 @@ func (c *cyberPolicyHandlerTestCache) SetReasoningContent(context.Context, strin
 func (c *cyberPolicyHandlerTestCache) GetReasoningContent(context.Context, string) (string, error) {
 	return "", service.ErrReasoningContentNotFound
 }
-func (c *cyberPolicyHandlerTestCache) SetCyberSessionBlocked(_ context.Context, key string, ttl time.Duration) error {
+func (c *cyberPolicyHandlerTestCache) SetCyberSessionBlocked(_ context.Context, scopeKey string, keys []string, ttl time.Duration) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.blocked == nil {
@@ -72,14 +73,42 @@ func (c *cyberPolicyHandlerTestCache) SetCyberSessionBlocked(_ context.Context, 
 	if c.ttls == nil {
 		c.ttls = make(map[string]time.Duration)
 	}
-	c.blocked[key] = true
-	c.ttls[key] = ttl
+	if c.scopes == nil {
+		c.scopes = make(map[string]bool)
+	}
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		c.blocked[key] = true
+		c.ttls[key] = ttl
+	}
+	if scopeKey != "" {
+		c.blocked[scopeKey] = true
+		c.scopes[scopeKey] = true
+		c.ttls[scopeKey] = ttl
+	}
 	return nil
+}
+func (c *cyberPolicyHandlerTestCache) IsCyberSessionScopeActive(_ context.Context, scopeKey string) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.scopes[scopeKey], nil
 }
 func (c *cyberPolicyHandlerTestCache) IsCyberSessionBlocked(_ context.Context, key string) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.blocked[key], nil
+}
+func (c *cyberPolicyHandlerTestCache) FindCyberSessionBlocked(_ context.Context, keys []string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, key := range keys {
+		if c.blocked[key] {
+			return key, nil
+		}
+	}
+	return "", nil
 }
 func (c *cyberPolicyHandlerTestCache) ttl(key string) time.Duration {
 	c.mu.Lock()
@@ -159,8 +188,7 @@ func TestRecordCyberPolicyIfMarked_PersistsRequestBeforeReturning(t *testing.T) 
 
 	h.recordCyberPolicyIfMarked(
 		c, nil, nil, nil, "gpt-5",
-		service.ContentModerationProtocolOpenAIResponses, body,
-		true, "", service.ChannelUsageFields{}, "",
+		true, body, service.ChannelUsageFields{}, "",
 	)
 
 	logs := repo.logSnapshot()
@@ -257,9 +285,9 @@ func TestRejectIfCyberSessionBlocked_UsesMessageFallback(t *testing.T) {
 
 	seedCtx := newTestGinContext()
 	seedCtx.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(string(body)))
-	blockKey := service.CyberPolicyBlockKey(apiKey.ID, seedCtx, service.ContentModerationProtocolOpenAIResponses, body)
-	require.NotEmpty(t, blockKey)
-	gateway.MarkCyberSessionBlocked(seedCtx.Request.Context(), blockKey)
+	plan := buildCyberSessionBlockWritePlan(apiKey.ID, seedCtx, body)
+	require.NotEmpty(t, plan.keys)
+	gateway.MarkCyberSessionBlocked(seedCtx.Request.Context(), plan.scopeKey, plan.keys)
 
 	request := func(key *service.APIKey, requestBody []byte) (*httptest.ResponseRecorder, bool) {
 		recorder := httptest.NewRecorder()
@@ -326,7 +354,7 @@ func TestRecordCyberPolicyIfMarked_WritesBlockBeforeReturning(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
 	service.MarkOpsCyberPolicy(c, service.CyberPolicyMark{Message: "blocked", UpstreamStatus: 400})
 
-	const blockKey = "message:v1:synchronous-write"
+	body := []byte(`{"model":"gpt-5","input":"synchronous cyber block write"}`)
 	h := &OpenAIGatewayHandler{gatewayService: gateway}
 	h.recordCyberPolicyIfMarked(
 		c,
@@ -334,16 +362,16 @@ func TestRecordCyberPolicyIfMarked_WritesBlockBeforeReturning(t *testing.T) {
 		nil,
 		nil,
 		"gpt-5",
-		service.ContentModerationProtocolOpenAIResponses,
-		nil,
 		true,
-		blockKey,
+		body,
 		service.ChannelUsageFields{},
 		"",
 	)
 
-	require.True(t, gateway.IsCyberSessionBlocked(context.Background(), blockKey))
-	require.Equal(t, 10*time.Hour, cache.ttl(blockKey))
+	plan := buildCyberSessionBlockWritePlan(101, c, body)
+	require.NotEmpty(t, plan.keys)
+	require.True(t, gateway.IsCyberSessionBlocked(context.Background(), plan.keys[0]))
+	require.Equal(t, 10*time.Hour, cache.ttl(plan.keys[0]))
 }
 
 func TestOpenAIWSCyberBlockKeyResolver_UpdatesAndInheritsExplicitIdentity(t *testing.T) {
@@ -405,9 +433,10 @@ func TestOpenAIResponsesWebSocket_MessageFallbackBlocksFirstFrame(t *testing.T) 
 	payload := []byte(`{"type":"response.create","model":"gpt-5","response":{"input":"blocked websocket message"}}`)
 	seedCtx := newTestGinContext()
 	seedCtx.Request = httptest.NewRequest(http.MethodGet, "/openai/v1/responses", nil)
-	blockKey := service.CyberPolicyBlockKey(101, seedCtx, service.ContentModerationProtocolOpenAIResponses, payload)
-	require.NotEmpty(t, blockKey)
-	gateway.MarkCyberSessionBlocked(seedCtx.Request.Context(), blockKey)
+	seedCtx.Request.RemoteAddr = "127.0.0.1:12345"
+	plan := buildCyberSessionBlockWritePlan(101, seedCtx, payload)
+	require.NotEmpty(t, plan.keys)
+	gateway.MarkCyberSessionBlocked(seedCtx.Request.Context(), plan.scopeKey, plan.keys)
 
 	h := newOpenAIHandlerForPreviousResponseIDValidation(t, nil)
 	h.gatewayService = gateway

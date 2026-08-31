@@ -62,13 +62,15 @@ func (s *OpenAIGatewayService) ExtractSessionID(c *gin.Context, body []byte) str
 }
 
 func explicitOpenAISessionID(c *gin.Context, body []byte) string {
-	if c == nil {
-		return ""
+	sessionID := ""
+	if c != nil {
+		sessionID = explicitOpenAIHeaderSessionID(c)
 	}
-
-	sessionID := explicitOpenAIHeaderSessionID(c)
 	if sessionID == "" && len(body) > 0 {
-		sessionID = strings.TrimSpace(openAIRequestPayloadView(body).Get("prompt_cache_key").String())
+		sessionID = strings.TrimSpace(parseRawJSONView(body).Get("prompt_cache_key").String())
+		if sessionID == "" {
+			sessionID = strings.TrimSpace(openAIRequestPayloadView(body).Get("prompt_cache_key").String())
+		}
 	}
 	return sessionID
 }

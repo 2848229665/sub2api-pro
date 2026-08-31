@@ -32,6 +32,10 @@ var defaultAllowed = map[string]struct{}{
 	"retry-after":                    {},
 	"location":                       {},
 	"www-authenticate":               {},
+	"x-models-etag":                  {},
+	"openai-model":                   {},
+	"x-openai-model":                 {},
+	"x-openai-authorization-error":   {},
 	// Codex uses this response header to avoid estimating reasoning tokens a
 	// second time when upstream usage already includes them.
 	"x-reasoning-included": {},

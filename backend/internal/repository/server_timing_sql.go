@@ -234,7 +234,9 @@ func (r *serverTimingRows) Close() error {
 func (r *serverTimingRows) Next(dest []driver.Value) error {
 	startedAt := time.Now()
 	err := r.Rows.Next(dest)
-	servertiming.RecordInterval(r.ctx, servertiming.MetricDatabase, startedAt, time.Now())
+	if !errors.Is(err, io.EOF) {
+		servertiming.RecordInterval(r.ctx, servertiming.MetricDatabase, startedAt, time.Now())
+	}
 	return err
 }
 

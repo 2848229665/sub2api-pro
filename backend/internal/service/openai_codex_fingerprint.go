@@ -21,6 +21,7 @@ import (
 // 构造器读取用于出站头改写——请求体与出站头必须共享同一份 IDs，保证
 // turn_id 等随机字段一致。
 const codexFingerprintIDsContextKey = "codex_fingerprint_ids"
+const openAICodexRelaySessionSeedContextKey = "openai_codex_relay_session_seed"
 
 // stageCodexFingerprintIDs 将本 attempt 解析出的收敛 ID 暂存到 gin context。
 // 必须无条件覆写（含 nil）：failover 从收敛账号切到 off 账号时，上一账号的
@@ -55,6 +56,39 @@ func applyStagedCodexFingerprintHeaders(c *gin.Context, account *Account, h http
 
 func applyStagedCodexFingerprintClientMetadata(c *gin.Context, account *Account, reqBody map[string]any) bool {
 	return applyCodexFingerprintClientMetadata(reqBody, stagedCodexFingerprintIDs(c, account))
+}
+
+func setOpenAICodexRelaySessionSeed(c *gin.Context, promptCacheKey string) {
+	if c == nil {
+		return
+	}
+	promptCacheKey = strings.TrimSpace(promptCacheKey)
+	if promptCacheKey == "" {
+		return
+	}
+	c.Set(openAICodexRelaySessionSeedContextKey, promptCacheKey)
+}
+
+func openAICodexRelaySessionSeedFromContext(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	value, ok := c.Get(openAICodexRelaySessionSeedContextKey)
+	if !ok {
+		return ""
+	}
+	if promptCacheKey, ok := value.(string); ok {
+		return strings.TrimSpace(promptCacheKey)
+	}
+	return ""
+}
+
+func stagedCodexFingerprintOriginalBodySessionID(c *gin.Context, account *Account) string {
+	ids := stagedCodexFingerprintIDs(c, account)
+	if ids == nil {
+		return ""
+	}
+	return strings.TrimSpace(ids.originalBodySessionID)
 }
 
 // codexFingerprintMode 控制 OAuth 账号出站请求的设备指纹收敛强度。

@@ -209,13 +209,12 @@ func (h *ConcurrencyHelper) accountLoadSnapshot(ctx context.Context, accountID i
 	if h == nil || h.concurrencyService == nil || accountID <= 0 {
 		return slotLoadSnapshot{}
 	}
-	loadMap, err := h.concurrencyService.GetAccountsLoadBatchFreshWithTimeout(
+	loadMap, err := h.concurrencyService.GetAccountsLoadBatch(
 		ctx,
 		[]service.AccountWithConcurrency{{
 			ID:             accountID,
 			MaxConcurrency: maxConcurrency,
 		}},
-		slotLoadSnapshotTimeout,
 	)
 	if err != nil {
 		return slotLoadSnapshot{Err: err}
@@ -473,6 +472,43 @@ func userSlotWaitLogFields(
 		zap.Int("max_concurrency", maxConcurrency),
 		zap.Int("queue_limit", queueLimit),
 		zap.Int64("timeout_ms", timeout.Milliseconds()),
+		zap.String("phase", phase),
+		zap.Bool("stream_started", streamStarted),
+	}
+	if waitDuration > 0 {
+		fields = append(fields, zap.Int64("wait_ms", waitDuration.Milliseconds()))
+	}
+	return append(fields, snapshot.zapFields()...)
+}
+
+func accountSlotWaitLogFields(
+	accountID int64,
+	accountPriority int,
+	waitPlan *service.AccountWaitPlan,
+	waitDuration time.Duration,
+	phase string,
+	streamStarted bool,
+	snapshot slotLoadSnapshot,
+) []zap.Field {
+	waitCandidateCount := waitPlan.CandidateCount
+	if waitCandidateCount <= 0 {
+		waitCandidateCount = len(waitPlan.Candidates)
+	}
+	waitReason := waitPlan.Reason
+	if waitReason == "" {
+		waitReason = "scheduler_fallback"
+	}
+	fields := []zap.Field{
+		zap.Int64("account_id", accountID),
+		zap.Int("account_priority", accountPriority),
+		zap.Int("effective_concurrency_limit", waitPlan.MaxConcurrency),
+		zap.Int64("timeout_ms", waitPlan.Timeout.Milliseconds()),
+		zap.Int("max_waiting", waitPlan.MaxWaiting),
+		zap.String("wait_reason", waitReason),
+		zap.Int("wait_candidate_count", waitCandidateCount),
+		zap.Int("logged_wait_candidate_count", len(waitPlan.Candidates)),
+		zap.Bool("wait_candidates_truncated", waitPlan.CandidatesTruncated),
+		zap.Any("wait_candidates", waitPlan.Candidates),
 		zap.String("phase", phase),
 		zap.Bool("stream_started", streamStarted),
 	}

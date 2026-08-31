@@ -223,10 +223,10 @@ func (s *OpenAIGatewayService) FindCyberSessionBlockedForRequest(ctx context.Con
 		logger.LegacyPrintf("service.openai_gateway", "cyber session scope read failed: err=%v", err)
 		return ""
 	}
-	if !active {
+	transcript := deriveOpenAICyberTranscriptBlockKeys(apiKeyID, body)
+	if !active && len(transcript.lookupKeys) == 0 {
 		return ""
 	}
-	transcript := deriveOpenAICyberTranscriptBlockKeys(apiKeyID, body)
 	if transcript.lookupKeysTruncated {
 		// Once the coarse scope is active, silently dropping old candidates would
 		// let a blocked client evade prefix matching by appending dummy items.

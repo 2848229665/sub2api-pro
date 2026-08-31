@@ -230,6 +230,7 @@ func openAIAccountWaitTestSelection() *service.AccountSelectionResult {
 			Timeout:        30 * time.Second,
 			MaxWaiting:     100,
 			Reason:         "all_general_candidates_busy",
+			CandidateCount: 2,
 			Candidates: []service.AccountWaitCandidateDiagnostic{
 				{AccountID: 68, Priority: 10, GeneralLimit: 2, HardLimit: 3, Result: "selected_for_wait"},
 				{AccountID: 90, Priority: 40, GeneralLimit: 2, HardLimit: 3, Result: "busy"},
