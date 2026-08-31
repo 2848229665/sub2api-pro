@@ -104,7 +104,6 @@ type OpenAIAccountScheduleRequest struct {
 	// RequireCompact is only for legacy /responses/compact capability filtering
 	// and compact_model_mapping; native remote compaction v2 leaves it false.
 	RequireCompact         bool
-	RequirePrivacySet      bool
 	ExcludedIDs            map[int64]struct{}
 	AffinityReservePercent *int
 	generalRejectCounter   *openAIGeneralRejectCounter
@@ -574,6 +573,8 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	if s != nil && s.service != nil && s.service.openAIGroupRequiresPrivacySet(ctx, req.GroupID) {
 		req.RequirePrivacySet = true
 	}
+	generalRejectCounter := &openAIGeneralRejectCounter{}
+	req.generalRejectCounter = generalRejectCounter
 	decision := OpenAIAccountScheduleDecision{}
 	start := time.Now()
 	defer func() {
@@ -656,6 +657,19 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		if escapedSticky {
 			req.PreserveStickyBinding = true
 		}
+	}
+
+	route, err := s.service.routeOpenAIAffinity(ctx, req, func(accountID int64) bool {
+		cfg := s.service.openAIStickyEscapeConfig()
+		reason, errorRate, ttft, shouldEscape := s.shouldEscapeStickyAccount(accountID, cfg)
+		if shouldEscape {
+			slog.Info("sticky_escape_triggered",
+				"account_id", accountID,
+				"reason", reason,
+				"error_rate", errorRate,
+				"ttft", ttft,
+			)
+		}
 		return shouldEscape
 	})
 	applyOpenAIAffinityRouteDecision(&decision, route, req)
@@ -707,6 +721,17 @@ func (s *defaultOpenAIAccountScheduler) Select(
 func recordOpenAIGeneralReject(req OpenAIAccountScheduleRequest, accountID int64, affinity bool) {
 	if affinity || req.generalRejectCounter == nil {
 		return
+	}
+	req.generalRejectCounter.record(accountID)
+}
+
+func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
+	ctx context.Context,
+	req OpenAIAccountScheduleRequest,
+) (*AccountSelectionResult, bool, error) {
+	sessionHash := strings.TrimSpace(req.SessionHash)
+	if sessionHash == "" || s == nil || s.service == nil || s.service.cache == nil {
+		return nil, false, nil
 	}
 
 	accountID := req.StickyAccountID

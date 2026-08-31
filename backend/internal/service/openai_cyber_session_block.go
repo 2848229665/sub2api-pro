@@ -21,12 +21,33 @@ type CyberSessionBlockStore interface {
 	FindCyberSessionBlocked(ctx context.Context, keys []string) (string, error)
 }
 
+// KeywordSessionBlockStore stores terminal local keyword-policy blocks in a
+// namespace separate from cyber-policy state.
+type KeywordSessionBlockStore interface {
+	ClaimKeywordSessionBlocked(ctx context.Context, key string, ttl time.Duration) (bool, error)
+	IsKeywordSessionBlocked(ctx context.Context, key string) (bool, error)
+}
+
+const policySessionWriteTimeout = 2 * time.Second
+
 const cyberSessionTranscriptLookupOverflowBlockKey = "transcript_lookup_limit_exceeded"
 
 // CyberSessionExplicitBlockKey returns an inexpensive exact key when the
 // client supplies a stable session signal.
 func CyberSessionExplicitBlockKey(apiKeyID int64, c *gin.Context, body []byte) string {
 	return hashCyberSessionBlockKey(apiKeyID, explicitOpenAISessionID(c, body))
+}
+
+// OpenAISessionBlockKey derives a policy-block key only from explicit session
+// identifiers. It never falls back to API-key-wide or content-derived blocking.
+func OpenAISessionBlockKey(apiKeyID int64, c *gin.Context, body []byte) string {
+	raw := explicitOpenAITerminalSessionID(c, body)
+	if raw == "" {
+		return ""
+	}
+	isolated := isolateOpenAISessionID(apiKeyID, raw)
+	sum := sha256.Sum256([]byte(isolated))
+	return hex.EncodeToString(sum[:])
 }
 
 // CyberSessionTranscriptBlockKeys returns the exact full-request key followed

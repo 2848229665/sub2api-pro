@@ -36,7 +36,7 @@ func EvaluatePluginCompatibility(manifest PluginManifest, host PluginHostInfo) P
 	}
 	result.Compatible = true
 	for _, tested := range manifest.Requires.TestedSub2APIVersions {
-		if normalizeSemver(tested) == normalizeSemver(host.Version) {
+		if normalizeSemverStrict(tested) == normalizeSemverStrict(host.Version) {
 			result.Tested = true
 			break
 		}
@@ -51,7 +51,7 @@ func EvaluatePluginCompatibility(manifest PluginManifest, host PluginHostInfo) P
 	return result
 }
 
-func normalizeSemver(version string) string {
+func normalizeSemverStrict(version string) string {
 	v := strings.TrimSpace(version)
 	if v == "" {
 		return ""
@@ -66,7 +66,7 @@ func normalizeSemver(version string) string {
 }
 
 func matchesSemverRange(version, expression string) bool {
-	v := normalizeSemver(version)
+	v := normalizeSemverStrict(version)
 	if v == "" {
 		return false
 	}
@@ -84,7 +84,7 @@ func matchesSemverRange(version, expression string) bool {
 				break
 			}
 		}
-		bound := normalizeSemver(raw)
+		bound := normalizeSemverStrict(raw)
 		if bound == "" {
 			return false
 		}
