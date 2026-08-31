@@ -75,7 +75,7 @@ func (s *OpenAIGatewayService) BeginOpenAIWSIngressSessionPreemption(
 	}
 	if preemptedPrevious {
 		if stateStore := s.getOpenAIWSStateStore(); stateStore != nil {
-			stateStore.DeleteSessionTurnState(preemptGroupID, preemptSessionHash)
+			stateStore.DeleteSessionTurnState(preemptGroupID, getAPIKeyIDFromContext(c), preemptSessionHash)
 			stateStore.DeleteSessionConn(preemptGroupID, preemptSessionHash)
 		}
 	}
@@ -155,7 +155,7 @@ func (s *OpenAIGatewayService) beginOpenAIWSSessionPreemptContext(
 	preempt := func() {
 		preemptOnce.Do(func() {
 			if stateStore := s.getOpenAIWSStateStore(); stateStore != nil {
-				stateStore.DeleteSessionTurnState(key.groupID, key.sessionHash)
+				stateStore.DeleteSessionTurnState(key.groupID, key.apiKeyID, key.sessionHash)
 				stateStore.DeleteSessionConn(key.groupID, key.sessionHash)
 			}
 			cancel(errOpenAIWSSessionPreempted)

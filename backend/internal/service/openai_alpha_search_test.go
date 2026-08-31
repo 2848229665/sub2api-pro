@@ -60,6 +60,7 @@ func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {
 	c.Request.Header.Set("Originator", "codex_cli_rs")
 	c.Request.Header.Set("Version", "0.144.1")
 	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"search-session","turn_id":"search-turn"}`)
+	c.Set("api_key", &APIKey{ID: 0, Key: "sk-alpha-search-oauth"})
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -77,7 +78,7 @@ func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {
 			"chatgpt_account_id": "chatgpt-account",
 		},
 	}
-	relayIdentity, ok := newOpenAICodexRelayIdentity(c, account)
+	_, ok := newOpenAICodexRelayIdentity(c, account)
 	require.True(t, ok)
 
 	result, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
@@ -96,11 +97,11 @@ func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {
 	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("Version"))
 	require.Empty(t, upstream.lastReq.Header.Get("OpenAI-Beta"))
 	require.Equal(t,
-		scopeCodexAccountIdentityValue(account, 0, "session", "search-session"),
+		"934c031c-bc5c-56d0-a725-5a1047611dea",
 		gjson.Get(upstream.lastReq.Header.Get("X-Codex-Turn-Metadata"), "session_id").String(),
 	)
 	require.Equal(t,
-		scopeCodexAccountIdentityValue(account, 0, "turn", "search-turn"),
+		"e4d6097e-4731-5f65-91ea-c1293c5c9b17",
 		gjson.Get(upstream.lastReq.Header.Get("X-Codex-Turn-Metadata"), "turn_id").String(),
 	)
 	require.JSONEq(t, string(body), string(upstream.lastBody))
@@ -131,7 +132,7 @@ func TestForwardAlphaSearchPATUsesResponsesWebSearchFallback(t *testing.T) {
 	c.Request.Header.Set("X-Codex-Turn-State", "turn-state")
 	c.Request.Header.Set(responsesLiteHeaderKey, "true")
 	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"turn_id":"turn-1","root_turn_id":"turn-1","workspaces":{"/private/project":{}}}`)
-	c.Set("api_key", &APIKey{ID: 702, Key: "sk-alpha-search-pat"})
+	c.Set("api_key", &APIKey{ID: 0, Key: "sk-alpha-search-pat"})
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -151,7 +152,7 @@ func TestForwardAlphaSearchPATUsesResponsesWebSearchFallback(t *testing.T) {
 			"chatgpt_account_is_fedramp": true,
 		},
 	}
-	relayIdentity, ok := newOpenAICodexRelayIdentity(c, account)
+	_, ok := newOpenAICodexRelayIdentity(c, account)
 	require.True(t, ok)
 
 	result, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
@@ -176,8 +177,8 @@ func TestForwardAlphaSearchPATUsesResponsesWebSearchFallback(t *testing.T) {
 	)
 	require.Equal(t, openai.CodexDefaultOriginator, upstream.lastReq.Header.Get("Originator"))
 	require.Empty(t, upstream.lastReq.Header.Get(openAIOfficialSessionIDHeader))
-	require.Empty(t, upstream.lastReq.Header.Get("Session_ID"))
-	require.Empty(t, upstream.lastReq.Header.Get("Conversation_ID"))
+	require.Equal(t, "31e72a237e9eb213", upstream.lastReq.Header.Get("Session_ID"))
+	require.Equal(t, "31e72a237e9eb213", upstream.lastReq.Header.Get("Conversation_ID"))
 	require.Empty(t, upstream.lastReq.Header.Get("X-Codex-Beta-Features"))
 	require.Empty(t, upstream.lastReq.Header.Get("X-Codex-Turn-State"))
 	require.Empty(t, upstream.lastReq.Header.Get(responsesLiteHeaderKey))

@@ -248,7 +248,7 @@ func TestCodexDirectCapabilitiesAreOAuthOnly(t *testing.T) {
 	require.True(t, oauth.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityCodexDirect))
 	require.True(t, oauth.SupportsOpenAIImageCapability(OpenAIImagesCapabilityCodexDirect))
 	require.False(t, apiKey.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityCodexDirect))
-	require.False(t, apiKey.SupportsOpenAIImageCapability(OpenAIImagesCapabilityCodexDirect))
+	require.True(t, apiKey.SupportsOpenAIImageCapability(OpenAIImagesCapabilityCodexDirect))
 }
 
 func TestForwardCodexDirectRejectsAPIKeyAccountBeforeOpeningUpstream(t *testing.T) {

@@ -90,13 +90,6 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	}
 
 	sessionResolution := resolveOpenAIWSSessionHeaders(c, promptCacheKey)
-	codexIdentity, hasCodexIdentity := openAICodexUpstreamIdentityFromContext(c)
-	relayIdentity := codexIdentity.RelayIdentity
-	if !hasCodexIdentity {
-		var ok bool
-		relayIdentity, ok = newOpenAICodexRelayIdentity(c, account)
-		hasCodexIdentity = ok
-	}
 	if c != nil && c.Request != nil {
 		if v := strings.TrimSpace(c.Request.Header.Get("accept-language")); v != "" {
 			headers.Set("accept-language", v)

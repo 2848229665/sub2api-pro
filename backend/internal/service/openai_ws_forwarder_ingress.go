@@ -296,6 +296,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				)
 			}
 		}
+		upstreamModel := originalModel
 		promptCacheKey := strings.TrimSpace(values[2].String())
 		previousResponseID := strings.TrimSpace(values[3].String())
 		previousResponseIDKind := ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
@@ -1012,6 +1013,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 						statusCode,
 						payload,
 						upstreamMessage,
+						s.openAIResponsesRectifierEnabled(ctx),
 					)
 					if retryErr != nil {
 						return nil, fmt.Errorf("normalize websocket rejected field retry: %w", retryErr)

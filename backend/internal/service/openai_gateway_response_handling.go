@@ -1440,7 +1440,7 @@ func (s *OpenAIGatewayService) BindOpenAIHTTPResponseOwner(
 	)
 }
 
-func (s *OpenAIGatewayService) bindHTTPResponseAccount(ctx context.Context, c *gin.Context, account *Account, responseID string) {
+func (s *OpenAIGatewayService) bindHTTPResponseAccount(ctx context.Context, c *gin.Context, account *Account, responseID string) bool {
 	if s == nil || account == nil || account.ID <= 0 {
 		return false
 	}
@@ -1470,6 +1470,7 @@ func (s *OpenAIGatewayService) bindHTTPResponseAccount(ctx context.Context, c *g
 			}
 		}
 	}
+	return true
 }
 
 func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {

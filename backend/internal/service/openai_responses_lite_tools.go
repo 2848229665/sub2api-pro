@@ -269,6 +269,19 @@ func normalizeOpenAIResponsesLiteToolsPayload(body []byte) ([]byte, bool, error)
 	return rebuilt, true, nil
 }
 
+func openAIResponsesLiteBodyHasNamespaceTools(body []byte) bool {
+	tools := gjson.GetBytes(body, "tools")
+	if !tools.Exists() || !tools.IsArray() {
+		return false
+	}
+	for _, tool := range tools.Array() {
+		if strings.TrimSpace(tool.Get("type").String()) == "namespace" {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeOpenAIResponsesLiteParallelToolCallsPayload(body []byte) ([]byte, bool, error) {
 	var requestBody map[string]any
 	if err := decodeOpenAIJSONUseNumber(body, &requestBody); err != nil {

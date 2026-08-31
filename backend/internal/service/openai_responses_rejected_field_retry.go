@@ -142,7 +142,7 @@ func (s *openAIResponsesRejectedFieldRetryState) rememberLocked(body []byte) {
 // after an explicit upstream 400 field rejection. extended=false restores the
 // historical behavior (max_output_tokens and input[N].namespace only); the
 // additional rules are gated by the responses-rectifier switch.
-func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, responseBody []byte, extended bool) ([]byte, string, bool, error) {
+func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, responseBody []byte, extended ...bool) ([]byte, string, bool, error) {
 	if statusCode != http.StatusBadRequest || len(body) == 0 || len(responseBody) == 0 {
 		return nil, "", false, nil
 	}

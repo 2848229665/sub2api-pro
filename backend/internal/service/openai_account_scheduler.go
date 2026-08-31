@@ -569,13 +569,12 @@ func newDefaultOpenAIAccountScheduler(service *OpenAIGatewayService, stats *open
 func (s *defaultOpenAIAccountScheduler) Select(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
-) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
 	if s != nil && s.service != nil && s.service.openAIGroupRequiresPrivacySet(ctx, req.GroupID) {
 		req.RequirePrivacySet = true
 	}
 	generalRejectCounter := &openAIGeneralRejectCounter{}
 	req.generalRejectCounter = generalRejectCounter
-	decision := OpenAIAccountScheduleDecision{}
 	start := time.Now()
 	defer func() {
 		decision.LatencyMs = time.Since(start).Milliseconds()
@@ -756,11 +755,11 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		}
 	}
 
-	account, err := s.service.getSchedulableAccount(ctx, accountID)
-	if err != nil || account == nil {
-		clearBinding()
-		return nil, false, nil
-	}
+		account, err := s.service.getSchedulableAccount(ctx, accountID)
+		if err != nil || account == nil {
+			clearBinding()
+			return nil, false, nil
+		}
 	if shouldClearStickySession(account, req.RequestedModel) || account.Platform != NormalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() || !account.IsSchedulable() {
 		clearBinding()
 		return nil, false, nil
@@ -771,12 +770,19 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 		clearBinding()
 		return nil, false, nil
-	}
-	account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
-	if account == nil || !s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) || !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
-		clearBinding()
-		return nil, false, nil
-	}
+		}
+		account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+		if account == nil {
+			clearBinding()
+			return nil, false, nil
+		}
+		if !s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) {
+			return nil, false, nil
+		}
+		if !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+			clearBinding()
+			return nil, false, nil
+		}
 	// Free-tier soft gate: sticky session must not pin an over-quota free OAuth account.
 	// Admin QueryQuota / import probes do not use this path.
 	if account != nil && len(s.filterGrokFreeQuotaAccounts(ctx, []Account{*account})) == 0 {
@@ -1959,15 +1965,16 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 			if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 				continue
 			}
-			if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
-				compactBlocked = true
-				continue
-			}
-			freshLimit := fresh.ConcurrencyLimitForAffinity(affinity, req.affinityReservePercent())
-			return attachSelectionProfitGate(ctx, attachOpenAISelectionRequest(&AccountSelectionResult{
-				Account:        fresh,
-				SessionOwnerID: req.StickyAccountID,
-				PreserveStickyBinding: req.PreserveStickyBinding ||
+					if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
+						compactBlocked = true
+						continue
+					}
+					freshLimit := fresh.ConcurrencyLimitForAffinity(affinity, req.affinityReservePercent())
+					recordOpenAIGeneralReject(req, fresh.ID, affinity)
+					return attachSelectionProfitGate(ctx, attachOpenAISelectionRequest(&AccountSelectionResult{
+						Account:        fresh,
+						SessionOwnerID: req.StickyAccountID,
+						PreserveStickyBinding: req.PreserveStickyBinding ||
 					(req.StickyWeighted && req.StickyAccountID > 0 && fresh.ID != req.StickyAccountID),
 				WaitPlan: &AccountWaitPlan{
 					AccountID:      fresh.ID,
@@ -2787,7 +2794,6 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		ctx = s.withOpenAIProfitControlGate(ctx, groupID)
 	}
 	platform = NormalizeOpenAICompatiblePlatform(platform)
-	decision := OpenAIAccountScheduleDecision{}
 	preserveGuardianParentBinding := preserveOpenAIGuardianParentBinding(ctx, sessionHash)
 	guardianParentAccountID := int64(0)
 	if strings.TrimSpace(previousResponseID) == "" {

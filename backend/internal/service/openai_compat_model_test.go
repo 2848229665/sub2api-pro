@@ -1125,8 +1125,8 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 	relayIdentity, relayOK := newOpenAICodexRelayIdentity(firstCtx, account)
 	require.True(t, relayOK)
 	require.Equal(t, relayIdentity.pseudonymize("session_id", rawCacheKey), firstCacheKey)
-	require.Equal(t, firstCacheKey, firstSessionID)
-	require.Equal(t, firstSessionID, upstream.requests[0].Header.Get(openAIOfficialSessionIDHeader))
+	require.Equal(t, generateSessionUUID(isolateOpenAIUpstreamSessionID(507, account, rawCacheKey)), firstSessionID)
+	require.Equal(t, "5a86ae12-0663-4521-a3c2-a4c9b7b7c9d3", upstream.requests[0].Header.Get(openAIOfficialSessionIDHeader))
 
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	secondRec := httptest.NewRecorder()
@@ -1194,8 +1194,8 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *t
 	relayIdentity, relayOK := newOpenAICodexRelayIdentity(firstCtx, account)
 	require.True(t, relayOK)
 	require.Equal(t, relayIdentity.pseudonymize("session_id", rawCacheKey), firstCacheKey)
-	require.Equal(t, firstCacheKey, firstSessionID)
-	require.Equal(t, firstSessionID, upstream.requests[0].Header.Get(openAIOfficialSessionIDHeader))
+	require.Equal(t, generateSessionUUID(isolateOpenAIUpstreamSessionID(507, account, rawCacheKey)), firstSessionID)
+	require.Equal(t, "5a86ae12-0663-4521-a3c2-a4c9b7b7c9d3", upstream.requests[0].Header.Get(openAIOfficialSessionIDHeader))
 
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"metadata":` + metadata + `,"messages":[{"role":"user","content":"rewritten plan"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	secondRec := httptest.NewRecorder()
@@ -1262,8 +1262,8 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnch
 	relayIdentity, relayOK := newOpenAICodexRelayIdentity(firstCtx, account)
 	require.True(t, relayOK)
 	require.Equal(t, relayIdentity.pseudonymize("session_id", rawCacheKey), firstCacheKey)
-	require.Equal(t, firstCacheKey, firstSessionID)
-	require.Equal(t, firstSessionID, upstream.requests[0].Header.Get(openAIOfficialSessionIDHeader))
+	require.Equal(t, generateSessionUUID(isolateOpenAIUpstreamSessionID(507, account, rawCacheKey)), firstSessionID)
+	require.Equal(t, "5a86ae12-0663-4521-a3c2-a4c9b7b7c9d3", upstream.requests[0].Header.Get(openAIOfficialSessionIDHeader))
 
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"metadata":` + metadata + `,"system":[{"type":"text","text":"anchor two","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	secondRec := httptest.NewRecorder()

@@ -101,14 +101,19 @@ func TestCyberTranscriptLookupKeysAreBoundedAndKeepNewestOrder(t *testing.T) {
 // --- fakes ---
 
 type fakeCyberBlockStore struct {
-	blocked   map[string]bool
-	scopes    map[string]bool
-	findCalls int
+	blocked      map[string]bool
+	keywordBlock map[string]bool
+	scopes       map[string]bool
+	findCalls    int
+	lastWriteErr error
+	lastWriteTTL time.Duration
 }
 
 var _ CyberSessionBlockStore = (*fakeCyberBlockStore)(nil)
 
-func (f *fakeCyberBlockStore) SetCyberSessionBlocked(_ context.Context, scopeKey string, keys []string, _ time.Duration) error {
+func (f *fakeCyberBlockStore) SetCyberSessionBlocked(_ context.Context, scopeKey string, keys []string, ttl time.Duration) error {
+	f.lastWriteErr = nil
+	f.lastWriteTTL = ttl
 	if f.blocked == nil {
 		f.blocked = map[string]bool{}
 	}
@@ -122,6 +127,21 @@ func (f *fakeCyberBlockStore) SetCyberSessionBlocked(_ context.Context, scopeKey
 		f.scopes[scopeKey] = true
 	}
 	return nil
+}
+
+func (f *fakeCyberBlockStore) ClaimKeywordSessionBlocked(_ context.Context, key string, _ time.Duration) (bool, error) {
+	if f.keywordBlock == nil {
+		f.keywordBlock = map[string]bool{}
+	}
+	if f.keywordBlock[key] {
+		return false, nil
+	}
+	f.keywordBlock[key] = true
+	return true, nil
+}
+
+func (f *fakeCyberBlockStore) IsKeywordSessionBlocked(_ context.Context, key string) (bool, error) {
+	return f.keywordBlock[key], nil
 }
 
 func (f *fakeCyberBlockStore) IsCyberSessionScopeActive(_ context.Context, scopeKey string) (bool, error) {
@@ -231,14 +251,14 @@ func (c *comboCacheAndStore) FindCyberSessionBlocked(ctx context.Context, keys [
 }
 func (c *comboCacheAndStore) ClaimKeywordSessionBlocked(ctx context.Context, key string, ttl time.Duration) (bool, error) {
 	c.keywordClaimCtxErr = ctx.Err()
-	blocked, err := c.keywordStore.IsCyberSessionBlocked(ctx, key)
+	blocked, err := c.keywordStore.IsKeywordSessionBlocked(ctx, key)
 	if err != nil || blocked {
 		return false, err
 	}
-	return true, c.keywordStore.SetCyberSessionBlocked(ctx, key, ttl)
+	return c.keywordStore.ClaimKeywordSessionBlocked(ctx, key, ttl)
 }
 func (c *comboCacheAndStore) IsKeywordSessionBlocked(ctx context.Context, key string) (bool, error) {
-	return c.keywordStore.IsCyberSessionBlocked(ctx, key)
+	return c.keywordStore.IsKeywordSessionBlocked(ctx, key)
 }
 
 // --- tests ---
@@ -310,7 +330,7 @@ func TestCyberSessionBlockWriteUsesConfiguredTTLAndDetachedContext(t *testing.T)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	svc.MarkCyberSessionBlocked(ctx, "message:v1:test")
+	svc.MarkCyberSessionBlocked(ctx, "", []string{"message:v1:test"})
 
 	require.NoError(t, combo.store.lastWriteErr)
 	require.Equal(t, 10*time.Hour, combo.store.lastWriteTTL)

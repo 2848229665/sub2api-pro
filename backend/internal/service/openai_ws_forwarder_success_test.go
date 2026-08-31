@@ -1410,7 +1410,7 @@ func TestOpenAIGatewayService_Forward_WSv2_DoesNotCommitHandshakeTurnStateBefore
 	}
 
 	result, err := svc.forwardOpenAIWSV2(
-		context.Background(), c, account, reqBody, "sk-test",
+		context.Background(), c, account, reqBody, "", "sk-test",
 		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
 		false, false, "gpt-5.1", "gpt-5.1", time.Now(), 1, "", new(bool),
 	)

@@ -41,7 +41,7 @@ func CyberSessionExplicitBlockKey(apiKeyID int64, c *gin.Context, body []byte) s
 // OpenAISessionBlockKey derives a policy-block key only from explicit session
 // identifiers. It never falls back to API-key-wide or content-derived blocking.
 func OpenAISessionBlockKey(apiKeyID int64, c *gin.Context, body []byte) string {
-	raw := explicitOpenAITerminalSessionID(c, body)
+	raw := explicitOpenAISessionID(c, body)
 	if raw == "" {
 		return ""
 	}
@@ -178,6 +178,22 @@ func (s *OpenAIGatewayService) MarkCyberSessionBlocked(ctx context.Context, scop
 	if err := store.SetCyberSessionBlocked(ctx, scopeKey, keys, ttl); err != nil {
 		logger.LegacyPrintf("service.openai_gateway", "cyber session block write failed: err=%v", err)
 	}
+}
+
+func (s *OpenAIGatewayService) IsCyberSessionBlocked(ctx context.Context, key string) bool {
+	if key == "" {
+		return false
+	}
+	store := s.cyberSessionBlockStore()
+	if store == nil {
+		return false
+	}
+	blocked, err := store.FindCyberSessionBlocked(ctx, []string{key})
+	if err != nil {
+		logger.LegacyPrintf("service.openai_gateway", "cyber session block read failed: err=%v", err)
+		return false
+	}
+	return blocked == key
 }
 
 // FindCyberSessionBlockedForRequest applies explicit-first lookup followed by
