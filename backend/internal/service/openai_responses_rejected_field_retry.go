@@ -33,16 +33,17 @@ func (s *OpenAIGatewayService) openAIResponsesRectifierEnabled(ctx context.Conte
 const maxOpenAIResponsesRejectedFieldRetries = 6
 
 var (
-	openAIResponsesRejectedNamespaceParamPattern  = regexp.MustCompile(`(?i)^input\[(\d+)\]\.namespace$`)
-	openAIResponsesRejectedStatusParamPattern     = regexp.MustCompile(`(?i)^input\[(\d+)\]\.status$`)
-	openAIResponsesRejectedContentParamPattern    = regexp.MustCompile(`(?i)^input\[(\d+)\]\.content$`)
-	openAIResponsesRejectedCacheParamPattern      = regexp.MustCompile(`(?i)^input\[(\d+)\]\.prompt_cache_breakpoint$`)
-	openAIResponsesRejectedMessageParamPattern    = regexp.MustCompile(`(?i)(?:unknown|unsupported)[ _-]+parameter\s*(?::|=|is)?\s*["']?(max_output_tokens|truncation|input\[\d+\]\.(?:namespace|status))(?:["']|\b)`)
-	openAIResponsesInvalidTypeMessageParamPattern = regexp.MustCompile(`(?i)invalid[ _-]+type\s+for\s+["']?(input\[\d+\]\.content)(?:["']|\b)[^\n]*\b(?:got|received)\s+null\b`)
-	openAIResponsesMaxZeroContentMessagePattern   = regexp.MustCompile(`(?i)invalid\s+["']?(input\[\d+\]\.content)["']?\s*:\s*array too long\.[^\n]*maximum length 0\b`)
-	openAIResponsesCacheModelRejectionPattern     = regexp.MustCompile(`(?i)["']?(prompt_cache_breakpoint|input\[\d+\]\.prompt_cache_breakpoint)["']?\s+is\s+not\s+supported\s+on\s+this\s+model\b`)
-	openAIResponsesToolParametersParamPattern     = regexp.MustCompile(`(?i)^(?:tools|input)\[\d+\](?:\.tools\[\d+\])*(?:\.function)?\.parameters$`)
-	openAIResponsesMissingSchemaTypePattern       = regexp.MustCompile(`(?i)\bgot\s+["']?type\s*:\s*["']?none["']?`)
+	openAIResponsesRejectedNamespaceParamPattern     = regexp.MustCompile(`(?i)^input\[(\d+)\]\.namespace$`)
+	openAIResponsesRejectedStatusParamPattern        = regexp.MustCompile(`(?i)^input\[(\d+)\]\.status$`)
+	openAIResponsesRejectedContentParamPattern       = regexp.MustCompile(`(?i)^input\[(\d+)\]\.content$`)
+	openAIResponsesRejectedCacheParamPattern         = regexp.MustCompile(`(?i)^input\[(\d+)\]\.prompt_cache_breakpoint$`)
+	openAIResponsesRejectedItemReferenceParamPattern = regexp.MustCompile(`(?i)^input\[(\d+)\](?:\.item_reference)?$`)
+	openAIResponsesRejectedMessageParamPattern       = regexp.MustCompile(`(?i)(?:unknown|unsupported)[ _-]+parameter\s*(?::|=|is)?\s*["']?(max_output_tokens|truncation|input\[\d+\]\.(?:namespace|status))(?:["']|\b)`)
+	openAIResponsesInvalidTypeMessageParamPattern    = regexp.MustCompile(`(?i)invalid[ _-]+type\s+for\s+["']?(input\[\d+\]\.content)(?:["']|\b)[^\n]*\b(?:got|received)\s+null\b`)
+	openAIResponsesMaxZeroContentMessagePattern      = regexp.MustCompile(`(?i)invalid\s+["']?(input\[\d+\]\.content)["']?\s*:\s*array too long\.[^\n]*maximum length 0\b`)
+	openAIResponsesCacheModelRejectionPattern        = regexp.MustCompile(`(?i)["']?(prompt_cache_breakpoint|input\[\d+\]\.prompt_cache_breakpoint)["']?\s+is\s+not\s+supported\s+on\s+this\s+model\b`)
+	openAIResponsesToolParametersParamPattern        = regexp.MustCompile(`(?i)^(?:tools|input)\[\d+\](?:\.tools\[\d+\])*(?:\.function)?\.parameters$`)
+	openAIResponsesMissingSchemaTypePattern          = regexp.MustCompile(`(?i)\bgot\s+["']?type\s*:\s*["']?none["']?`)
 )
 
 // openAIResponsesRejectedTopLevelParams maps explicitly rejected
@@ -194,12 +195,15 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 		if index, ok := openAIResponsesRejectedStatusIndex(param); ok {
 			return removeOpenAIResponsesRejectedStatusAtIndex(body, index)
 		}
-		if param == "max_output_tokens" && gjson.GetBytes(body, "max_output_tokens").Exists() {
-			retryBody, err := sjson.DeleteBytes(body, "max_output_tokens")
+		if index, ok := openAIResponsesRejectedItemReferenceIndex(param); ok {
+			return removeOpenAIResponsesRejectedItemReferenceAtIndex(body, index)
+		}
+		if path, ok := openAIResponsesRejectedTopLevelParams[param]; ok && gjson.GetBytes(body, path).Exists() {
+			retryBody, err := sjson.DeleteBytes(body, path)
 			if err != nil {
-				return nil, "", false, fmt.Errorf("delete rejected max_output_tokens: %w", err)
+				return nil, "", false, fmt.Errorf("delete rejected %s: %w", path, err)
 			}
-			return retryBody, "max_output_tokens parameter rejection", true, nil
+			return retryBody, fmt.Sprintf("%s parameter rejection", path), true, nil
 		}
 		if param == "truncation" && gjson.GetBytes(body, "truncation").Exists() {
 			retryBody, err := sjson.DeleteBytes(body, "truncation")
@@ -222,7 +226,11 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 	maxZeroContentParam := openAIResponsesMaxZeroContentParamFromMessage(message)
 	if index, ok := openAIResponsesRejectedContentIndex(param); ok &&
 		param == maxZeroContentParam && code == "array_above_max_length" {
-		return removeOpenAIResponsesRejectedReasoningContentAtIndex(body, index)
+		itemType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, fmt.Sprintf("input.%d.type", index)).String()))
+		if itemType == "reasoning" {
+			return removeOpenAIResponsesRejectedReasoningContentAtIndex(body, index)
+		}
+		return emptyOpenAIResponsesRejectedContentAtIndex(body, index)
 	}
 	return nil, "", false, nil
 }
@@ -288,6 +296,10 @@ func openAIResponsesRejectedContentIndex(param string) (int, bool) {
 
 func openAIResponsesRejectedCacheIndex(param string) (int, bool) {
 	return openAIResponsesRejectedInputIndex(openAIResponsesRejectedCacheParamPattern, param)
+}
+
+func openAIResponsesRejectedItemReferenceIndex(param string) (int, bool) {
+	return openAIResponsesRejectedInputIndex(openAIResponsesRejectedItemReferenceParamPattern, param)
 }
 
 func openAIResponsesRejectedInputIndex(pattern *regexp.Regexp, param string) (int, bool) {

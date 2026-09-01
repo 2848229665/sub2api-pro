@@ -1108,6 +1108,7 @@ func setOpenAIUpstreamSessionHeaders(headers http.Header, value string) {
 	}
 	headers.Set(openAIOfficialSessionIDHeader, value)
 	headers.Set("session_id", value)
+	headers.Set("Session_Id", value)
 }
 
 func clearOpenAIUpstreamSessionHeaders(headers http.Header) {
@@ -1116,6 +1117,7 @@ func clearOpenAIUpstreamSessionHeaders(headers http.Header) {
 	}
 	headers.Del(openAIOfficialSessionIDHeader)
 	headers.Del("session_id")
+	headers.Del("Session_Id")
 }
 
 func logCodexCLIOnlyDetection(ctx context.Context, c *gin.Context, account *Account, apiKeyID int64, result CodexClientRestrictionDetectionResult, body []byte) {

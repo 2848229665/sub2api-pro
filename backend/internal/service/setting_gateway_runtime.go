@@ -745,7 +745,20 @@ type gatewayForwardingSettingsResult struct {
 	claudeOAuthSystemPrompt, claudeOAuthSystemPromptBlocks                                string
 }
 
+func (s *SettingService) defaultGatewayForwardingSettingsResult() gatewayForwardingSettingsResult {
+	return gatewayForwardingSettingsResult{
+		fp:                                 true,
+		claudeOAuthSystemPromptInjection:   true,
+		clientDatelineNormalization:        true,
+		openAICodexPromptCacheOptimization: s.defaultOpenAICodexPromptCacheOptimizationEnabled(),
+		openAIResponsesRectifier:           s.defaultOpenAIResponsesRectifierEnabled(),
+	}
+}
+
 func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context) gatewayForwardingSettingsResult {
+	if s == nil || s.settingRepo == nil {
+		return s.defaultGatewayForwardingSettingsResult()
+	}
 	if cached, ok := gatewayForwardingCache.Load().(*cachedGatewayForwardingSettings); ok && cached != nil {
 		if time.Now().UnixNano() < cached.expiresAt {
 			return gatewayForwardingSettingsResult{
@@ -810,14 +823,16 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				openAIResponsesRectifier:           s.defaultOpenAIResponsesRectifierEnabled(),
 				expiresAt:                          time.Now().Add(gatewayForwardingErrorTTL).UnixNano(),
 			})
-			return gatewayForwardingSettingsResult{
-				fp:                                 true,
-				claudeOAuthSystemPromptInjection:   true,
-				rewriteMessageCacheControl:         s.defaultRewriteMessageCacheControl(),
-				clientDatelineNormalization:        true,
-				openAICodexPromptCacheOptimization: s.defaultOpenAICodexPromptCacheOptimizationEnabled(),
-				openAIResponsesRectifier:           s.defaultOpenAIResponsesRectifierEnabled(),
-			}, nil
+			return func() (gatewayForwardingSettingsResult, error) {
+				return gatewayForwardingSettingsResult{
+					fp:                                 true,
+					claudeOAuthSystemPromptInjection:   true,
+					rewriteMessageCacheControl:         s.defaultRewriteMessageCacheControl(),
+					clientDatelineNormalization:        true,
+					openAICodexPromptCacheOptimization: s.defaultOpenAICodexPromptCacheOptimizationEnabled(),
+					openAIResponsesRectifier:           s.defaultOpenAIResponsesRectifierEnabled(),
+				}, nil
+			}()
 		}
 		fp := true
 		if v, ok := values[SettingKeyEnableFingerprintUnification]; ok && v != "" {
@@ -879,13 +894,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 	if r, ok := val.(gatewayForwardingSettingsResult); ok {
 		return r
 	}
-	return gatewayForwardingSettingsResult{
-		fp:                                 true,
-		claudeOAuthSystemPromptInjection:   true,
-		clientDatelineNormalization:        true,
-		openAICodexPromptCacheOptimization: s.defaultOpenAICodexPromptCacheOptimizationEnabled(),
-		openAIResponsesRectifier:           s.defaultOpenAIResponsesRectifierEnabled(),
-	}
+	return s.defaultGatewayForwardingSettingsResult()
 }
 
 // GetGatewayForwardingSettings returns cached gateway forwarding settings.

@@ -755,11 +755,11 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		}
 	}
 
-		account, err := s.service.getSchedulableAccount(ctx, accountID)
-		if err != nil || account == nil {
-			clearBinding()
-			return nil, false, nil
-		}
+	account, err := s.service.getSchedulableAccount(ctx, accountID)
+	if err != nil || account == nil {
+		clearBinding()
+		return nil, false, nil
+	}
 	if shouldClearStickySession(account, req.RequestedModel) || account.Platform != NormalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() || !account.IsSchedulable() {
 		clearBinding()
 		return nil, false, nil
@@ -770,19 +770,19 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 		clearBinding()
 		return nil, false, nil
-		}
-		account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
-		if account == nil {
-			clearBinding()
-			return nil, false, nil
-		}
-		if !s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) {
-			return nil, false, nil
-		}
-		if !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
-			clearBinding()
-			return nil, false, nil
-		}
+	}
+	account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+	if account == nil {
+		clearBinding()
+		return nil, false, nil
+	}
+	if !s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) {
+		return nil, false, nil
+	}
+	if !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+		clearBinding()
+		return nil, false, nil
+	}
 	// Free-tier soft gate: sticky session must not pin an over-quota free OAuth account.
 	// Admin QueryQuota / import probes do not use this path.
 	if account != nil && len(s.filterGrokFreeQuotaAccounts(ctx, []Account{*account})) == 0 {
@@ -1965,16 +1965,16 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 			if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 				continue
 			}
-					if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
-						compactBlocked = true
-						continue
-					}
-					freshLimit := fresh.ConcurrencyLimitForAffinity(affinity, req.affinityReservePercent())
-					recordOpenAIGeneralReject(req, fresh.ID, affinity)
-					return attachSelectionProfitGate(ctx, attachOpenAISelectionRequest(&AccountSelectionResult{
-						Account:        fresh,
-						SessionOwnerID: req.StickyAccountID,
-						PreserveStickyBinding: req.PreserveStickyBinding ||
+			if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
+				compactBlocked = true
+				continue
+			}
+			freshLimit := fresh.ConcurrencyLimitForAffinity(affinity, req.affinityReservePercent())
+			recordOpenAIGeneralReject(req, fresh.ID, affinity)
+			return attachSelectionProfitGate(ctx, attachOpenAISelectionRequest(&AccountSelectionResult{
+				Account:        fresh,
+				SessionOwnerID: req.StickyAccountID,
+				PreserveStickyBinding: req.PreserveStickyBinding ||
 					(req.StickyWeighted && req.StickyAccountID > 0 && fresh.ID != req.StickyAccountID),
 				WaitPlan: &AccountWaitPlan{
 					AccountID:      fresh.ID,
@@ -2819,20 +2819,20 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		Platform:                platform,
 		SessionHash:             sessionHash,
 		StickyAccountID:         stickyAccountID,
-		GuardianParentAccountID:  guardianParentAccountID,
-		PreserveStickyBinding:    preserveGuardianParentBinding,
+		GuardianParentAccountID: guardianParentAccountID,
+		PreserveStickyBinding:   preserveGuardianParentBinding,
 		PreviousResponseID:      previousResponseID,
-		PreviousResponseCanMove:  previousResponseCanMove,
-		CanTemporarilyOverflow:   canTemporarilyOverflow,
-		UseUpstreamTokenCost:     useUpstreamTokenCost,
-		RequestedModel:           requestedModel,
-		RequiredTransport:        requiredTransport,
-		RequiredCapability:       requiredCapability,
-		RequiredImageCapability:  requiredImageCapability,
-		RequireCompact:           requireCompact,
-		RequirePrivacySet:        requirePrivacySet,
-		ExcludedIDs:              excludedIDs,
-		AffinityReservePercent:    affinityReservePercentSnapshot,
+		PreviousResponseCanMove: previousResponseCanMove,
+		CanTemporarilyOverflow:  canTemporarilyOverflow,
+		UseUpstreamTokenCost:    useUpstreamTokenCost,
+		RequestedModel:          requestedModel,
+		RequiredTransport:       requiredTransport,
+		RequiredCapability:      requiredCapability,
+		RequiredImageCapability: requiredImageCapability,
+		RequireCompact:          requireCompact,
+		RequirePrivacySet:       requirePrivacySet,
+		ExcludedIDs:             excludedIDs,
+		AffinityReservePercent:  affinityReservePercentSnapshot,
 	}
 	scheduler := s.getOpenAIAccountSchedulerForRuntimeSettings(runtimeSettings)
 	switch scheduler.(type) {

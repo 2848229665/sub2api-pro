@@ -151,6 +151,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 
 	if account != nil && account.UsesOpenAICodexProtocol() {
+		_, hasCodexIdentity := openAICodexUpstreamIdentityFromContext(c)
 		if rejectReason := detectOpenAIPassthroughInstructionsRejectReason(reqModel, body); rejectReason != "" {
 			rejectMsg := "OpenAI codex passthrough requires a non-empty instructions field"
 			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
@@ -180,12 +181,18 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 		reqStream = gjson.GetBytes(body, "stream").Bool()
 
-		accountScopedBody, accountScoped, scopeErr := applyCodexAccountIdentityClientMetadataRaw(body, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
-		if scopeErr != nil {
-			return nil, scopeErr
-		}
-		if accountScoped {
-			body = accountScopedBody
+		if !gjson.GetBytes(body, "client_metadata.x-codex-turn-metadata").Exists() {
+			sourceBody := codexAccountIdentitySourceBody(c)
+			if len(sourceBody) == 0 {
+				sourceBody = body
+			}
+			accountScopedBody, accountScoped, scopeErr := applyCodexAccountIdentityClientMetadataRawFromSource(body, sourceBody, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+			if scopeErr != nil {
+				return nil, scopeErr
+			}
+			if accountScoped {
+				body = accountScopedBody
+			}
 		}
 
 		stageCodexFingerprintIDs(c, nil)
@@ -193,7 +200,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		// 一次性解析收敛 ID：请求体 client_metadata 在此改写（raw 字节外科
 		// 手术，透传热路径禁全量 Unmarshal），出站头改写由请求构造器读取
 		// context 中的同一份 IDs 完成（turn_id 等随机字段两侧必须一致）。
-		if !isOpenAIResponsesCompactPath(c) {
+		if !isOpenAIResponsesCompactPath(c) && !hasCodexIdentity {
 			var clientHeaders http.Header
 			if c != nil && c.Request != nil {
 				clientHeaders = c.Request.Header
@@ -654,7 +661,6 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, req.Header, account); err != nil {
 			return nil, fmt.Errorf("resolve chatgpt account headers: %w", err)
 		}
-		apiKeyID := getAPIKeyIDFromContext(c)
 		// 先保存客户端原始值，再做 compact 补充，避免后续统一隔离时读到已处理的值。
 		clientSessionID := strings.TrimSpace(req.Header.Get(openAIOfficialSessionIDHeader))
 		if clientSessionID == "" {
@@ -684,10 +690,10 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 			clientConversationID = promptCacheKey
 		}
 		if clientSessionID != "" {
-			req.Header.Set("session_id", isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), clientSessionID))
+			setOpenAIUpstreamSessionHeaders(req.Header, clientSessionID)
 		}
 		if clientConversationID != "" {
-			req.Header.Set("conversation_id", isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), clientConversationID))
+			req.Header.Set("conversation_id", clientConversationID)
 		}
 	} else if isOpenAIResponsesCompactPath(c) {
 		// 透传白名单会放行客户端的 Accept: text/event-stream；compact 上游是
@@ -704,12 +710,21 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
 		req.Header.Set("user-agent", CodexCanonicalUserAgent())
 	}
-	applyCodexAccountIdentityHeaders(req.Header, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+	hasCodexIdentity := false
+	var codexIdentity openAICodexUpstreamIdentity
+	if codexIdentity, hasCodexIdentity = openAICodexUpstreamIdentityFromContext(c); hasCodexIdentity {
+		applyOpenAICodexUpstreamIdentityHeaders(req.Header, codexIdentity)
+		if codexIdentity.SessionID != "" {
+			req.Header.Set("conversation_id", codexIdentity.SessionID)
+		}
+	} else {
+		applyCodexAccountIdentityHeaders(req.Header, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
 
-	// 指纹收敛：使用 forwardOpenAIPassthrough 中预计算的收敛 ID 改写出站头，
-	// 与请求体 client_metadata 共享同一份 IDs（与非透传路径相同的相对位置：
-	// 会话隔离之后、终态身份收口之前）。
-	applyStagedCodexFingerprintHeaders(c, account, req.Header)
+		// 指纹收敛：使用 forwardOpenAIPassthrough 中预计算的收敛 ID 改写出站头，
+		// 与请求体 client_metadata 共享同一份 IDs（与非透传路径相同的相对位置：
+		// 会话隔离之后、终态身份收口之前）。
+		applyStagedCodexFingerprintHeaders(c, account, req.Header)
+	}
 	// 终态收口：透传路径的 OAuth 与非透传完全一致，同样强制统一出站身份
 	// （User-Agent / originator / version 同源自洽），客户端自报身份不会到达上游。
 	if account.UsesOpenAICodexProtocol() {

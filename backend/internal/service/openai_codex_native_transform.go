@@ -13,10 +13,11 @@ import (
 )
 
 const (
-	openAICodexUpstreamIdentityContextKey = "openai_codex_upstream_identity"
-	openAIOfficialThreadIDHeader          = "thread-id"
-	openAIOfficialClientRequestIDHeader   = "x-client-request-id"
-	openAICodexParentThreadIDHeader       = "x-codex-parent-thread-id"
+	openAICodexUpstreamIdentityContextKey          = "openai_codex_upstream_identity"
+	openAICodexNativeOptimizationAppliedContextKey = "openai_codex_native_optimization_applied"
+	openAIOfficialThreadIDHeader                   = "thread-id"
+	openAIOfficialClientRequestIDHeader            = "x-client-request-id"
+	openAICodexParentThreadIDHeader                = "x-codex-parent-thread-id"
 )
 
 type openAICodexUpstreamIdentity struct {
@@ -47,6 +48,9 @@ func (s *OpenAIGatewayService) openAICodexPromptCacheOptimizationEnabled(ctx con
 		return false
 	}
 	if s.settingService != nil {
+		if s.settingService.settingRepo == nil {
+			return s.cfg != nil && s.cfg.Gateway.OpenAICodexPromptCacheOptimizationEnabled
+		}
 		if ctx == nil {
 			ctx = context.Background()
 		}
@@ -561,12 +565,32 @@ func resolveOpenAICodexUpstreamIdentity(
 		rawSessionID = stagedCodexFingerprintOriginalBodySessionID(c, account)
 	}
 	if rawSessionID == "" {
+		rawSessionID = openAICodexRequestSessionSeed(c)
+	}
+	if rawSessionID == "" {
 		rawSessionID = openAICodexRelaySessionSeed(c, body)
 	}
 	if rawSessionID == "" && compact {
 		rawSessionID = resolveOpenAICompactSessionID(c)
 	}
 	return resolveOpenAICodexUpstreamIdentityWithSessionID(c, account, rawSessionID)
+}
+
+func openAICodexRequestSessionSeed(c *gin.Context) string {
+	if c == nil || c.Request == nil {
+		return ""
+	}
+	for _, name := range []string{
+		openAIOfficialSessionIDHeader,
+		openAIOfficialThreadIDHeader,
+		"session_id",
+		"conversation_id",
+	} {
+		if value := strings.TrimSpace(c.Request.Header.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // openAICodexRelaySessionSeed 按官方协议优先级选择最终 session header 的原始种子。

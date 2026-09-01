@@ -1315,6 +1315,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(
 	// rewriting the durable binding here would make a short burst migrate the
 	// whole conversation to a cache-cold account.
 	stickySpillover := false
+	stickySpilloverOwnerID := stickyAccountID
 	if sessionHash != "" {
 		accountID := stickyAccountID
 		if accountID > 0 && !isExcluded(accountID) {
@@ -1359,6 +1360,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(
 							}))
 						}
 						stickySpillover = true
+						scheduleReq.PreserveStickyBinding = true
+						scheduleReq.StickyAccountID = 0
+						stickyAccountID = 0
 					}
 				}
 			}
@@ -1368,6 +1372,13 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(
 	// ============ Layer 2: Load-aware selection ============
 	// Per-pass parent-health cache to avoid repeated DB calls when multiple shadow
 	// accounts share the same parent.
+	applyStickySpilloverMetadata := func(selection *AccountSelectionResult) *AccountSelectionResult {
+		if selection != nil && stickySpillover && stickySpilloverOwnerID > 0 {
+			selection.SessionOwnerID = stickySpilloverOwnerID
+			selection.PreserveStickyBinding = true
+		}
+		return selection
+	}
 	parentCacheL2 := make(map[int64]*Account)
 	parentLookupL2 := func(id int64) *Account {
 		if a, ok := parentCacheL2[id]; ok {
@@ -1495,7 +1506,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(
 		} else {
 			selectionOrder = append(selectionOrder, available...)
 		}
-
 		for _, item := range selectionOrder {
 			fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, item.account, platform, requestedModel, false, requiredCapability)
 			if fresh == nil {
@@ -1525,7 +1535,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(
 				if sessionHash != "" && !stickySpillover && !gatewayProfitControlGateActive(ctx) {
 					_ = s.setStickySessionAccountID(ctx, groupID, sessionHash, fresh.ID, openaiStickySessionTTL)
 				}
-				return selection, true, nil
+				return applyStickySpilloverMetadata(selection), true, nil
 			}
 		}
 		return nil, true, nil
@@ -1572,20 +1582,20 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(
 				if sessionHash != "" && !stickySpillover && !gatewayProfitControlGateActive(ctx) {
 					_ = s.setStickySessionAccountID(ctx, groupID, sessionHash, fresh.ID, openaiStickySessionTTL)
 				}
-				return selection, nil
+				return applyStickySpilloverMetadata(selection), nil
 			}
 		}
 	} else {
 		if selection, attempted, selectErr := tryAcquireFromLoadMap(loadMap); selectErr != nil {
 			return nil, selectErr
 		} else if selection != nil {
-			return selection, nil
+			return applyStickySpilloverMetadata(selection), nil
 		} else if attempted {
 			if freshLoadMap, loadErr := s.concurrencyService.GetAccountsLoadBatchFresh(ctx, accountLoads); loadErr == nil {
 				if selection, _, selectErr := tryAcquireFromLoadMap(freshLoadMap); selectErr != nil {
 					return nil, selectErr
 				} else if selection != nil {
-					return selection, nil
+					return applyStickySpilloverMetadata(selection), nil
 				}
 			}
 		}
@@ -1617,12 +1627,16 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(
 			continue
 		}
 		affinity := stickyAccountID > 0 && fresh.ID == stickyAccountID
-		return prepareSelection(s.newSelectionResult(ctx, fresh, false, nil, &AccountWaitPlan{
+		selection, err := prepareSelection(s.newSelectionResult(ctx, fresh, false, nil, &AccountWaitPlan{
 			AccountID:      fresh.ID,
 			MaxConcurrency: fresh.ConcurrencyLimitForAffinity(affinity, scheduleReq.affinityReservePercent()),
 			Timeout:        cfg.FallbackWaitTimeout,
 			MaxWaiting:     cfg.FallbackMaxWaiting,
 		}))
+		if err != nil {
+			return nil, err
+		}
+		return applyStickySpilloverMetadata(selection), nil
 	}
 
 	if requireCompact && baseCandidateCount > 0 {
