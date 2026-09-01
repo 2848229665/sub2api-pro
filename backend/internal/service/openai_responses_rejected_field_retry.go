@@ -468,19 +468,3 @@ func removeOpenAIResponsesRejectedItemReferenceAtIndex(body []byte, index int) (
 	}
 	return nil, "", false, nil
 }
-
-// emptyOpenAIResponsesRejectedContentAtIndex rewrites input[N].content to an
-// empty array when the upstream rejected it with "array too long. Expected an
-// array with maximum length 0" (a codex-spark history-item constraint).
-func emptyOpenAIResponsesRejectedContentAtIndex(body []byte, index int) ([]byte, string, bool, error) {
-	contentPath := fmt.Sprintf("input.%d.content", index)
-	content := gjson.GetBytes(body, contentPath)
-	if !content.IsArray() || len(content.Array()) == 0 {
-		return nil, "", false, nil
-	}
-	retryBody, err := sjson.SetRawBytes(body, contentPath, []byte("[]"))
-	if err != nil {
-		return nil, "", false, fmt.Errorf("empty rejected content at input[%d]: %w", index, err)
-	}
-	return retryBody, "indexed content max-length rejection", true, nil
-}
