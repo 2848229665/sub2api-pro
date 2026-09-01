@@ -59,7 +59,7 @@ func (s *OpenAIGatewayService) routeOpenAIAffinity(
 	route := openAIAffinityRouteResult{Request: req}
 
 	previousResponseID := strings.TrimSpace(req.PreviousResponseID)
-	if previousResponseID != "" && normalizeOpenAICompatiblePlatform(req.Platform) == PlatformOpenAI {
+	if previousResponseID != "" && req.PreviousResponseCanMove && normalizeOpenAICompatiblePlatform(req.Platform) == PlatformOpenAI {
 		accountID := s.ResolveAccountIDByPreviousResponseIDForScheduler(
 			ctx,
 			req.GroupID,
@@ -142,6 +142,11 @@ func (s *OpenAIGatewayService) routeOpenAIAffinity(
 	if account != nil && req.CanTemporarilyOverflow {
 		route.Request.PreserveStickyBinding = true
 		route.OverflowAccount = account
+		return route, nil
+	}
+	if req.PreserveStickyBinding {
+		route.Request.StickyAccountID = 0
+		route.Request.PreserveStickyBinding = true
 		return route, nil
 	}
 	if !req.CanTemporarilyOverflow {

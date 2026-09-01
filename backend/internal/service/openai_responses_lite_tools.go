@@ -45,7 +45,7 @@ func normalizeOpenAIResponsesLiteTools(reqBody map[string]any) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		return ensureOpenAIResponsesLiteParallelToolCalls(reqBody, changed)
+		return ensureOpenAIResponsesLiteParallelToolCalls(reqBody, changed, true)
 	}
 	tools, ok := rawTools.([]any)
 	if !ok {
@@ -83,7 +83,7 @@ func normalizeOpenAIResponsesLiteTools(reqBody map[string]any) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		return ensureOpenAIResponsesLiteParallelToolCalls(reqBody, changed)
+		return ensureOpenAIResponsesLiteParallelToolCalls(reqBody, changed, len(topLevelTools) == 0)
 	}
 
 	input, err := appendOpenAIResponsesLiteAdditionalTools(reqBody["input"], namespaceTools)
@@ -99,15 +99,22 @@ func normalizeOpenAIResponsesLiteTools(reqBody map[string]any) (bool, error) {
 	} else {
 		reqBody["tools"] = topLevelTools
 	}
-	return ensureOpenAIResponsesLiteParallelToolCalls(reqBody, true)
+	return ensureOpenAIResponsesLiteParallelToolCalls(reqBody, true, true)
 }
 
-func ensureOpenAIResponsesLiteParallelToolCalls(reqBody map[string]any, changed bool) (bool, error) {
+func ensureOpenAIResponsesLiteParallelToolCalls(reqBody map[string]any, changed bool, requireField bool) (bool, error) {
 	parallel, exists := reqBody["parallel_tool_calls"]
 	if exists {
 		if _, ok := parallel.(bool); !ok {
 			return false, newOpenAIResponsesLiteValidationError("parallel_tool_calls", "responses Lite requires parallel_tool_calls to be a boolean")
 		}
+	}
+	if !exists {
+		if !requireField {
+			return changed, nil
+		}
+		reqBody["parallel_tool_calls"] = false
+		return true, nil
 	}
 	if parallel == false {
 		return changed, nil
@@ -256,11 +263,30 @@ func normalizeOpenAIResponsesLiteToolsPayload(body []byte) ([]byte, bool, error)
 	// and defeats OpenAI prompt caching. Patch just reasoning.context onto the
 	// raw body so the cached prefix stays identical to what Codex emitted.
 	if !openAIResponsesLiteBodyHasNamespaceTools(body) {
-		patched, patchErr := sjson.SetBytes(body, "reasoning.context", "all_turns")
-		if patchErr != nil {
-			return body, false, fmt.Errorf("patch responses Lite reasoning context: %w", patchErr)
+		reasoningContext := strings.TrimSpace(gjson.GetBytes(body, "reasoning.context").String())
+		parallel := gjson.GetBytes(body, "parallel_tool_calls")
+		if reasoningContext == "all_turns" && parallel.Exists() && !parallel.Bool() {
+			return body, false, nil
 		}
-		return patched, true, nil
+		patched := body
+		changed := false
+		if reasoningContext != "all_turns" {
+			next, patchErr := sjson.SetBytes(patched, "reasoning.context", "all_turns")
+			if patchErr != nil {
+				return body, false, fmt.Errorf("patch responses Lite reasoning context: %w", patchErr)
+			}
+			patched = next
+			changed = true
+		}
+		if !parallel.Exists() || parallel.Bool() {
+			next, patchErr := sjson.SetBytes(patched, "parallel_tool_calls", false)
+			if patchErr != nil {
+				return body, false, fmt.Errorf("patch responses Lite parallel_tool_calls: %w", patchErr)
+			}
+			patched = next
+			changed = true
+		}
+		return patched, changed, nil
 	}
 	rebuilt, err := marshalOpenAIUpstreamJSON(requestBody)
 	if err != nil {
@@ -287,7 +313,7 @@ func normalizeOpenAIResponsesLiteParallelToolCallsPayload(body []byte) ([]byte, 
 	if err := decodeOpenAIJSONUseNumber(body, &requestBody); err != nil {
 		return body, false, fmt.Errorf("decode responses Lite request body: %w", err)
 	}
-	changed, err := ensureOpenAIResponsesLiteParallelToolCalls(requestBody, false)
+	changed, err := ensureOpenAIResponsesLiteParallelToolCalls(requestBody, false, true)
 	if err != nil || !changed {
 		return body, false, err
 	}

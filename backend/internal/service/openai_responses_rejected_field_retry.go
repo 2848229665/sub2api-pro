@@ -225,12 +225,11 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 	}
 	maxZeroContentParam := openAIResponsesMaxZeroContentParamFromMessage(message)
 	if index, ok := openAIResponsesRejectedContentIndex(param); ok &&
-		param == maxZeroContentParam && code == "array_above_max_length" {
+		code == "array_above_max_length" && param == maxZeroContentParam {
 		itemType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, fmt.Sprintf("input.%d.type", index)).String()))
 		if itemType == "reasoning" {
 			return removeOpenAIResponsesRejectedReasoningContentAtIndex(body, index)
 		}
-		return emptyOpenAIResponsesRejectedContentAtIndex(body, index)
 	}
 	return nil, "", false, nil
 }

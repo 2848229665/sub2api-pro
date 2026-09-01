@@ -55,6 +55,7 @@ const (
 	openAIWSRetryJitterRatioDefault    = 0.2
 	openAICompactSessionSeedKey        = "openai_compact_session_seed"
 	openAIUpstreamEndpointContextKey   = "openai_actual_upstream_endpoint"
+	openAIResponsesLiteAttemptDisabledContextKey = "openai_responses_lite_attempt_disabled"
 	// codexCLIVersion 是网关对上游声明的 Codex 客户端版本，同时供 codexCLIUserAgent
 	// 与 version 头使用。上游 /backend-api/codex 在容量紧张时按客户端身份分优先级降载，
 	// 陈旧版本会被优先丢弃（HTTP 200 + 流内 server_is_overloaded）；非官方客户端配不出
@@ -1090,8 +1091,16 @@ func getAPIKeyIDFromContext(c *gin.Context) int64 {
 // isolateOpenAISessionID 保留非 relay 调用点的历史 trim 行为。
 // OpenAI Codex OAuth 的出站身份由 openAICodexRelayIdentity 统一处理；此函数
 // 不得再用于该路径的设备、会话或线程身份隔离。
-func isolateOpenAISessionID(_ int64, raw string) string {
-	return strings.TrimSpace(raw)
+func isolateOpenAISessionID(apiKeyID int64, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if apiKeyID <= 0 {
+		return raw
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("openai-session:%d:%s", apiKeyID, raw)))
+	return fmt.Sprintf("%x", sum[:16])
 }
 
 // setOpenAIUpstreamSessionHeaders mirrors the isolated session value into the
@@ -1118,6 +1127,18 @@ func clearOpenAIUpstreamSessionHeaders(headers http.Header) {
 	headers.Del(openAIOfficialSessionIDHeader)
 	headers.Del("session_id")
 	headers.Del("Session_Id")
+}
+
+func openAIResponsesLiteAttemptDisabled(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	value, ok := c.Get(openAIResponsesLiteAttemptDisabledContextKey)
+	if !ok {
+		return false
+	}
+	disabled, _ := value.(bool)
+	return disabled
 }
 
 func logCodexCLIOnlyDetection(ctx context.Context, c *gin.Context, account *Account, apiKeyID int64, result CodexClientRestrictionDetectionResult, body []byte) {

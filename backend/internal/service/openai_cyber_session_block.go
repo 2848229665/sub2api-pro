@@ -228,6 +228,9 @@ func (s *OpenAIGatewayService) FindCyberSessionBlockedForRequest(ctx context.Con
 		return ""
 	}
 	if transcript.lookupKeysTruncated {
+		if !active {
+			return ""
+		}
 		// Once the coarse scope is active, silently dropping old candidates would
 		// let a blocked client evade prefix matching by appending dummy items.
 		return cyberSessionTranscriptLookupOverflowBlockKey

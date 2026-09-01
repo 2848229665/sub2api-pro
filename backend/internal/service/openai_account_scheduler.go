@@ -165,11 +165,11 @@ func (s *OpenAIGatewayService) resolveOpenAISchedulingRequirePrivacySet(
 		return contextGroup.RequirePrivacySet, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf(
-			"resolve OpenAI scheduling group %d privacy requirement: %w",
-			*groupID,
-			err,
+		slog.Warn("openai_privacy_requirement_lookup_failed",
+			"group_id", *groupID,
+			"error", err,
 		)
+		return true, nil
 	}
 	if group == nil || group.ID != *groupID {
 		return false, fmt.Errorf(

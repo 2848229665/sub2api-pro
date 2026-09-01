@@ -690,10 +690,10 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 			clientConversationID = promptCacheKey
 		}
 		if clientSessionID != "" {
-			setOpenAIUpstreamSessionHeaders(req.Header, clientSessionID)
+			setOpenAIUpstreamSessionHeaders(req.Header, isolateOpenAIUpstreamSessionID(getAPIKeyIDFromContext(c), codexAccountIdentitySource(c, account), clientSessionID))
 		}
 		if clientConversationID != "" {
-			req.Header.Set("conversation_id", clientConversationID)
+			req.Header.Set("conversation_id", isolateOpenAIUpstreamSessionID(getAPIKeyIDFromContext(c), codexAccountIdentitySource(c, account), clientConversationID))
 		}
 	} else if isOpenAIResponsesCompactPath(c) {
 		// 透传白名单会放行客户端的 Accept: text/event-stream；compact 上游是
@@ -740,6 +740,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	// x-codex-beta-features：按真实 Codex 的会话级行为补注（在账号级覆写之后，
 	// 保证不被覆盖丢失）。
 	applyOpenAICodexBetaFeatures(c, account, req.Header)
+	if openAIResponsesLiteAttemptDisabled(c) {
+		req.Header.Del(responsesLiteHeader)
+	}
 	setOpenAICodexRoutingHintFromBody(req.Header, account, body)
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http_passthrough", req.Header, body, "not_applicable")
 

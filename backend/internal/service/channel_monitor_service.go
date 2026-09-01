@@ -387,21 +387,39 @@ func validateCreateParams(p ChannelMonitorCreateParams) error {
 		return err
 	}
 	usesQuota := monitorCheckModeUsesQuota(checkMode)
-	// probe 分支（含 quota_probe 的探活部分）仍需 endpoint + api_key；
-	// quota 模式 endpoint/api_key 留空，避免要求用户填无意义的占位值。
-	if checkMode != MonitorCheckModeQuota {
+	if usesQuota && (p.AccountID == nil || *p.AccountID <= 0) {
+		return ErrChannelMonitorAccountRequired
+	}
+	switch checkMode {
+	case MonitorCheckModeProbe:
+		// probe：先要求 api_key，再检查 endpoint，避免把“缺 key”误报成 endpoint 错误。
+		if strings.TrimSpace(p.APIKey) == "" {
+			return ErrChannelMonitorMissingAPIKey
+		}
+		if err := validateEndpoint(p.Endpoint); err != nil {
+			return err
+		}
+		if normalizeMonitorPrimaryModel(p.Provider, checkMode, p.PrimaryModel) == "" {
+			return ErrChannelMonitorMissingPrimaryModel
+		}
+	case MonitorCheckModeQuotaProbe:
+		// quota_probe：先确认主模型，再校验 endpoint，最后才要求 api_key。
+		if normalizeMonitorPrimaryModel(p.Provider, checkMode, p.PrimaryModel) == "" {
+			return ErrChannelMonitorMissingPrimaryModel
+		}
 		if err := validateEndpoint(p.Endpoint); err != nil {
 			return err
 		}
 		if strings.TrimSpace(p.APIKey) == "" {
 			return ErrChannelMonitorMissingAPIKey
 		}
-	}
-	if usesQuota && (p.AccountID == nil || *p.AccountID <= 0) {
-		return ErrChannelMonitorAccountRequired
-	}
-	if normalizeMonitorPrimaryModel(p.Provider, checkMode, p.PrimaryModel) == "" {
-		return ErrChannelMonitorMissingPrimaryModel
+	case MonitorCheckModeQuota:
+		// quota：不需要 endpoint / api_key，占位模型由 normalizeMonitorPrimaryModel 处理。
+		return nil
+	default:
+		if normalizeMonitorPrimaryModel(p.Provider, checkMode, p.PrimaryModel) == "" {
+			return ErrChannelMonitorMissingPrimaryModel
+		}
 	}
 	return nil
 }
