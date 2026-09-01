@@ -50,11 +50,11 @@ const (
 	// 上游错误体只需要提取错误 JSON/日志摘要，默认 512KiB 避免错误风暴叠加大请求体。
 	openAIUpstreamErrorBodyReadLimit int64 = 512 << 10
 	// OpenAI WS Mode 重连退避默认值（可由配置覆盖）。
-	openAIWSRetryBackoffInitialDefault = 120 * time.Millisecond
-	openAIWSRetryBackoffMaxDefault     = 2 * time.Second
-	openAIWSRetryJitterRatioDefault    = 0.2
-	openAICompactSessionSeedKey        = "openai_compact_session_seed"
-	openAIUpstreamEndpointContextKey   = "openai_actual_upstream_endpoint"
+	openAIWSRetryBackoffInitialDefault           = 120 * time.Millisecond
+	openAIWSRetryBackoffMaxDefault               = 2 * time.Second
+	openAIWSRetryJitterRatioDefault              = 0.2
+	openAICompactSessionSeedKey                  = "openai_compact_session_seed"
+	openAIUpstreamEndpointContextKey             = "openai_actual_upstream_endpoint"
 	openAIResponsesLiteAttemptDisabledContextKey = "openai_responses_lite_attempt_disabled"
 	// codexCLIVersion 是网关对上游声明的 Codex 客户端版本，同时供 codexCLIUserAgent
 	// 与 version 头使用。上游 /backend-api/codex 在容量紧张时按客户端身份分优先级降载，
