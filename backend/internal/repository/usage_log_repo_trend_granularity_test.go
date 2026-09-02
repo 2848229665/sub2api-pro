@@ -59,9 +59,9 @@ func TestGetUsageTrendFromAggregatesGroupsDailyRowsByWeekAndMonth(t *testing.T) 
 
 func TestShouldUsePreaggregatedTrendSupportsWeekAndMonth(t *testing.T) {
 	for _, granularity := range []string{"hour", "day", "week", "month"} {
-		require.True(t, shouldUsePreaggregatedTrend(granularity, 0, 0, 0, 0, "", nil, nil, nil, "", nil))
+		require.True(t, shouldUsePreaggregatedTrend(granularity, 0, 0, 0, 0, "", nil, nil, nil, "", nil, nil))
 	}
 
-	require.False(t, shouldUsePreaggregatedTrend("month", 42, 0, 0, 0, "", nil, nil, nil, "", nil))
-	require.False(t, shouldUsePreaggregatedTrend("quarter", 0, 0, 0, 0, "", nil, nil, nil, "", nil))
+	require.False(t, shouldUsePreaggregatedTrend("month", 42, 0, 0, 0, "", nil, nil, nil, "", nil, nil))
+	require.False(t, shouldUsePreaggregatedTrend("quarter", 0, 0, 0, 0, "", nil, nil, nil, "", nil, nil))
 }

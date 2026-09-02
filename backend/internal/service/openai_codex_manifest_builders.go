@@ -651,27 +651,27 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 	modelID = strings.TrimSpace(modelID)
 	noReasoningLevel := "none"
 	descriptor := configuredCodexModelDescriptor{
-		Slug:                      modelID,
-		DisplayName:               modelID,
-		Description:               configuredCodexCustomDescription,
-		DefaultReasoningLevel:     &noReasoningLevel,
-		SupportedReasoningLevels:   []configuredCodexReasoningLevel{{Effort: "none", Description: configuredCodexReasoningLevelDescription("none")}},
-		ShellType:                 "unified_exec",
-		Visibility:                "list",
-		SupportedInAPI:            true,
-		Priority:                  configuredCodexModelPriority,
-		AdditionalSpeedTiers:      []string{},
-		ServiceTiers:              []configuredCodexServiceTier{},
-		ModelMessages:             configuredCodexModelMessages{InstructionsTemplate: openai.CodexBaseInstructionsForModel(modelID)},
+		Slug:                              modelID,
+		DisplayName:                       modelID,
+		Description:                       configuredCodexCustomDescription,
+		DefaultReasoningLevel:             &noReasoningLevel,
+		SupportedReasoningLevels:          []configuredCodexReasoningLevel{{Effort: "none", Description: configuredCodexReasoningLevelDescription("none")}},
+		ShellType:                         "unified_exec",
+		Visibility:                        "list",
+		SupportedInAPI:                    true,
+		Priority:                          configuredCodexModelPriority,
+		AdditionalSpeedTiers:              []string{},
+		ServiceTiers:                      []configuredCodexServiceTier{},
+		ModelMessages:                     configuredCodexModelMessages{InstructionsTemplate: openai.CodexBaseInstructionsForModel(modelID)},
 		SupportsReasoningSummaryParameter: true,
-		DefaultReasoningSummary:   "auto",
-		WebSearchToolType:         "text",
-		TruncationPolicy:          configuredCodexTruncationPolicy{Mode: "bytes", Limit: configuredCodexToolOutputMaxTokens},
-		ContextWindow:             configuredCodexFallbackContext,
-		MaxContextWindow:          configuredCodexFallbackContext,
-		EffectiveContextWindowPercent: 95,
-		ExperimentalSupportedTools:    []string{},
-		InputModalities:               []string{"text"},
+		DefaultReasoningSummary:           "auto",
+		WebSearchToolType:                 "text",
+		TruncationPolicy:                  configuredCodexTruncationPolicy{Mode: "bytes", Limit: configuredCodexToolOutputMaxTokens},
+		ContextWindow:                     configuredCodexFallbackContext,
+		MaxContextWindow:                  configuredCodexFallbackContext,
+		EffectiveContextWindowPercent:     95,
+		ExperimentalSupportedTools:        []string{},
+		InputModalities:                   []string{"text"},
 	}
 
 	if isDeepSeekCodexModel(modelID) {
@@ -769,11 +769,11 @@ func configuredCodexGrokReasoningLevels(modelID string) []configuredCodexReasoni
 
 func configuredCodexClaudeReasoningLevels(modelID string) []configuredCodexReasoningLevel {
 	descriptions := map[string]string{
-		"low": "Fast responses with lighter reasoning",
+		"low":    "Fast responses with lighter reasoning",
 		"medium": "Balanced reasoning for most coding tasks",
-		"high": "Greater reasoning depth for coding and agent tasks",
-		"xhigh": "Extra-high reasoning depth for difficult tasks",
-		"max": "Maximum reasoning depth for complex tasks",
+		"high":   "Greater reasoning depth for coding and agent tasks",
+		"xhigh":  "Extra-high reasoning depth for difficult tasks",
+		"max":    "Maximum reasoning depth for complex tasks",
 	}
 	levels := claude.EffortLevelsForModel(modelID)
 	out := make([]configuredCodexReasoningLevel, 0, len(levels))
