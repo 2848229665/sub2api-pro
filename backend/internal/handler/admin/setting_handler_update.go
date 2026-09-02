@@ -1692,6 +1692,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.EnableFingerprintUnification
 		}(),
+		OpenAITTFTMode: func() string {
+			if req.OpenAITTFTMode != nil {
+				return *req.OpenAITTFTMode
+			}
+			return previousSettings.OpenAITTFTMode
+		}(),
 		EnableMetadataPassthrough: func() bool {
 			if req.EnableMetadataPassthrough != nil {
 				return *req.EnableMetadataPassthrough

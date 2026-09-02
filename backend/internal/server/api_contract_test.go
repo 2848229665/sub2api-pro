@@ -392,6 +392,7 @@ func TestAPIContracts(t *testing.T) {
 						"require_oauth_only": false,
 						"require_privacy_set": false,
 						"max_reasoning_effort": "",
+						"max_reasoning_effort_over_limit": "",
 						"reasoning_effort_mappings": null,
 						"rpm_limit": 0,
 						"created_at": "2025-01-02T03:04:05Z",
@@ -590,6 +591,7 @@ func TestAPIContracts(t *testing.T) {
 								"request_id": "req_123",
 								"model": "claude-3",
 								"request_type": "stream",
+								"native_compaction_v2": false,
 								"openai_ws_mode": false,
 								"group_id": null,
 								"subscription_id": null,
@@ -2052,7 +2054,7 @@ func (s *stubAccountRepo) IncrementQuotaUsed(ctx context.Context, id int64, amou
 	return errors.New("not implemented")
 }
 
-func (s *stubAccountRepo) ResetQuotaUsed(ctx context.Context, id int64) error {
+func (s *stubAccountRepo) ResetQuotaUsedAndClearRateLimitCooldown(ctx context.Context, id int64) error {
 	return errors.New("not implemented")
 }
 

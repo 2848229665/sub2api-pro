@@ -738,6 +738,7 @@ func (s *SettingService) IsBackendModeEnabled(ctx context.Context) bool {
 }
 
 type gatewayForwardingSettingsResult struct {
+	openAITTFTMode                                                                        string
 	fp, mp, cch, claudeOAuthSystemPromptInjection, cacheTTL1h, rewriteMessageCacheControl bool
 	clientDatelineNormalization                                                           bool
 	openAICodexPromptCacheOptimization                                                    bool
@@ -797,6 +798,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), gatewayForwardingDBTimeout)
 		defer cancel()
 		values, err := s.settingRepo.GetMultiple(dbCtx, []string{
+			SettingKeyOpenAITTFTMode,
 			SettingKeyEnableFingerprintUnification,
 			SettingKeyEnableMetadataPassthrough,
 			SettingKeyEnableCCHSigning,
@@ -834,6 +836,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				}, nil
 			}()
 		}
+		ttftMode := normalizeOpenAITTFTMode(values[SettingKeyOpenAITTFTMode])
 		fp := true
 		if v, ok := values[SettingKeyEnableFingerprintUnification]; ok && v != "" {
 			fp = v == "true"
@@ -895,6 +898,11 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		return r
 	}
 	return s.defaultGatewayForwardingSettingsResult()
+}
+
+// GetOpenAITTFTMode 返回 Responses first_token_ms 的统计口径。
+func (s *SettingService) GetOpenAITTFTMode(ctx context.Context) string {
+	return s.getGatewayForwardingSettingsCached(ctx).openAITTFTMode
 }
 
 // GetGatewayForwardingSettings returns cached gateway forwarding settings.

@@ -601,7 +601,7 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 	upstreamBody := body
 	convertedFromOpenAIModelList := false
 	if request.useAPIKeyUpstream {
-		convertedBody := convertOpenAIModelListToCodexManifest(body)
+		convertedBody := convertOpenAIModelListToCodexManifestForAccount(body, request.credentialAccount)
 		convertedFromOpenAIModelList = !bytes.Equal(convertedBody, body)
 		body = convertedBody
 	}
@@ -620,7 +620,7 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 		body, err = completeAPIKeyCodexModelsManifestMetadata(
 			body,
 			false,
-			request.credentialAccount != nil && isOfficialOpenAIModelsBaseURL(request.credentialAccount.GetOpenAIBaseURL()),
+			request.credentialAccount,
 		)
 		if err != nil {
 			return nil, &codexModelsManifestUpstreamError{
@@ -741,6 +741,10 @@ func adjustAPIKeyCodexModelsManifest(body []byte) ([]byte, error) {
 // standard list shape, or yield no usable model IDs are returned unchanged so
 // envelope validation reports the original payload.
 func convertOpenAIModelListToCodexManifest(body []byte) []byte {
+	return convertOpenAIModelListToCodexManifestForAccount(body, nil)
+}
+
+func convertOpenAIModelListToCodexManifestForAccount(body []byte, account *Account) []byte {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(body, &envelope); err != nil || envelope == nil {
 		return body
@@ -769,7 +773,13 @@ func convertOpenAIModelListToCodexManifest(body []byte) []byte {
 	if len(modelIDs) == 0 {
 		return body
 	}
-	converted, err := BuildCodexModelsManifest(modelIDs)
+	imageInputModels := make(map[string]bool, len(modelIDs))
+	for _, modelID := range modelIDs {
+		if accountCodexModelSupportsImageInput(account, modelID) {
+			imageInputModels[modelID] = true
+		}
+	}
+	converted, err := buildCodexModelsManifest(modelIDs, imageInputModels, nil, nil)
 	if err != nil {
 		return body
 	}
@@ -790,7 +800,7 @@ func (s *OpenAIGatewayService) CompleteAPIKeyCodexModelsManifestForClient(manife
 	if len(manifest.upstreamSourceBody) > 0 {
 		body = append([]byte(nil), manifest.upstreamSourceBody...)
 		if manifest.convertedFromOpenAIModelList {
-			body = convertOpenAIModelListToCodexManifest(body)
+			body = convertOpenAIModelListToCodexManifestForAccount(body, account)
 		}
 	}
 	var err error
@@ -801,7 +811,7 @@ func (s *OpenAIGatewayService) CompleteAPIKeyCodexModelsManifestForClient(manife
 	body, err = completeAPIKeyCodexModelsManifestMetadata(
 		body,
 		true,
-		isOfficialOpenAIModelsBaseURL(account.GetOpenAIBaseURL()),
+		account,
 	)
 	if err != nil {
 		return err
@@ -920,7 +930,7 @@ func applySyncedAPIKeyCodexModelMetadata(body []byte, account *Account, overwrit
 	return updated, nil
 }
 
-func completeAPIKeyCodexModelsManifestMetadata(body []byte, completeAll, officialOpenAI bool) ([]byte, error) {
+func completeAPIKeyCodexModelsManifestMetadata(body []byte, completeAll bool, account *Account) ([]byte, error) {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		return nil, fmt.Errorf("decode JSON object: %w", err)
@@ -930,6 +940,7 @@ func completeAPIKeyCodexModelsManifestMetadata(body []byte, completeAll, officia
 		return nil, fmt.Errorf("decode top-level models array: %w", err)
 	}
 
+	officialOpenAI := account != nil && isOfficialOpenAIModelsBaseURL(account.GetOpenAIBaseURL())
 	changed := false
 	if officialOpenAI {
 		filtered := make([]json.RawMessage, 0, len(models))
@@ -970,6 +981,9 @@ func completeAPIKeyCodexModelsManifestMetadata(body []byte, completeAll, officia
 		}
 
 		descriptor := newConfiguredCodexModelDescriptor(slug)
+		if accountCodexModelSupportsImageInput(account, slug) {
+			descriptor.InputModalities = []string{"text", "image"}
+		}
 		if forceOfficialImage {
 			descriptor.InputModalities = []string{"text", "image"}
 			descriptor.SupportsImageDetailOriginal = true
