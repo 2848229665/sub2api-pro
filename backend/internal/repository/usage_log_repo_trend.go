@@ -352,7 +352,7 @@ func (r *usageLogRepository) getUsageTrendWithFilters(ctx context.Context, start
 	return results, nil
 }
 
-func shouldUsePreaggregatedTrend(granularity string, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8, billingMode string, upstreamModelMismatch *bool) bool {
+func shouldUsePreaggregatedTrend(granularity string, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8, billingMode string, upstreamModelMismatch *bool, nativeCompactionV2 *bool) bool {
 	if granularity != "day" && granularity != "hour" && granularity != "week" && granularity != "month" {
 		return false
 	}

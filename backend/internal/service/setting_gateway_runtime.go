@@ -53,6 +53,7 @@ const backendModeDBTimeout = 5 * time.Second
 
 // cachedGatewayForwardingSettings 缓存网关转发行为设置（进程内缓存，60s TTL）
 type cachedGatewayForwardingSettings struct {
+	openAITTFTMode                     string
 	fingerprintUnification             bool
 	metadataPassthrough                bool
 	cchSigning                         bool
@@ -763,6 +764,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 	if cached, ok := gatewayForwardingCache.Load().(*cachedGatewayForwardingSettings); ok && cached != nil {
 		if time.Now().UnixNano() < cached.expiresAt {
 			return gatewayForwardingSettingsResult{
+				openAITTFTMode:                   cached.openAITTFTMode,
 				fp:                                 cached.fingerprintUnification,
 				mp:                                 cached.metadataPassthrough,
 				cch:                                cached.cchSigning,
@@ -781,6 +783,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		if cached, ok := gatewayForwardingCache.Load().(*cachedGatewayForwardingSettings); ok && cached != nil {
 			if time.Now().UnixNano() < cached.expiresAt {
 				return gatewayForwardingSettingsResult{
+					openAITTFTMode:                   cached.openAITTFTMode,
 					fp:                                 cached.fingerprintUnification,
 					mp:                                 cached.metadataPassthrough,
 					cch:                                cached.cchSigning,
@@ -814,6 +817,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		if err != nil {
 			slog.Warn("failed to get gateway forwarding settings", "error", err)
 			gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{
+				openAITTFTMode:                   OpenAITTFTModeSemantic,
 				fingerprintUnification:             true,
 				metadataPassthrough:                false,
 				cchSigning:                         false,
@@ -827,6 +831,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			})
 			return func() (gatewayForwardingSettingsResult, error) {
 				return gatewayForwardingSettingsResult{
+					openAITTFTMode:                   OpenAITTFTModeSemantic,
 					fp:                                 true,
 					claudeOAuthSystemPromptInjection:   true,
 					rewriteMessageCacheControl:         s.defaultRewriteMessageCacheControl(),
@@ -867,6 +872,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			openAIResponsesRectifier = v == "true"
 		}
 		gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{
+			openAITTFTMode:                   ttftMode,
 			fingerprintUnification:             fp,
 			metadataPassthrough:                mp,
 			cchSigning:                         cch,
@@ -881,6 +887,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			expiresAt:                          time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
 		})
 		return gatewayForwardingSettingsResult{
+			openAITTFTMode:                   ttftMode,
 			fp:                                 fp,
 			mp:                                 mp,
 			cch:                                cch,

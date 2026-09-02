@@ -252,6 +252,7 @@ type UpdateSettingsRequest struct {
 	EnableAnthropicCacheTTL1hInjection        *bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
 	RewriteMessageCacheControl                *bool   `json:"rewrite_message_cache_control"`
 	EnableClientDatelineNormalization         *bool   `json:"enable_client_dateline_normalization"`
+	OpenAITTFTMode                            *string `json:"openai_ttft_mode"`
 	OpenAICodexPromptCacheOptimizationEnabled *bool   `json:"openai_codex_prompt_cache_optimization_enabled"`
 	OpenAIResponsesRectifierEnabled           *bool   `json:"openai_responses_rectifier_enabled"`
 	AntigravityUserAgentVersion               *string `json:"antigravity_user_agent_version"`

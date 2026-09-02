@@ -122,6 +122,76 @@ func codexExplicitModelTargetsConflictForPlatform(accounts []Account, platform, 
 	return len(targets) > 1
 }
 
+func resolveCodexCompositeModelTarget(
+	modelID string,
+	accounts []Account,
+	routes []CompositeModelRoute,
+	routesAvailable bool,
+) (string, string, bool) {
+	if !routesAvailable {
+		return "", "", false
+	}
+	if route, matched := matchCompositeRoute(routes, modelID, CompositeRouteEndpointResponses); matched {
+		upstreamModel := strings.TrimSpace(route.UpstreamModel)
+		if upstreamModel == "" {
+			upstreamModel = modelID
+		}
+		return route.TargetPlatform, upstreamModel, true
+	}
+	if codexCompositeRouteMatchesModel(routes, modelID) {
+		return "", "", false
+	}
+
+	claimedPlatforms := make(map[string]struct{})
+	for _, account := range accounts {
+		platform := strings.TrimSpace(account.Platform)
+		if !isConcreteRequestPlatform(platform) || !codexExplicitModelMappingClaims(account, modelID) {
+			continue
+		}
+		claimedPlatforms[platform] = struct{}{}
+	}
+	if len(claimedPlatforms) > 1 {
+		return "", "", false
+	}
+	for platform := range claimedPlatforms {
+		return platform, modelID, true
+	}
+
+	platform, detected := DetectModelPlatform(modelID)
+	if !detected {
+		return "", "", false
+	}
+	return platform, modelID, true
+}
+
+func codexCompositeRouteMatchesModel(routes []CompositeModelRoute, modelID string) bool {
+	for _, route := range routes {
+		publicModel := strings.TrimSpace(route.PublicModel)
+		if publicModel == "" {
+			continue
+		}
+		switch normalizeCompositeRouteMatchType(route.MatchType) {
+		case CompositeRouteMatchPrefix:
+			if strings.HasPrefix(modelID, publicModel) {
+				return true
+			}
+		default:
+			if modelID == publicModel {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func codexExplicitModelMappingClaims(account Account, modelID string) bool {
+	if account.Credentials == nil || strings.TrimSpace(modelID) == "" {
+		return false
+	}
+	mapped := strings.TrimSpace(account.GetModelMapping()[modelID])
+	return mapped != ""
+}
+
 func intersectUpstreamModelMetadata(modelID string, candidates []UpstreamModelMetadata) codexModelMetadataOverride {
 	result := codexModelMetadataOverride{UpstreamModelMetadata: UpstreamModelMetadata{ID: strings.TrimSpace(modelID)}}
 	for _, candidate := range candidates {

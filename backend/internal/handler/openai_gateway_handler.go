@@ -1235,7 +1235,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
 	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
-	sessionHash, promptCacheKey = resolveOpenAIMessagesMetadataSession(sessionHash, promptCacheKey, reqModel, body)
+	sessionHash, promptCacheKey = resolveOpenAIMessagesMetadataSession(c, sessionHash, promptCacheKey, reqModel, body)
 	if h.rejectIfCyberSessionBlocked(c, apiKey, service.ContentModerationProtocolAnthropicMessages, body, reqModel, cyberBlockFormatAnthropic) {
 		return
 	}
@@ -2823,7 +2823,7 @@ accountSelectionLoop:
 				// the connection-level cyber session gate here as well. Native ingress
 				// visits this hook first and gets the same side-effect-free close error;
 				// its original BeforeTurn guard remains as defense in depth.
-				if cyberBlockedThisConn {
+				if cyberBlockedThisConn.Load() {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, cyberSessionBlockedClientMsg, nil)
 				}
 				if turn == 1 {

@@ -1070,7 +1070,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					}
 					payload = litePayload
 				}
-				originalResponseCreate := payload
 				if next, policyErr := applyOpenAIWSReasoningEffortPolicy(payload, hooks); policyErr != nil {
 					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
 				} else {

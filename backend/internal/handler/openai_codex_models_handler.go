@@ -34,6 +34,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 
 	reqLog := requestLogger(c, "handler.openai_gateway.codex_models")
 	streamStarted := false
+	ifNoneMatch := c.GetHeader("If-None-Match")
 
 	maxAccountSwitches := h.maxAccountSwitches
 	if maxAccountSwitches <= 0 {
