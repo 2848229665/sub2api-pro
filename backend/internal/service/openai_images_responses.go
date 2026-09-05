@@ -1799,6 +1799,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		len(parsed.Uploads),
 	)
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	upstreamCtx = withOpenAIImagesSelfBuiltRequest(upstreamCtx)
 	defer releaseUpstreamCtx()
 
 	token, _, err := s.GetAccessToken(upstreamCtx, account)
