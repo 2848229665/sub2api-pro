@@ -255,8 +255,11 @@ type OpenAIForwardResult struct {
 	// ResponseAccountBound confirms response_id -> account_id was persisted
 	// before session affinity is allowed to converge to this account.
 	ResponseAccountBound bool
-	Usage                OpenAIUsage
-	Model                string // 原始模型（用于响应和日志显示）
+	// UpstreamHeaders is the direct upstream response header map, used for
+	// account-specific request ID extraction and other response metadata.
+	UpstreamHeaders http.Header
+	Usage           OpenAIUsage
+	Model           string // 原始模型（用于响应和日志显示）
 	// BillingModel is the model used for cost calculation.
 	// When non-empty, CalculateCost uses this instead of Model.
 	// This is set by the Anthropic Messages conversion path where
@@ -920,7 +923,10 @@ func (s *OpenAIGatewayService) writeOpenAIWSFallbackErrorResponse(c *gin.Context
 
 	setOpsUpstreamError(c, statusCode, upstreamMessage, "")
 	if account != nil {
+		proxyID, proxyName := opsUpstreamWSProxyAttribution(account)
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			ProxyID:            proxyID,
+			ProxyName:          proxyName,
 			Platform:           account.Platform,
 			AccountID:          account.ID,
 			AccountName:        account.Name,

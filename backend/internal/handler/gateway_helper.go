@@ -566,7 +566,7 @@ func concurrencyWaitFailureReason(err error) string {
 }
 
 func concurrencyResponseLogFields(err error, slotType string) []zap.Field {
-	status, errType, _ := concurrencyErrorResponse(err, slotType)
+	status, errType, _, _ := concurrencyErrorResponse(err, slotType)
 	return []zap.Field{
 		zap.Bool("terminal_event", true),
 		zap.Int("mapped_status_code", status),

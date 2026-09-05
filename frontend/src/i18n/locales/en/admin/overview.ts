@@ -872,7 +872,7 @@ export default {
         rpmLimitHint: 'Max requests per minute for each user in this group; 0 = unlimited. Once set, it takes over per-user rate limiting in this group (overrides the user-level rpm_limit fallback).',
         maxReasoningEffort: 'Max reasoning effort',
         maxReasoningEffortUnlimited: 'Unlimited (follow request)',
-        maxReasoningEffortHint: 'Limits explicit OpenAI reasoning effort requests only. For Composite groups, it applies only to requests resolved to OpenAI. Omitted effort stays omitted. The ceiling takes precedence over reasoning effort mappings.',
+        maxReasoningEffortHint: 'Limits explicit Anthropic and OpenAI reasoning effort requests. For Composite groups, it applies to the resolved target platform. Omitted effort stays omitted. The ceiling takes precedence over reasoning effort mappings.',
         maxReasoningEffortOverLimit: 'Over-limit access control',
         maxReasoningEffortOverLimitDowngrade: 'Automatically downgrade when over limit',
         maxReasoningEffortOverLimitDeny: 'Deny access',
@@ -1085,13 +1085,26 @@ export default {
       modelsList: {
         accessibleTitle: 'Only allow models in the list',
         accessibleHint: 'When enabled, the configured list below is used verbatim for both /v1/models and request access control. Unlisted models are rejected; the list is no longer derived from accounts or model mappings.',
-        title: 'Custom /v1/models Model List',
-        hint: 'Select and order the /v1/models response. When access restriction is enabled, this list also controls which models can be called.',
+        title: 'Custom {endpoint} Model List',
+        hint: 'Only changes the {endpoint} response. Whitelist model calls and account routing are unchanged.',
         loading: 'Loading model list...',
         empty: 'No displayable models',
         selectedSummary: 'Selected {selected} / {total}',
         selectAll: 'Select all',
         invertSelection: 'Invert'
+      },
+      codexModelsManifest: {
+        title: 'Pinned Accounts for Codex Model Manifest',
+        hint: 'When enabled, Codex client /models requests for this group are fetched only from the pinned accounts and merged by slug, bypassing the scheduler. Pinned accounts in rate-limit or overload windows are still used.',
+        enable: 'Fetch manifest with specific accounts',
+        enabledHint: 'Accounts are limited to OpenAI accounts bound to this group, at most 10.',
+        disabledHint: 'Not enabled: manifest requests go through scheduler account selection.',
+        accounts: 'Pinned accounts',
+        searchPlaceholder: 'Search accounts (OpenAI accounts in this group)',
+        searchEmpty: 'No matching accounts',
+        fallback: 'Fall back to the scheduler when all pinned accounts are unavailable',
+        fallbackHint: 'Off: return 503 / the upstream error. On: fall back to the existing scheduler path.',
+        selectAtLeastOne: 'Select at least one account after enabling pinned accounts'
       },
       compositeRoutes: {
         action: 'Routes',
