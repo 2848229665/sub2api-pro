@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -267,6 +268,12 @@ type OpenAIWSIngressHooks struct {
 	// that must be written into the upstream response.create frame.
 	MapRequestModel func(turn int, originalModel string) (string, error)
 	AfterTurn       func(turn int, result *OpenAIForwardResult, turnErr error)
+	// CyberBlockedThisConn is set when the passthrough relay observes an
+	// upstream cyber_policy event and the connection must reject the next turn.
+	CyberBlockedThisConn *atomic.Bool
+	// CyberBlockPendingAfterFailover keeps the post-failover cleanup gate in
+	// sync with the handler's connection-level cyber state.
+	CyberBlockPendingAfterFailover *atomic.Bool
 }
 
 func (s *OpenAIGatewayService) getOpenAIWSConnPool() *openAIWSConnPool {

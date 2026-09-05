@@ -1210,6 +1210,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		firstTurnStartedAt = hooks.InitialTurnStartedAt
 	}
 	failureAccountSideEffectsApplied := false
+	var cyberBlockedThisConn *atomic.Bool
+	var cyberBlockPendingAfterFailover *atomic.Bool
+	if hooks != nil {
+		cyberBlockedThisConn = hooks.CyberBlockedThisConn
+		cyberBlockPendingAfterFailover = hooks.CyberBlockPendingAfterFailover
+	}
 	relayResult, relayExit := openaiwsv2.RunEntry(openaiwsv2.EntryInput{
 		Ctx:                ctx,
 		ClientConn:         policyClientConn,
@@ -1327,6 +1333,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					failureAccountSideEffectsApplied = false
 				}
 				if (eventType == "error" || eventType == "response.failed") && markOpenAIWSV2PassthroughCyberPolicy(c, payload) {
+					if cyberBlockedThisConn != nil {
+						cyberBlockedThisConn.Store(true)
+					}
+					if cyberBlockPendingAfterFailover != nil {
+						cyberBlockPendingAfterFailover.Store(false)
+					}
 					return nil
 				}
 				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(payload)

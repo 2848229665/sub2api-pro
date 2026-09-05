@@ -2488,8 +2488,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		h.enqueueCyberSessionBlockedOpsEntry(c, apiKey, reqModel, cyberBlockKey)
 		return
 	}
-	cyberBlockedThisConn := false
-	cyberBlockPendingAfterFailover := false
+	var cyberBlockedThisConn atomic.Bool
+	var cyberBlockPendingAfterFailover atomic.Bool
 	var cyberTurnBodiesMu sync.Mutex
 	cyberTurnBodies := map[int][]byte{1: append([]byte(nil), firstMessage...)}
 	setCyberTurnBody := func(turn int, payload []byte) {
@@ -2884,13 +2884,15 @@ accountSelectionLoop:
 		// passthrough 没有 BeforeTurn 时，AfterTurn 回退到 TurnStarted 的所属 turn 时刻。
 		var turnPricing openAIWSTurnPricing
 		hooks := &service.OpenAIWSIngressHooks{
-			ClientLifecycleContext:      clientLifecycleCtx,
-			InitialRequestModel:         reqModel,
-			InitialTurnStartedAt:        firstTurnStartedAt,
-			MaxReasoningEffort:          maxReasoningEffort,
-			MaxReasoningEffortOverLimit: maxReasoningEffortOverLimit,
-			ReasoningEffortMappings:     reasoningEffortMappings,
-			TurnStarted:                 recordTurnStart,
+			ClientLifecycleContext:         clientLifecycleCtx,
+			InitialRequestModel:            reqModel,
+			InitialTurnStartedAt:           firstTurnStartedAt,
+			MaxReasoningEffort:             maxReasoningEffort,
+			MaxReasoningEffortOverLimit:    maxReasoningEffortOverLimit,
+			ReasoningEffortMappings:        reasoningEffortMappings,
+			CyberBlockedThisConn:           &cyberBlockedThisConn,
+			CyberBlockPendingAfterFailover: &cyberBlockPendingAfterFailover,
+			TurnStarted:                    recordTurnStart,
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
 				cyberAuditPayload = append(cyberAuditPayload[:0], payload...)
 				cyberBlockKey := cyberKeyResolver.Resolve(payload)
@@ -2906,7 +2908,7 @@ accountSelectionLoop:
 				// the connection-level cyber session gate here as well. Native ingress
 				// visits this hook first and gets the same side-effect-free close error;
 				// its original BeforeTurn guard remains as defense in depth.
-				if cyberBlockedThisConn {
+				if cyberBlockedThisConn.Load() {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, cyberSessionBlockedClientMsg, nil)
 				}
 				if turn == 1 {
@@ -2947,7 +2949,7 @@ accountSelectionLoop:
 			},
 			BeforeTurn: func(turn int) error {
 				// turn==1 的会话屏蔽已由握手层检查覆盖；连接内 flag 只拦截后续 turn。
-				if cyberBlockedThisConn {
+				if cyberBlockedThisConn.Load() {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, cyberSessionBlockedClientMsg, nil)
 				}
 				// 长连接跨峰谷/倍率刷新防护：每个 turn 按当前时刻重装门并复核
@@ -2999,7 +3001,7 @@ accountSelectionLoop:
 				// 避免同一逻辑 turn 换号后重复落风控。CyberBlocked 必须在 submit 前
 				// 同步预捕获（task 闭包由 worker 池异步执行，届时 mark 已清除）。
 				defer func() {
-					clearCyberPolicyAttemptState(c, !cyberBlockPendingAfterFailover)
+					clearCyberPolicyAttemptState(c, !cyberBlockPendingAfterFailover.Load())
 				}()
 				if turnErr == nil && result != nil && h.finalizeOpenAIResponseAffinity(
 					ctx,
@@ -3037,12 +3039,14 @@ accountSelectionLoop:
 				turnUsageFields := turnMapping.ToUsageFields(turnRequestedModel, turnUpstreamModel)
 				cyberMarked := service.GetOpsCyberPolicy(c) != nil
 				h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, turnRequestedModel, turnErr != nil, cyberBlockBody, turnUsageFields, requestPayloadHash)
-				cyberBlockedThisConn, cyberBlockPendingAfterFailover = advanceOpenAIWSCyberBlockState(
-					cyberBlockedThisConn,
-					cyberBlockPendingAfterFailover,
+				blocked, pending := advanceOpenAIWSCyberBlockState(
+					cyberBlockedThisConn.Load(),
+					cyberBlockPendingAfterFailover.Load(),
 					cyberMarked,
 					turnErr,
 				)
+				cyberBlockedThisConn.Store(blocked)
+				cyberBlockPendingAfterFailover.Store(pending)
 				if turnErr != nil {
 					if result == nil || result.ImageCount <= 0 {
 						return
