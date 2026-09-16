@@ -280,6 +280,7 @@ watch(
 
           <OpsErrorLogTable
             class="min-h-0 flex-1"
+            summary-first
             :rows="rows"
             :total="total"
             :loading="loading"

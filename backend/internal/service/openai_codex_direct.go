@@ -145,7 +145,7 @@ func (s *OpenAIGatewayService) forwardOpenAICodexDirectJSON(
 	if resp.StatusCode >= http.StatusBadRequest {
 		responseBody = s.redactAgentIdentitySensitiveBody(ctx, account, responseBody)
 		upstreamMessage := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(responseBody)))
-		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMessage, responseBody) ||
+		if s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMessage, responseBody) ||
 			isOpenAICodexDirectEndpointUnsupported(resp.StatusCode) {
 			resp.Body = io.NopCloser(bytes.NewReader(responseBody))
 			shouldDisable := false

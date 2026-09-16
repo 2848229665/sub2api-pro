@@ -14,9 +14,9 @@ import (
 
 func TestGroupModelsListAllowsModel(t *testing.T) {
 	apiKey := &service.APIKey{Group: &service.Group{
-		ModelsListConfig: service.GroupModelsListConfig{
-			UseAccessibleModels: true,
-			Models:              []string{"gpt-5.4", "claude-sonnet-4-6"},
+		ModelAllowlist: service.GroupModelAllowlist{
+			Enabled: true,
+			Models:  []string{"gpt-5.4", "claude-sonnet-4-6"},
 		},
 	}}
 
@@ -46,9 +46,9 @@ func TestGrokCountTokens_ModelsListRestrictionUsesPublicModel(t *testing.T) {
 		}))
 		c.Request = req
 		c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{Group: &service.Group{
-			ModelsListConfig: service.GroupModelsListConfig{
-				UseAccessibleModels: true,
-				Models:              models,
+			ModelAllowlist: service.GroupModelAllowlist{
+				Enabled: true,
+				Models:  models,
 			},
 		}})
 
