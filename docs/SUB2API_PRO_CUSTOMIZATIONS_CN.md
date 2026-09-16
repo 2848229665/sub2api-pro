@@ -6,15 +6,14 @@
 
 | 项目 | 值 |
 |---|---|
-| 官方基线 | `Wei-Shaw/sub2api` `v0.1.165` |
+| 官方基线 | `Wei-Shaw/sub2api` `v0.2.5`（`86f93c28e`；官方随后仅把 VERSION 同步为 0.2.5） |
 | 下游仓库 | `killaragorn/sub2api-pro` |
-| 产品分支 | `product/main` |
-| 已发布快照 | `v0.1.165-pro.4` |
-| 快照提交 | `65c41d3cb15be3a33a8fe685c98f90564cd1ce50` |
-| Fork 独有非合并提交 | 17 个 |
-| 相对基线差异 | 157 个文件，`+11247 / -1047` |
+| 工作分支 | `sync/v0.2.5` |
+| 已发布快照 | `v0.2.5-pro.1` |
+| 新站来源 | 澄川 `sub2新站` 目录（基于官方 0.2.4 的定制树） |
+| 合并分析 | [XINZHAN_MERGE_V0.2.5-PRO.1.md](XINZHAN_MERGE_V0.2.5-PRO.1.md) |
 
-本清单只描述 Fork 独有差异，不重复列出从官方基线继承的能力。统计范围是本文创建前的 `v0.1.165-pro.4`；本文档提交本身不计入上述功能差异。
+历史快照 `v0.1.165-pro.4` 的台账仍保留在第 13 节，供对照早期 Fork 差异。当前产品代码以 `v0.2.5-pro.1` 为准。
 
 本文不记录服务器地址、管理员密码、数据库密码、OAuth 凭据或部署平台密钥。服务器实例的临时操作记录不能代替这里的产品变更记录。
 
@@ -30,7 +29,8 @@ sub2api-pro 当前增加或改变了以下能力：
 6. Prompt Audit 增加 Groq GPT-OSS Safeguard 节点，并强化结构化审计结果；
 7. 修复 OpenAI WebSocket 控制关闭帧在取消竞态中丢失的问题；
 8. 将内置自更新源、安装脚本和镜像来源切换到本 Fork；
-9. 建立 `product/main` 产品分支、上游同步规则和 Fork 专属 Release/GHCR 发布流程。
+9. 建立 `product/main` 产品分支、上游同步规则和 Fork 专属 Release/GHCR 发布流程；
+10. 并入澄川新站：账号保护/Mode1、流量与 RPM、智能测试、用户清理、超级管理员分级、分组安全策略、全局定价、账号健康、毛利、分层路由、花费守卫、工单和 Relay 工作台。
 
 ## 3. OpenAI 优先级饱和调度
 
@@ -420,3 +420,24 @@ git diff --name-status v0.1.165...product/main
 3. Cyber 完整请求体的权限、保留和删除策略；
 4. 自更新 Release 仓库、checksum、镜像源和容器内文件所有权；
 5. 新增 Fork 代码是否引入 OAuth 凭据枚举、导出或非预期外联。
+
+## 15. v0.2.5-pro.1 与新站合并
+
+`v0.2.5-pro.1` 把官方 `v0.2.5` 与澄川新站定制叠到本 Fork 的调度增强之上。详细文件核对见 [新站功能变更清单](FEATURE_CHANGE_MANIFEST.md) 和 [合并分析](XINZHAN_MERGE_V0.2.5-PRO.1.md)。产品取舍见 [新站产品决策](PRODUCT_DECISIONS.md)。
+
+本版本相对官方必须继续保留：
+
+- Priority Saturation 与亲和并发预留；
+- Cyber 完整请求体；
+- Prompt Audit / Groq 节点；
+- 自更新源指向本 Fork。
+
+本版本从新站并入、且官方没有的能力：
+
+- 默认账号保护（legacy / mode1）和 TLS 指纹档案；
+- 智能测试中心，测试路径不刷新 OAuth；
+- 用户清理与清理保护；
+- `super_admin` 分级；
+- 分组安全策略、工单、花费守卫及相关管理页。
+
+官方 0.2.5 的分组模型 allowlist 取代旧的 `models_list` / `use_accessible_models`。新站与官方冲突的 SQL 已改号到 `239`/`240`/`249`/`250`。

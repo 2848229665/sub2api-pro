@@ -146,6 +146,14 @@ docs/*
 !docs/screenshots/
 docs/screenshots/*
 !docs/screenshots/mobile-account-actions-menu.png
+!docs/CHATGPT_OAUTH_PROMPT_CACHE_CN.md
+!docs/DOWNSTREAM_BRANCHING_CN.md
+!docs/OPENAI_SCHEDULING_REQUIREMENTS_CN.md
+!docs/SUB2API_PRO_CUSTOMIZATIONS_CN.md
+!docs/FEATURE_CHANGE_MANIFEST.md
+!docs/PRODUCT_DECISIONS.md
+!docs/BF-002-intelligent-test-auth-isolation.md
+!docs/XINZHAN_MERGE_V0.2.5-PRO.1.md
 .serena/
 .codex/
 frontend/coverage/
