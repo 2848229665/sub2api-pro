@@ -259,8 +259,11 @@ func (s *OpenAIGatewayService) SelectAccountForModel(ctx context.Context, groupI
 // SelectAccountForModelWithExclusions 选择支持指定模型的账号，同时排除指定的账号。
 func (s *OpenAIGatewayService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
 	account, err := s.selectAccountForModelWithExclusions(s.withOpenAIQuotaAutoPauseContext(ctx), groupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, 0, "", false)
-	if err != nil || account == nil || sessionHash == "" {
+	if err != nil || account == nil {
 		return account, err
+	}
+	if sessionHash == "" {
+		return s.hydrateSelectedAccount(ctx, account)
 	}
 	ownerID, _, err := s.ClaimStickySession(ctx, groupID, sessionHash, account.ID)
 	if err != nil {
@@ -268,22 +271,22 @@ func (s *OpenAIGatewayService) SelectAccountForModelWithExclusions(ctx context.C
 	}
 	for range openAIStickyOwnerReconcileAttempts {
 		if ownerID <= 0 || ownerID == account.ID {
-			return account, nil
+			return s.hydrateSelectedAccount(ctx, account)
 		}
 		if _, excluded := excludedIDs[ownerID]; excluded {
 			// Exclusions represent a one-request retry. The selected account is
 			// a temporary fallback and must not replace the observed owner.
-			return account, nil
+			return s.hydrateSelectedAccount(ctx, account)
 		}
 		if owner := s.tryStickySessionHit(ctx, groupID, PlatformOpenAI, sessionHash, requestedModel, nil, false, ownerID, ""); owner != nil {
-			return owner, nil
+			return s.hydrateSelectedAccount(ctx, owner)
 		}
 		swapped, migrateErr := s.MigrateStickySession(ctx, groupID, sessionHash, ownerID, account.ID)
 		if migrateErr != nil {
 			return nil, migrateErr
 		}
 		if swapped {
-			return account, nil
+			return s.hydrateSelectedAccount(ctx, account)
 		}
 		ownerID, _, err = s.ClaimStickySession(ctx, groupID, sessionHash, account.ID)
 		if err != nil {
@@ -306,7 +309,7 @@ func (s *OpenAIGatewayService) SelectAccountForTokenCount(
 ) (*Account, error) {
 	ctx = WithOpenAIProfitControlSuppressed(ctx)
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
-	return s.selectAccountForModelWithExclusions(
+	account, err := s.selectAccountForModelWithExclusions(
 		ctx,
 		groupID,
 		platform,
@@ -318,6 +321,10 @@ func (s *OpenAIGatewayService) SelectAccountForTokenCount(
 		requiredCapability,
 		false,
 	)
+	if err != nil {
+		return nil, err
+	}
+	return s.hydrateSelectedAccount(ctx, account)
 }
 
 // NormalizeOpenAICompatiblePlatform 保留 grok 与国产 OpenAI 兼容供应商（kimi/zhipu/
@@ -1659,7 +1666,7 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 		if platform == PlatformGrok {
 			accounts = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, accounts)
 		}
-		return accounts, nil
+		return FilterTierPoolAccounts(accounts, TierPoolFromContext(ctx)), nil
 	}
 	var accounts []Account
 	var err error
@@ -1677,7 +1684,7 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	if platform == PlatformGrok {
 		accounts = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, accounts)
 	}
-	return accounts, nil
+	return FilterTierPoolAccounts(accounts, TierPoolFromContext(ctx)), nil
 }
 
 func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {
@@ -1872,15 +1879,22 @@ func (s *OpenAIGatewayService) isOpenAIAccountBlockedBySchedulingThreshold(ctx c
 }
 
 func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {
-	if account == nil || s.schedulerSnapshot == nil {
-		return account, nil
+	if account == nil {
+		return nil, nil
 	}
-	hydrated, err := s.schedulerSnapshot.GetAccount(ctx, account.ID)
-	if err != nil {
+	hydrated := account
+	if s.schedulerSnapshot != nil {
+		var err error
+		hydrated, err = s.schedulerSnapshot.GetAccount(ctx, account.ID)
+		if err != nil {
+			return nil, err
+		}
+		if hydrated == nil {
+			return nil, fmt.Errorf("selected openai account %d not found during hydration", account.ID)
+		}
+	}
+	if err := ResolveRandomProxyFromSource(ctx, hydrated, s.accountRepo); err != nil {
 		return nil, err
-	}
-	if hydrated == nil {
-		return nil, fmt.Errorf("selected openai account %d not found during hydration", account.ID)
 	}
 	return hydrated, nil
 }

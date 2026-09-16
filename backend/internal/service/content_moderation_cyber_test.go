@@ -382,3 +382,10 @@ func TestFinalizeCyberPolicyEvent_ConfigLoadFailureSkipsEnforcement(t *testing.T
 	require.Zero(t, logs[0].ViolationCount)
 	require.False(t, logs[0].AutoBanned)
 }
+
+func (r *cyberOrderingTestRepo) UpdateLogOverturned(ctx context.Context, id int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, "update_overturned")
+	return nil
+}

@@ -114,6 +114,8 @@ export default {
         withSuffix: '{time} to lift'
       }
     }
+  ,
+    loadMore: 'Load more',
   },
 
   adminCompliance: {
@@ -215,6 +217,15 @@ export default {
     keywordStats: 'Keyword Hit Statistics',
     promptAudit: 'Prompt Audit',
     auditLogs: 'Audit Logs',
+    billing: 'Billing',
+    tickets: 'Tickets',
+    securityPolicy: 'Security Policy',
+    globalPricing: 'Global Pricing',
+    accountHealth: 'Account Health',
+    margins: 'Margin Center',
+    tieredRouting: 'Tiered Routing',
+    spendGuard: 'Spend Guard',
+    ticketsAdmin: 'Ticket Management',
   },
 
   // Auth

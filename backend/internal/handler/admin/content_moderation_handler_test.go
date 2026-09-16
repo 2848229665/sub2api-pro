@@ -76,6 +76,10 @@ func (r *cyberRequestAuditHandlerRepo) UpdateCyberPolicyOutcome(context.Context,
 	return nil
 }
 
+func (r *cyberRequestAuditHandlerRepo) UpdateLogOverturned(context.Context, int64) error {
+	return nil
+}
+
 func TestContentModerationHandlerListLogsPassesValidAction(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &cyberRequestAuditHandlerRepo{}

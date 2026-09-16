@@ -51,7 +51,7 @@ func (h *GatewayHandler) checkSecurityAudit(c *gin.Context, reqLog *zap.Logger, 
 	if h == nil {
 		return nil
 	}
-	return runSecurityAudit(c, reqLog, h.securityAuditCoordinator, h.contentModerationService, apiKey, subject, protocol, model, body, "http")
+	return runSecurityAudit(c, reqLog, h.securityAuditCoordinator, h.contentModerationService, apiKey, subject, protocol, model, body, "http", h.securityPolicyService)
 }
 
 func (h *OpenAIGatewayHandler) checkSecurityAudit(c *gin.Context, reqLog *zap.Logger, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol, model string, body []byte) *securityaudit.Decision {
@@ -93,7 +93,7 @@ func (h *OpenAIGatewayHandler) checkOpenAISecurityAuditStage(c *gin.Context, req
 		}
 	}
 
-	return runSecurityAuditWithScan(c, reqLog, h.securityAuditCoordinator, h.contentModerationService, apiKey, subject, protocol, model, body, stage, keywordScan)
+	return runSecurityAuditWithScan(c, reqLog, h.securityAuditCoordinator, h.contentModerationService, apiKey, subject, protocol, model, body, stage, keywordScan, h.securityPolicyService)
 }
 
 func keywordSessionBlockingProtocol(protocol string) bool {
@@ -130,13 +130,20 @@ func keywordSessionBlockedDecision(errorCode string) *securityaudit.Decision {
 	}
 }
 
-func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securityaudit.Coordinator, legacy *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol, model string, body []byte, stage string) *securityaudit.Decision {
-	return runSecurityAuditWithScan(c, reqLog, coordinator, legacy, apiKey, subject, protocol, model, body, stage, nil)
+func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securityaudit.Coordinator, legacy *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol, model string, body []byte, stage string, policies ...*service.SecurityPolicyService) *securityaudit.Decision {
+	var securityPolicy *service.SecurityPolicyService
+	if len(policies) > 0 {
+		securityPolicy = policies[0]
+	}
+	return runSecurityAuditWithScan(c, reqLog, coordinator, legacy, apiKey, subject, protocol, model, body, stage, nil, securityPolicy)
 }
 
-func runSecurityAuditWithScan(c *gin.Context, reqLog *zap.Logger, coordinator *securityaudit.Coordinator, legacy *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol, model string, body []byte, stage string, keywordScan *service.ContentModerationKeywordScan) *securityaudit.Decision {
+func runSecurityAuditWithScan(c *gin.Context, reqLog *zap.Logger, coordinator *securityaudit.Coordinator, legacy *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol, model string, body []byte, stage string, keywordScan *service.ContentModerationKeywordScan, securityPolicy *service.SecurityPolicyService) *securityaudit.Decision {
 	if c == nil || c.Request == nil {
 		return nil
+	}
+	if decision := checkGroupSecurityPolicy(c, securityPolicy, apiKey, protocol, model, body); decision != nil {
+		return decision
 	}
 	cacheCompletion := cachesSecurityAuditCompletion(stage)
 	if cacheCompletion {

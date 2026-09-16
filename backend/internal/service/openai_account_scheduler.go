@@ -818,7 +818,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		)
 		return nil, true, nil
 	}
-	result, acquireErr := s.service.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
+	result, acquireErr := s.service.tryAcquireAccountSlot(ctx, accountID, account.Mode1EffectiveConcurrency())
 	if acquireErr != nil && req.DisableStickyEscape {
 		return nil, false, acquireErr
 	}
@@ -850,7 +850,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 			Account: account,
 			WaitPlan: &AccountWaitPlan{
 				AccountID:      accountID,
-				MaxConcurrency: account.Concurrency,
+				MaxConcurrency: account.Mode1EffectiveConcurrency(),
 				Timeout:        cfg.StickySessionWaitTimeout,
 				MaxWaiting:     cfg.StickySessionMaxWaiting,
 			},
@@ -1434,6 +1434,11 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 		affinity := candidate.account.ID == req.StickyAccountID ||
 			candidate.account.ID == req.StickyPreviousAccountID
 		limit := candidate.account.ConcurrencyLimitForAffinity(affinity, req.affinityReservePercent())
+
+		if candidate.loadKnown && limit > 0 &&
+			candidate.loadInfo.CurrentConcurrency >= limit {
+			continue
+		}
 
 		result, attempted, acquireErr := s.tryAcquireOpenAIAccountSlot(ctx, candidate.account.ID, limit, budget)
 		if !attempted {
@@ -3017,7 +3022,22 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	baseReq.StickyPreviousAccountID = stickyPreviousAccountID
 	baseReq.StickyWeighted = stickyWeighted
 	baseReq.SubscriptionPriority = subscriptionPriority
-	return scheduler.Select(ctx, baseReq)
+	selection, decision, err = scheduler.Select(ctx, baseReq)
+	if err != nil || selection == nil || selection.Account == nil {
+		return selection, decision, err
+	}
+	// Direct sticky/previous-response branches may skip newSelectionResult.
+	// Resolve request-time random proxy here without a full snapshot hydration.
+	if selection.Account.IsRandomProxy() {
+		if hydrateErr := ResolveRandomProxyFromSource(ctx, selection.Account, s.accountRepo); hydrateErr != nil {
+			if selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+				selection.ReleaseFunc = nil
+			}
+			return nil, decision, hydrateErr
+		}
+	}
+	return selection, decision, nil
 }
 
 func accountSupportsOpenAICapabilities(account *Account, requiredCapability OpenAIEndpointCapability, requiredImageCapability OpenAIImagesCapability) bool {

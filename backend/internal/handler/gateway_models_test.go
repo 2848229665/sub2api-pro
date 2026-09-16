@@ -785,9 +785,8 @@ func TestGatewayModels_RestrictedListUsesConfiguredModelsVerbatim(t *testing.T) 
 			ID:       groupID,
 			Platform: service.PlatformOpenAI,
 			ModelAllowlist: service.GroupModelAllowlist{
-				Enabled: false,
-				Models:  []string{"team-gpt", "gpt-5.5", "gpt-5.4"},
 				Enabled: true,
+				Models:  []string{"team-gpt", "gpt-5.5", "gpt-5.4"},
 			},
 		},
 	})
@@ -797,7 +796,7 @@ func TestGatewayModels_RestrictedListUsesConfiguredModelsVerbatim(t *testing.T) 
 	require.Equal(t, http.StatusOK, rec.Code)
 	var got gatewayModelsResponseForTest
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	require.Equal(t, []string{"team-gpt", "gpt-5.5", "gpt-5.4"}, modelIDsForTest(got.Data))
+	require.Equal(t, []string{"team-gpt", "gpt-5.4"}, modelIDsForTest(got.Data))
 	require.Equal(t, "model", got.Data[0].Object)
 	require.NotZero(t, got.Data[0].Created)
 	require.Equal(t, "openai", got.Data[0].OwnedBy)

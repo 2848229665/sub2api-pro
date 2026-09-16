@@ -3003,7 +3003,22 @@
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
         </div>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
+        <ProxySelector v-model="form.proxy_id" :proxies="proxies" :disabled="randomProxyEnabled" />
+        <label class="mt-2 flex cursor-pointer items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+          <input
+            v-model="randomProxyEnabled"
+            type="checkbox"
+            class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+            @change="handleRandomProxyChange"
+          />
+          <span>{{ t('admin.accounts.randomProxy') }}</span>
+        </label>
+        <p class="input-hint">{{ t('admin.accounts.randomProxyHint') }}</p>
+        <label class="input-label mt-3">{{ t('admin.accounts.accountPool') }}</label>
+        <div class="w-52">
+          <Select v-model="accountPoolSelection" :options="accountPoolOptions" />
+        </div>
+        <p class="input-hint">{{ t('admin.accounts.accountPoolHint') }}</p>
       </div>
 
       <UpstreamRequestIdHeaderField
@@ -4024,10 +4039,20 @@ const oauthStepTitle = computed(() => {
 // Platform-specific hints for API Key type
 // 上游ID：直接上游声明请求标识的响应头名，留空不记录。
 const upstreamRequestIdHeader = ref('')
+const accountPoolSelection = ref<'standard' | 'premium'>('standard')
+const accountPoolOptions = computed(() => [
+  { label: t('admin.accounts.poolStandard'), value: 'standard' },
+  { label: t('admin.accounts.poolPremium'), value: 'premium' }
+])
 const withUpstreamRequestIdHeader = <T extends Record<string, unknown> | undefined>(extra: T): T | Record<string, unknown> => {
   const name = upstreamRequestIdHeader.value.trim()
-  if (!name) return extra
-  return { ...(extra || {}), upstream_request_id_header: name }
+  const poolPremium = accountPoolSelection.value === 'premium'
+  if (!name && !poolPremium) return extra
+  return {
+    ...(extra || {}),
+    ...(name ? { upstream_request_id_header: name } : {}),
+    ...(poolPremium ? { pool: 'premium' } : {})
+  }
 }
 
 const baseUrlHint = computed(() => {
@@ -4743,6 +4768,13 @@ const form = reactive({
   group_ids: [] as number[],
   expires_at: null as number | null
 })
+const randomProxyEnabled = ref(false)
+
+const handleRandomProxyChange = () => {
+  if (randomProxyEnabled.value) {
+    form.proxy_id = null
+  }
+}
 
 const accountCapacity = computed(() =>
   validateAccountCapacity(
@@ -5233,6 +5265,17 @@ const withAntigravityConfirmFlag = (payload: CreateAccountRequest): CreateAccoun
   return cloned
 }
 
+const withProxySelection = <T extends { proxy_id?: number | null; extra?: Record<string, unknown> }>(payload: T): T => {
+  if (!randomProxyEnabled.value) {
+    return payload
+  }
+  const extra = { ...(payload.extra || {}), proxy_mode: 'random' }
+  return { ...payload, proxy_id: null, extra }
+}
+
+const createAccountRequest = (payload: CreateAccountRequest) =>
+  adminAPI.accounts.create(withAntigravityConfirmFlag(withProxySelection(payload)))
+
 const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<void>): Promise<boolean> => {
   if (!needsMixedChannelCheck(form.platform)) {
     return true
@@ -5266,7 +5309,7 @@ const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<v
 const submitCreateAccount = async (payload: CreateAccountRequest) => {
   submitting.value = true
   try {
-    const account = await adminAPI.accounts.create(withAntigravityConfirmFlag(payload))
+    const account = await createAccountRequest(payload)
     const modelMapping = payload.credentials.model_mapping
     const hasConcreteMappedTarget = payload.type === 'apikey' &&
       typeof modelMapping === 'object' &&
@@ -5326,6 +5369,8 @@ const resetForm = () => {
   form.type = 'oauth'
   form.credentials = {}
   form.proxy_id = null
+  randomProxyEnabled.value = false
+  accountPoolSelection.value = 'standard'
   form.concurrency = 10
   form.load_factor = null
   form.priority = 1
@@ -6085,7 +6130,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           return
         }
 
-        await adminAPI.accounts.create({
+        await createAccountRequest({
           name: accountName,
           notes: form.notes,
           platform: 'grok',
@@ -6154,7 +6199,7 @@ const handleGrokImportSSO = async (ssoInput: string) => {
   }
 
   try {
-    const result = await adminAPI.grok.createFromSSO({
+    const result = await adminAPI.grok.createFromSSO(withProxySelection({
       sso_tokens: ssoTokens,
       name: form.name || undefined,
       notes: form.notes || undefined,
@@ -6166,8 +6211,9 @@ const handleGrokImportSSO = async (ssoInput: string) => {
       priority: form.priority,
       rate_multiplier: form.rate_multiplier,
       expires_at: form.expires_at,
-      auto_pause_on_expired: autoPauseOnExpired.value
-    })
+      auto_pause_on_expired: autoPauseOnExpired.value,
+      extra: withUpstreamRequestIdHeader({})
+    }))
 
     const successCount = result.created?.length || 0
     const failedCount = result.failed?.length || 0
@@ -6262,7 +6308,7 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
           return
         }
 
-        await adminAPI.accounts.create({
+        await createAccountRequest({
           name: accountName,
           notes: form.notes,
           platform: 'grok',
@@ -6361,7 +6407,7 @@ const handleOpenAIExchange = async (authCode: string) => {
     }
 
     if (shouldCreateOpenAI) {
-      await adminAPI.accounts.create({
+      await createAccountRequest({
         name: form.name,
         notes: form.notes,
         platform: 'openai',
@@ -6469,7 +6515,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
 
   try {
     const extra = buildOpenAICodexImportExtra()
-    const result = await adminAPI.accounts.importCodexSession({
+    const result = await adminAPI.accounts.importCodexSession(withProxySelection({
       content: trimmed,
       name: form.name,
       notes: form.notes || null,
@@ -6484,7 +6530,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
       credential_extras: Object.keys(credentialExtras).length > 0 ? credentialExtras : undefined,
       extra: withUpstreamRequestIdHeader(extra),
       update_existing: true
-    })
+    }))
 
     const successCount = result.created + result.updated
     const params = {
@@ -6547,7 +6593,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
 
   try {
     const extra = buildOpenAICodexImportExtra()
-    await adminAPI.accounts.createOpenAICodexPAT({
+    await adminAPI.accounts.createOpenAICodexPAT(withProxySelection({
       access_token: trimmed,
       name: form.name,
       notes: form.notes || null,
@@ -6561,7 +6607,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
       auto_pause_on_expired: autoPauseOnExpired.value,
       credential_extras: Object.keys(credentialExtras).length > 0 ? credentialExtras : undefined,
       extra: withUpstreamRequestIdHeader(extra)
-    })
+    }))
 
     appStore.showSuccess(t('admin.accounts.accountCreated'))
     emit('created')
@@ -6642,7 +6688,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
         const accountName = refreshTokens.length > 1 ? `${baseName} #${i + 1}` : baseName
 
         if (shouldCreateOpenAI) {
-          await adminAPI.accounts.create({
+          await createAccountRequest({
             name: accountName,
             notes: form.notes,
             platform: 'openai',
@@ -6757,7 +6803,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
         })
-        await adminAPI.accounts.create(createPayload)
+        await createAccountRequest(createPayload)
         successCount++
       } catch (error: any) {
         failedCount++
@@ -7122,7 +7168,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           credentials.temp_unschedulable_rules = tempUnschedPayload
         }
 
-        await adminAPI.accounts.create({
+        await createAccountRequest({
           name: accountName,
           notes: form.notes,
           platform: form.platform,

@@ -35,6 +35,10 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Live is not supported for this platform")
 		return
 	}
+	if !service.LiveBillingAvailable() {
+		h.errorResponse(c, http.StatusServiceUnavailable, "LIVE_BILLING_UNAVAILABLE", "Live is temporarily unavailable until usage settlement is supported")
+		return
+	}
 	request, err := parseLiveCallRequest(c)
 	if err != nil {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
