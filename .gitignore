@@ -141,6 +141,8 @@ docs/*
 !docs/COMPOSITE_GROUPS.md
 !docs/PLUGIN_DEVELOPMENT.md
 !docs/channel-monitor-v2-safe-defaults.md
+!docs/MOGAI_MERGE_V0.2.5-PRO.2.md
+!docs/STRATEGY_TEST_MATRIX.md
 !docs/legal/
 !docs/legal/*.md
 !docs/screenshots/
