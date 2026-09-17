@@ -51,7 +51,7 @@ import UserDashboardStats from '@/components/user/dashboard/UserDashboardStats.v
 import UserDashboardCharts from '@/components/user/dashboard/UserDashboardCharts.vue'
 import UserDashboardRecentUsage from '@/components/user/dashboard/UserDashboardRecentUsage.vue'
 import UserDashboardQuickActions from '@/components/user/dashboard/UserDashboardQuickActions.vue'
-import type { UsageLog, TrendDataPoint, ModelStat, PlatformQuotaItem } from '@/types'
+import type { UsageLog, TrendDataPoint, ModelStat, PlatformQuotaItem, UsageTrendGranularity } from '@/types'
 
 const authStore = useAuthStore()
 const user = computed(() => authStore.user)
@@ -84,7 +84,7 @@ const lastWeek = () => formatDateLocalInput(new Date(Date.now() - 6 * 86400000))
 const today = () => formatDateLocalInput(new Date())
 const startDate = ref(lastWeek())
 const endDate = ref(today())
-const granularity = ref('day')
+const granularity = ref<UsageTrendGranularity>('day')
 let chartsRequest = 0
 
 async function loadStats() {
@@ -113,7 +113,7 @@ async function loadCharts() {
   loadingCharts.value = true
   try {
     const [trend, models] = await Promise.all([
-      usageAPI.getDashboardTrend({ start_date: startDate.value, end_date: endDate.value, granularity: granularity.value === 'hour' ? 'hour' : 'day' }),
+      usageAPI.getDashboardTrend({ start_date: startDate.value, end_date: endDate.value, granularity: granularity.value }),
       usageAPI.getDashboardModels({ start_date: startDate.value, end_date: endDate.value })
     ])
     if (request !== chartsRequest) return
@@ -151,4 +151,5 @@ async function refreshAll() {
 }
 onMounted(() => { void refreshAll() })
 </script>
+
 
